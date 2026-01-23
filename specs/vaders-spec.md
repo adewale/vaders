@@ -45,6 +45,7 @@ vaders --room ABC123 --name "Alice"
 | `SPACE` | Shoot |
 | `ENTER` | Ready up (lobby) |
 | `S` | Start solo (when alone in lobby) |
+| `M` | Toggle audio mute |
 | `Q` | Quit |
 
 ### Multiplayer Flow
@@ -54,6 +55,195 @@ vaders --room ABC123 --name "Alice"
 3. Friends run `vaders --room ABC123`
 4. All players press `ENTER` to ready up
 5. Game starts after 3-second countdown
+
+---
+
+## Launch Screen
+
+On startup, players see a full-screen launch experience with logo, mode selection, and controls reference.
+
+### Layout (80×24)
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                                                                              │
+│  ██╗   ██╗ █████╗ ██████╗ ███████╗██████╗ ███████╗                          │
+│  ██║   ██║██╔══██╗██╔══██╗██╔════╝██╔══██╗██╔════╝                          │
+│  ██║   ██║███████║██║  ██║█████╗  ██████╔╝███████╗                          │
+│  ╚██╗ ██╔╝██╔══██║██║  ██║██╔══╝  ██╔══██╗╚════██║                          │
+│   ╚████╔╝ ██║  ██║██████╔╝███████╗██║  ██║███████║                          │
+│    ╚═══╝  ╚═╝  ╚═╝╚═════╝ ╚══════╝╚═╝  ╚═╝╚══════╝                          │
+│                                                                              │
+│           ╔═╗ /°\ {ö}        S P A C E   I N V A D E R S        ╔═╗ /°\ {ö} │
+│                                                                              │
+│  ┌─────────────────────────────────────────────────────────────────────────┐ │
+│  │  [1] SOLO GAME              Start immediately, 3 lives                 │ │
+│  │  [2] CREATE ROOM            Get room code to share with friends        │ │
+│  │  [3] JOIN ROOM              Enter a room code                          │ │
+│  │  [4] MATCHMAKING            Auto-join an open game                     │ │
+│  │  [E] ENHANCED MODE   OFF    Galaga/Galaxian enemies + Amiga visuals    │ │
+│  └─────────────────────────────────────────────────────────────────────────┘ │
+│                                                                              │
+│     CONTROLS   ←/→ or A/D Move   SPACE Shoot   M Mute   Q Quit             │
+│                                                                              │
+│                         Press 1-4 to select mode                            │
+│                                                                              │
+│  v1.0.0                                    1-4 Players • OpenTUI + Bun      │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Logo Component
+
+```tsx
+// client/src/components/Logo.tsx
+
+const LOGO_ASCII = `
+██╗   ██╗ █████╗ ██████╗ ███████╗██████╗ ███████╗
+██║   ██║██╔══██╗██╔══██╗██╔════╝██╔══██╗██╔════╝
+██║   ██║███████║██║  ██║█████╗  ██████╔╝███████╗
+╚██╗ ██╔╝██╔══██║██║  ██║██╔══╝  ██╔══██╗╚════██║
+ ╚████╔╝ ██║  ██║██████╔╝███████╗██║  ██║███████║
+  ╚═══╝  ╚═╝  ╚═╝╚═════╝ ╚══════╝╚═╝  ╚═╝╚══════╝
+`.trim()
+
+export function Logo() {
+  return (
+    <box flexDirection="column" alignItems="center">
+      <text fg="#00ffff">{LOGO_ASCII}</text>
+      <box height={1} />
+      <text fg="#888">
+        <span fg="#ff00ff">╔═╗</span> <span fg="#00ffff">/°\</span> <span fg="#00ff00">{'{ö}'}</span>
+        {'        '}S P A C E   I N V A D E R S{'        '}
+        <span fg="#ff00ff">╔═╗</span> <span fg="#00ffff">/°\</span> <span fg="#00ff00">{'{ö}'}</span>
+      </text>
+    </box>
+  )
+}
+```
+
+### Launch Screen Component
+
+```tsx
+// client/src/components/LaunchScreen.tsx
+import { useKeyboard, useRenderer } from '@opentui/react'
+import { useState } from 'react'
+import { Logo } from './Logo'
+
+interface LaunchScreenProps {
+  onStartSolo: () => void
+  onCreateRoom: () => void
+  onJoinRoom: (code: string) => void
+  onMatchmake: () => void
+  version: string
+}
+
+export function LaunchScreen({ onStartSolo, onCreateRoom, onJoinRoom, onMatchmake, version }: LaunchScreenProps) {
+  const renderer = useRenderer()
+  const [enhanced, setEnhanced] = useState(false)
+  const [joinMode, setJoinMode] = useState(false)
+  const [roomCode, setRoomCode] = useState('')
+
+  useKeyboard((event) => {
+    if (joinMode) {
+      if (event.name === 'escape') {
+        setJoinMode(false)
+        setRoomCode('')
+      } else if (event.name === 'enter' && roomCode.length > 0) {
+        onJoinRoom(roomCode)
+      }
+      return
+    }
+
+    switch (event.name) {
+      case '1':
+        onStartSolo()
+        break
+      case '2':
+        onCreateRoom()
+        break
+      case '3':
+        setJoinMode(true)
+        break
+      case '4':
+        onMatchmake()
+        break
+      case 'e':
+        setEnhanced(e => !e)
+        break
+      case 'q':
+        renderer.destroy()
+        break
+    }
+  })
+
+  return (
+    <box flexDirection="column" width={80} height={24} padding={1}>
+      <Logo />
+      <box height={1} />
+
+      <box flexDirection="column" border borderColor="#444" padding={1}>
+        <MenuItem hotkey="1" label="SOLO GAME" desc="Start immediately, 3 lives" />
+        <MenuItem hotkey="2" label="CREATE ROOM" desc="Get room code to share with friends" />
+        <MenuItem hotkey="3" label="JOIN ROOM" desc="Enter a room code" />
+        <MenuItem hotkey="4" label="MATCHMAKING" desc="Auto-join an open game" />
+        <box height={1} />
+        <box>
+          <text fg="#ffff00">[E] ENHANCED MODE</text>
+          <box width={3} />
+          <text fg={enhanced ? '#00ff00' : '#666'}>{enhanced ? 'ON ' : 'OFF'}</text>
+          <box width={3} />
+          <text fg="#666">Galaga/Galaxian enemies + Amiga visuals</text>
+        </box>
+      </box>
+
+      <box height={1} />
+      <text fg="#888">
+        {'   '}<strong>CONTROLS</strong>{'   '}←/→ or A/D Move   SPACE Shoot   M Mute   Q Quit
+      </text>
+      <box flex={1} />
+      <box>
+        <text fg="#666">v{version}</text>
+        <box flex={1} />
+        <text fg="#666">1-4 Players • OpenTUI + Bun</text>
+      </box>
+    </box>
+  )
+}
+
+function MenuItem({ hotkey, label, desc }: { hotkey: string; label: string; desc: string }) {
+  return (
+    <box>
+      <text fg="#00ffff">[{hotkey}]</text>
+      <box width={1} />
+      <text fg="#fff" width={18}>{label}</text>
+      <text fg="#888">{desc}</text>
+    </box>
+  )
+}
+```
+
+### Animated Elements
+
+The launch screen includes subtle animations:
+
+| Element | Animation |
+|---------|-----------|
+| Logo | Color cycle through cyan → magenta → yellow (2s loop) |
+| Alien sprites | Bob up and down (sine wave, 1s period) |
+| Menu highlight | Pulsing brightness on selected option |
+| "Press 1-4" | Fade in/out (1.5s period) |
+
+### Join Room Input
+
+When player presses `[3]`, show inline room code input:
+
+```
+│  [3] JOIN ROOM              Enter code: [ABC123_]                         │
+```
+
+- 6-character alphanumeric code
+- Auto-uppercase
+- `ENTER` to confirm, `ESC` to cancel
 
 ---
 
@@ -148,6 +338,40 @@ interface DiveBomber extends Alien {
 | 7-9 | 2 | 6 | 5 rows | Commanders use tractor beam |
 | 10+ | 2 | 8 | 6 rows | All abilities active |
 
+### Challenging Stages (Enhanced Mode)
+
+Bonus rounds occur at **Wave 3, 7, 11, 15...** (every 4th wave starting from 3).
+
+**Characteristics:**
+- **40 enemies** fly in preset formations
+- Enemies **do not fire** at players
+- Enemies **do not stop** - they fly through and exit
+- Destroy all 40 for **10,000 point bonus**
+- Partial completion: 100 points per kill
+
+**Visual Treatment:**
+- **Plasma background** replaces gradient sky (see Visual Effects section)
+- Formation flies in synchronized patterns
+- No barriers on screen
+
+**Music:**
+- Special upbeat "bonus round" track
+- Tempo matches formation speed
+
+```typescript
+interface ChallengingStage {
+  wave: number
+  enemyCount: 40
+  formations: FormationPattern[]
+  timeLimit: number  // Ticks before stage ends
+  bonusPoints: 10000
+}
+
+function isChallengingStage(wave: number): boolean {
+  return wave >= 3 && (wave - 3) % 4 === 0
+}
+```
+
 ### Transform Enemies (Wave 4+)
 
 When a Dive Bomber is destroyed, it has a 20% chance to split into 3 smaller enemies:
@@ -173,30 +397,6 @@ Transform enemies dive rapidly and exit screen (don't rejoin formation).
 | Dive Bomber while diving | 160 |
 | Transform group (all 3) | 1000-3000 |
 
-### Enhanced State Schema
-
-```typescript
-interface GameState {
-  // ... existing fields ...
-  enhancedMode: boolean
-
-  // Enhanced-specific
-  commanders: Commander[]
-  diveBombers: DiveBomber[]
-  transforms: TransformEnemy[]
-  capturedPlayers: Record<string, string>  // playerId → commanderId
-}
-
-interface TransformEnemy {
-  id: number
-  type: 'scorpion' | 'stingray' | 'mini-commander'
-  x: number
-  y: number
-  velocity: { x: number, y: number }
-  lifetime: number  // Ticks until auto-despawn
-}
-```
-
 ### Enhanced Sprites
 
 ```typescript
@@ -205,11 +405,11 @@ export const ENHANCED_SPRITES = {
     healthy: '◄══►',
     damaged: '◄──►',  // After first hit
   },
-  diveBomber: '♦',
+  dive_bomber: '♦',
   transform: {
     scorpion: '∿',
     stingray: '◇',
-    miniCommander: '◄►',
+    mini_commander: '◄►',
   },
   tractorBeam: '╠╬╣',  // 3-char beam effect
 } as const
@@ -303,7 +503,7 @@ function getTractorBeamColor(tick: number): string {
 
 #### Challenging Stage Plasma Background
 
-Sinusoidal plasma effect for bonus rounds:
+Sinusoidal plasma effect for Challenging Stages (bonus rounds at waves 3, 7, 11, 15...). See "Challenging Stages" section above for gameplay details.
 
 ```typescript
 // client/src/effects/plasma.ts
@@ -379,81 +579,165 @@ function plasmaColor(value: number): [number, number, number] {
 ```typescript
 // shared/types.ts
 
+// ─── Base Types ───────────────────────────────────────────────────────────────
+
+interface Position {
+  x: number
+  y: number
+}
+
+interface GameEntity extends Position {
+  id: number
+}
+
+// ─── Game State ───────────────────────────────────────────────────────────────
+
 interface GameState {
-  roomId: string
+  roomId: string                    // 6-char alphanumeric
   mode: 'solo' | 'coop'
   status: 'waiting' | 'countdown' | 'playing' | 'paused' | 'gameover'
   tick: number
-  
+  enhancedMode: boolean
+
   players: Record<string, Player>
-  playerOrder: string[]  // Join order for color/position assignment
-  readyPlayers: Set<string>
-  
+  readyPlayerIds: string[]          // Array for JSON serialization
+
   aliens: Alien[]
   bullets: Bullet[]
   barriers: Barrier[]
-  
+
+  // Enhanced mode only
+  commanders?: Commander[]
+  diveBombers?: DiveBomber[]
+  transforms?: TransformEnemy[]
+  capturedPlayerIds?: Record<string, string>  // playerId → commanderId
+
   wave: number
-  lives: number          // 3 solo, 5 co-op
+  lives: number                     // 3 solo, 5 co-op
   score: number
   alienDirection: 1 | -1
-  
+
   config: GameConfig
 }
 
 interface GameConfig {
-  width: 80
-  height: 24
-  maxPlayers: 4
-  tickRate: 60
-  
+  width: number                     // Default: 80
+  height: number                    // Default: 24
+  maxPlayers: number                // Default: 4
+  tickIntervalMs: number            // Default: 16 (~60fps)
+
   // Base values (scaled by player count)
-  baseAlienMoveInterval: 30
-  baseBulletSpeed: 2
-  baseAlienShootRate: 0.5
-  playerCooldown: 10
-  respawnDelay: 180       // 3 seconds (ticks)
+  baseAlienMoveInterval: number     // Ticks between alien moves
+  baseBulletSpeed: number           // Cells per tick
+  baseAlienShootRate: number        // Probability per tick
+  playerCooldown: number            // Ticks between shots
+  respawnDelay: number              // Ticks (180 = 3 seconds at 60fps)
+  disconnectGracePeriod: number     // Ticks (600 = 10 seconds at 60fps)
+}
+
+const DEFAULT_CONFIG: GameConfig = {
+  width: 80,
+  height: 24,
+  maxPlayers: 4,
+  tickIntervalMs: 16,
+  baseAlienMoveInterval: 30,
+  baseBulletSpeed: 2,
+  baseAlienShootRate: 0.5,
+  playerCooldown: 10,
+  respawnDelay: 180,
+  disconnectGracePeriod: 600,
+}
+
+// ─── Layout Constants ─────────────────────────────────────────────────────────
+
+const LAYOUT = {
+  PLAYER_Y: 20,
+  BARRIER_Y: 16,
+  ALIEN_START_Y: 2,
+} as const
+
+// ─── Player ───────────────────────────────────────────────────────────────────
+
+type PlayerSlot = 1 | 2 | 3 | 4
+type PlayerColor = 'green' | 'cyan' | 'yellow' | 'magenta'
+
+const PLAYER_COLORS: Record<PlayerSlot, PlayerColor> = {
+  1: 'green',
+  2: 'cyan',
+  3: 'yellow',
+  4: 'magenta',
 }
 
 interface Player {
   id: string
   name: string
   x: number
-  slot: 1 | 2 | 3 | 4     // Determines color and spawn position
-  color: 'green' | 'cyan' | 'yellow' | 'magenta'
+  slot: PlayerSlot
+  color: PlayerColor
   lastShot: number
   alive: boolean
-  respawnAt: number | null  // Tick to respawn (co-op only)
+  respawnAt: number | null          // Tick to respawn (co-op only)
   kills: number
-  ready: boolean
+  disconnectedAt: number | null     // Tick when disconnected (for grace period)
 }
 
-interface Alien {
-  id: number
-  type: 'squid' | 'crab' | 'octopus'
-  row: number             // For formation tracking
+// ─── Enemies ──────────────────────────────────────────────────────────────────
+
+type ClassicAlienType = 'squid' | 'crab' | 'octopus'
+type EnhancedAlienType = 'commander' | 'dive_bomber'
+type AlienType = ClassicAlienType | EnhancedAlienType
+
+interface BaseAlien extends GameEntity {
+  row: number
   col: number
-  x: number
-  y: number
   alive: boolean
   points: number
 }
 
-interface Bullet {
-  id: number
-  ownerId: string | null
-  x: number
-  y: number
-  dy: -1 | 1
+interface Alien extends BaseAlien {
+  type: ClassicAlienType
+}
+
+interface Commander extends BaseAlien {
+  type: 'commander'
+  health: 2 | 1                     // 2 hits to kill (green → purple → dead)
+  tractorBeamCooldown: number
+  capturedPlayerId: string | null
+}
+
+interface DiveBomber extends BaseAlien {
+  type: 'dive_bomber'
+  diveState: 'formation' | 'diving' | 'returning'
+  divePathProgress: number
+  diveDirection: 1 | -1
+}
+
+// ─── Projectiles & Obstacles ──────────────────────────────────────────────────
+
+interface Bullet extends GameEntity {
+  ownerId: string | null            // null = alien bullet
+  dy: -1 | 1                        // -1 = up (player), 1 = down (alien)
 }
 
 interface Barrier {
-  x: number               // Left edge of barrier
-  segments: Array<{ 
-    offsetX: number
-    offsetY: number
-    health: number        // 0-4
-  }>
+  x: number                         // Left edge
+  segments: BarrierSegment[]
+}
+
+interface BarrierSegment {
+  offsetX: number
+  offsetY: number
+  health: number                    // 0-4 (0 = destroyed)
+}
+
+// ─── Transform Enemies (Enhanced Mode) ────────────────────────────────────────
+
+type TransformType = 'scorpion' | 'stingray' | 'mini_commander'
+
+interface TransformEnemy extends GameEntity {
+  type: TransformType
+  velocity: Position
+  lifetime: number                  // Ticks until auto-despawn
 }
 ```
 
@@ -569,13 +853,12 @@ export class GameRoom implements DurableObject {
 
   private createInitialState(): GameState {
     return {
-      roomId: crypto.randomUUID().slice(0, 8),
+      roomId: crypto.randomUUID().slice(0, 6).toUpperCase(),  // 6-char alphanumeric
       mode: 'solo',
       status: 'waiting',
       tick: 0,
       players: {},
-      playerOrder: [],
-      readyPlayers: new Set(),
+      readyPlayerIds: [],
       aliens: [],
       bullets: [],
       barriers: [],
@@ -626,9 +909,11 @@ export class GameRoom implements DurableObject {
     
     ws.addEventListener('close', () => {
       const playerId = this.sessions.get(ws)
-      if (playerId) {
-        this.removePlayer(playerId)
+      if (playerId && this.game.players[playerId]) {
+        // Mark as disconnected, don't remove immediately (grace period)
+        this.game.players[playerId].disconnectedAt = this.game.tick
         this.sessions.delete(ws)
+        this.broadcast({ type: 'event', name: 'player_disconnected', data: { playerId } })
       }
     })
   }
@@ -654,11 +939,10 @@ export class GameRoom implements DurableObject {
           alive: true,
           respawnAt: null,
           kills: 0,
-          ready: false,
+          disconnectedAt: null,
         }
         
         this.game.players[player.id] = player
-        this.game.playerOrder.push(player.id)
         this.sessions.set(ws, player.id)
         this.game.mode = Object.keys(this.game.players).length === 1 ? 'solo' : 'coop'
         
@@ -677,19 +961,17 @@ export class GameRoom implements DurableObject {
       }
       
       case 'ready': {
-        if (playerId && this.game.players[playerId]) {
-          this.game.players[playerId].ready = true
-          this.game.readyPlayers.add(playerId)
+        if (playerId && this.game.players[playerId] && !this.game.readyPlayerIds.includes(playerId)) {
+          this.game.readyPlayerIds.push(playerId)
           this.broadcast({ type: 'event', name: 'player_ready', data: { playerId } })
           this.checkStartConditions()
         }
         break
       }
-      
+
       case 'unready': {
         if (playerId && this.game.players[playerId]) {
-          this.game.players[playerId].ready = false
-          this.game.readyPlayers.delete(playerId)
+          this.game.readyPlayerIds = this.game.readyPlayerIds.filter(id => id !== playerId)
           this.broadcast({ type: 'event', name: 'player_unready', data: { playerId } })
         }
         break
@@ -714,7 +996,7 @@ export class GameRoom implements DurableObject {
 
   private checkStartConditions() {
     const playerCount = Object.keys(this.game.players).length
-    const readyCount = this.game.readyPlayers.size
+    const readyCount = this.game.readyPlayerIds.length
     
     if (playerCount >= 2 && readyCount === playerCount) {
       this.startCountdown()
@@ -752,14 +1034,24 @@ export class GameRoom implements DurableObject {
     this.broadcast({ type: 'event', name: 'game_start' })
     this.broadcast({ type: 'sync', state: this.serializeState(), playerId: '' })
     
-    this.interval = setInterval(() => this.tick(), this.game.config.tickRate)
+    this.interval = setInterval(() => this.tick(), this.game.config.tickIntervalMs)
   }
 
   private tick() {
     const delta: DeltaState = {}
     const playerCount = Object.keys(this.game.players).length
     const scaled = getScaledConfig(playerCount, this.game.config)
-    
+
+    // Handle disconnect grace period timeouts
+    for (const player of Object.values(this.game.players)) {
+      if (player.disconnectedAt !== null) {
+        const elapsed = this.game.tick - player.disconnectedAt
+        if (elapsed >= this.game.config.disconnectGracePeriod) {
+          this.removePlayer(player.id)
+        }
+      }
+    }
+
     // Handle respawns (co-op only)
     if (this.game.mode === 'coop') {
       for (const player of Object.values(this.game.players)) {
@@ -810,7 +1102,7 @@ export class GameRoom implements DurableObject {
             id: Date.now() + Math.random(),
             ownerId: playerId,
             x: player.x,
-            y: 19,
+            y: LAYOUT.PLAYER_Y - 1,  // Spawn bullet above player
             dy: -1,
           })
           player.lastShot = this.game.tick
@@ -867,7 +1159,7 @@ export class GameRoom implements DurableObject {
       if (bullet.dy === 1) {
         for (const player of Object.values(this.game.players)) {
           if (!player.alive) continue
-          if (Math.abs(bullet.x - player.x) < 2 && Math.abs(bullet.y - 20) < 1) {
+          if (Math.abs(bullet.x - player.x) < 2 && Math.abs(bullet.y - LAYOUT.PLAYER_Y) < 1) {
             bulletsToRemove.push(bullet.id)
             this.handlePlayerDeath(player.id, delta)
             break
@@ -1057,8 +1349,7 @@ export class GameRoom implements DurableObject {
 
   private removePlayer(playerId: string) {
     delete this.game.players[playerId]
-    this.game.playerOrder = this.game.playerOrder.filter(id => id !== playerId)
-    this.game.readyPlayers.delete(playerId)
+    this.game.readyPlayerIds = this.game.readyPlayerIds.filter(id => id !== playerId)
     
     const playerCount = Object.keys(this.game.players).length
     
@@ -1083,7 +1374,7 @@ export class GameRoom implements DurableObject {
   }
 
   private serializeState(): GameState {
-    return { ...this.game, readyPlayers: new Set(this.game.readyPlayers) }
+    return { ...this.game }  // readyPlayerIds is already JSON-serializable
   }
 
   async alarm() {
@@ -1233,10 +1524,9 @@ interface LobbyScreenProps {
 
 export function LobbyScreen({ state, currentPlayerId, onReady, onUnready, onStartSolo }: LobbyScreenProps) {
   const players = Object.values(state.players)
-  const currentPlayer = state.players[currentPlayerId]
-  const isReady = currentPlayer?.ready ?? false
+  const isReady = state.readyPlayerIds.includes(currentPlayerId)
   const playerCount = players.length
-  const readyCount = players.filter(p => p.ready).length
+  const readyCount = state.readyPlayerIds.length
   
   useKeyboard((event) => {
     switch (event.name) {
@@ -1260,17 +1550,20 @@ export function LobbyScreen({ state, currentPlayerId, onReady, onUnready, onStar
       <text fg="yellow">Players ({playerCount}/4):</text>
       <box height={1} />
       
-      {players.map((player) => (
-        <box key={player.id}>
-          <text fg={player.color}>
-            {player.id === currentPlayerId ? '► ' : '  '}P{player.slot} {player.name}
-          </text>
-          <box flex={1} />
-          <text fg={player.ready ? 'green' : 'gray'}>
-            {player.ready ? '✓ READY' : '○ waiting'}
-          </text>
-        </box>
-      ))}
+      {players.map((player) => {
+        const playerReady = state.readyPlayerIds.includes(player.id)
+        return (
+          <box key={player.id}>
+            <text fg={player.color}>
+              {player.id === currentPlayerId ? '► ' : '  '}P{player.slot} {player.name}
+            </text>
+            <box flex={1} />
+            <text fg={playerReady ? 'green' : 'gray'}>
+              {playerReady ? '✓ READY' : '○ waiting'}
+            </text>
+          </box>
+        )
+      })}
       
       {Array.from({ length: 4 - playerCount }).map((_, i) => (
         <text key={\`empty-\${i}\`} fg="gray">  P{playerCount + i + 1} (empty)</text>
@@ -1337,7 +1630,7 @@ export function GameScreen({ state, currentPlayerId }: GameScreenProps) {
       <box flex={1} position="relative" borderStyle="single" borderColor="gray">
         {/* Aliens */}
         {aliens.filter(a => a.alive).map(alien => (
-          <text key={\`alien-\${alien.id}\`} position="absolute" top={alien.y} left={alien.x} color={COLORS.alien[alien.type]}>
+          <text key={\`alien-\${alien.id}\`} position="absolute" top={alien.y} left={alien.x} fg={COLORS.alien[alien.type]}>
             {SPRITES.alien[alien.type]}
           </text>
         ))}
@@ -1377,7 +1670,7 @@ function PlayerShip({ player, isCurrentPlayer, tick }: { player: Player; isCurre
   }
   
   return (
-    <box position="absolute" top={20} left={player.x - 1}>
+    <box position="absolute" top={LAYOUT.PLAYER_Y} left={player.x - 1}>
       <text fg={player.alive ? player.color : 'gray'}>{SPRITES.player}</text>
       <text position="absolute" top={1} left={1} fg={player.color}>
         {isCurrentPlayer ? '▼' : \`P\${player.slot}\`}
@@ -1567,8 +1860,11 @@ function applyDelta(state: GameState, delta: DeltaState): GameState {
   return next
 }
 
-function handleEvent(name: string, data: unknown) {
-  if (name === 'alien_killed' || name === 'player_died') process.stdout.write('\x07')
+function handleEvent(name: GameEvent, data: unknown) {
+  // Legacy beep - now replaced by audio system
+  if (name === 'alien_killed' || name === 'player_died') {
+    audio.playSfx(name)
+  }
 }
 ```
 
@@ -1732,12 +2028,12 @@ new_classes = ["GameRoom"]
 
 ### Difficulty Scaling
 
-| Players | Alien Speed | Shots/sec | Grid Size |
-|---------|-------------|-----------|-----------|
+See `getScaledConfig()` in Scaling Logic section for canonical values. Summary:
+
+| Players | Speed | Shots/sec | Grid |
+|---------|-------|-----------|------|
 | 1 | 1.0× | 0.5 | 11×5 |
-| 2 | 1.25× | 0.75 | 11×5 |
-| 3 | 1.5× | 1.0 | 13×5 |
-| 4 | 1.75× | 1.25 | 15×6 |
+| 2-4 | 1.25×–1.75× | 0.75–1.25 | up to 15×6 |
 
 ---
 
@@ -1745,12 +2041,13 @@ new_classes = ["GameRoom"]
 
 | Scenario | Handling |
 |----------|----------|
-| Player disconnect | Keep in game 10s, then remove |
-| All players leave | Pause state, destroy after 5min |
-| Room full (4 players) | Return 429, suggest new room |
-| Terminal too small | Show "resize terminal" message |
-| Simultaneous kills | Both players credited |
-| Player rejoins | Send full sync, respawn if lives remain |
+| Player disconnect | Mark `disconnectedAt`, keep in game for `disconnectGracePeriod` (10s), then remove |
+| All players leave | End game, destroy room after 5min via Durable Object alarm |
+| Room full (4 players) | Return HTTP 429 with `room_full` error |
+| Terminal too small | Show "resize terminal to 80×24" message |
+| Simultaneous kills | Both players credited (last bullet processed wins tie) |
+| Player rejoins within grace | Clear `disconnectedAt`, resume play |
+| Player rejoins after removal | Rejoin as new player if game in progress and room not full |
 
 ---
 
@@ -1762,6 +2059,345 @@ new_classes = ["GameRoom"]
 4. **\<text\>** — Styled text with color/bold props
 5. **position="absolute"** — Game entity positioning
 6. **createRoot/render** — React reconciler entry point
+
+---
+
+## Audio
+
+Audio is **client-side only** and **on by default**. Press `M` to toggle mute. Audio state persists in localStorage.
+
+### Keyboard Shortcut
+
+| Key | Action |
+|-----|--------|
+| `M` | Toggle audio on/off |
+
+### Sound Effects
+
+All sound effects are synthesized using Web Audio API for minimal bundle size.
+
+| Event | Sound | Style |
+|-------|-------|-------|
+| **Player shoot** | Short blip, rising pitch | 50ms, square wave |
+| **Alien killed** | Descending tone + noise burst | 100ms |
+| **Player death** | Low rumble + explosion | 300ms |
+| **Wave complete** | Triumphant arpeggio | 500ms |
+| **Game over** | Descending minor chord | 1000ms |
+| **Commander hit** (Enhanced) | Metallic clang | 150ms |
+| **Tractor beam** (Enhanced) | Warbling tone, sustained | Loop while active |
+| **Transform spawn** (Enhanced) | Splitting/sparkle effect | 200ms |
+| **Capture** (Enhanced) | Alarming siren | 400ms |
+| **Menu select** | Click/blip | 30ms |
+| **Menu navigate** | Soft tick | 20ms |
+| **Ready up** | Positive chime | 150ms |
+| **Countdown tick** | Beep | 100ms |
+| **Game start** | Fanfare | 800ms |
+
+### Music
+
+#### Normal Mode: Retro Chiptune
+
+8-bit style music using square, triangle, and noise channels. Tempo increases as aliens decrease.
+
+```typescript
+// client/src/audio/music.ts
+
+interface ChiptuneTrack {
+  name: string
+  bpm: number
+  channels: {
+    square1: NoteSequence
+    square2: NoteSequence
+    triangle: NoteSequence
+    noise: NoteSequence
+  }
+}
+
+const NORMAL_MODE_TRACKS: ChiptuneTrack[] = [
+  {
+    name: 'invasion',
+    bpm: 120,
+    channels: {
+      square1: [
+        // Lead melody - classic Space Invaders descending pattern
+        { note: 'E4', duration: '8n' },
+        { note: 'D4', duration: '8n' },
+        { note: 'C4', duration: '8n' },
+        { note: 'B3', duration: '8n' },
+        // ... continues
+      ],
+      square2: [/* Harmony */],
+      triangle: [/* Bass line */],
+      noise: [/* Percussion - hi-hat pattern */],
+    },
+  },
+]
+```
+
+**Dynamic tempo scaling:**
+
+| Aliens Remaining | BPM Multiplier |
+|------------------|----------------|
+| 100-75% | 1.0× |
+| 75-50% | 1.15× |
+| 50-25% | 1.3× |
+| 25-10% | 1.5× |
+| <10% | 1.75× |
+
+#### Enhanced Mode: Amiga-Style
+
+MOD/tracker-inspired music with:
+- 4 channels (Paula chip emulation)
+- Sample-based instruments
+- Characteristic Amiga "punch" and bass
+
+```typescript
+// client/src/audio/amigaMusic.ts
+
+interface AmigaTrack {
+  name: string
+  bpm: number
+  samples: {
+    [key: string]: Float32Array  // Pre-loaded 8-bit samples
+  }
+  patterns: Pattern[]
+  sequence: number[]  // Pattern order
+}
+
+const ENHANCED_MODE_TRACKS: AmigaTrack[] = [
+  {
+    name: 'shadow_assault',
+    bpm: 125,
+    samples: {
+      kick: loadSample('kick_amiga.raw'),
+      snare: loadSample('snare_amiga.raw'),
+      bass: loadSample('bass_amiga.raw'),
+      lead: loadSample('lead_amiga.raw'),
+      pad: loadSample('pad_amiga.raw'),
+    },
+    patterns: [
+      // Pattern 0: Intro
+      {
+        rows: 64,
+        channels: [
+          [/* Channel 1: Kick + Bass */],
+          [/* Channel 2: Snare + Hats */],
+          [/* Channel 3: Lead melody */],
+          [/* Channel 4: Pad/atmosphere */],
+        ],
+      },
+    ],
+    sequence: [0, 0, 1, 2, 1, 2, 3, 3],  // Pattern play order
+  },
+]
+```
+
+**Amiga music characteristics:**
+- **Crunchy bass**: Low-pass filtered, slightly distorted
+- **Punchy drums**: Short decay, no reverb
+- **Arpeggiated chords**: Fast note cycling for polyphony illusion
+- **Portamento leads**: Pitch slides between notes
+
+### Audio Engine
+
+```typescript
+// client/src/audio/engine.ts
+
+class AudioEngine {
+  private ctx: AudioContext | null = null
+  private muted: boolean = false
+  private musicGain: GainNode | null = null
+  private sfxGain: GainNode | null = null
+
+  constructor() {
+    this.muted = localStorage.getItem('vaders_muted') === 'true'
+  }
+
+  async init() {
+    this.ctx = new AudioContext()
+    this.musicGain = this.ctx.createGain()
+    this.sfxGain = this.ctx.createGain()
+    this.musicGain.connect(this.ctx.destination)
+    this.sfxGain.connect(this.ctx.destination)
+    this.updateVolumes()
+  }
+
+  toggleMute() {
+    this.muted = !this.muted
+    localStorage.setItem('vaders_muted', String(this.muted))
+    this.updateVolumes()
+  }
+
+  private updateVolumes() {
+    const vol = this.muted ? 0 : 1
+    this.musicGain?.gain.setValueAtTime(vol * 0.4, this.ctx!.currentTime)
+    this.sfxGain?.gain.setValueAtTime(vol * 0.7, this.ctx!.currentTime)
+  }
+
+  playSfx(name: SoundEffect) {
+    if (!this.ctx || this.muted) return
+    const sfx = SFX_LIBRARY[name]
+    sfx.play(this.ctx, this.sfxGain!)
+  }
+
+  playMusic(mode: 'normal' | 'enhanced') {
+    // Start appropriate music track
+  }
+
+  setMusicTempo(multiplier: number) {
+    // Adjust playback speed based on aliens remaining
+  }
+}
+
+export const audio = new AudioEngine()
+```
+
+### Sound Effect Synthesis
+
+```typescript
+// client/src/audio/sfx.ts
+
+type SoundEffect =
+  | 'shoot'
+  | 'alien_killed'
+  | 'player_death'
+  | 'wave_complete'
+  | 'game_over'
+  | 'commander_hit'
+  | 'tractor_beam'
+  | 'transform_spawn'
+  | 'capture'
+  | 'menu_select'
+  | 'menu_navigate'
+  | 'ready_up'
+  | 'countdown'
+  | 'game_start'
+
+const SFX_LIBRARY: Record<SoundEffect, SynthSound> = {
+  shoot: {
+    play(ctx: AudioContext, dest: AudioNode) {
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = 'square'
+      osc.frequency.setValueAtTime(880, ctx.currentTime)
+      osc.frequency.exponentialRampToValueAtTime(1760, ctx.currentTime + 0.05)
+      gain.gain.setValueAtTime(0.3, ctx.currentTime)
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.05)
+      osc.connect(gain).connect(dest)
+      osc.start()
+      osc.stop(ctx.currentTime + 0.05)
+    },
+  },
+
+  alien_killed: {
+    play(ctx: AudioContext, dest: AudioNode) {
+      // Descending tone
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = 'square'
+      osc.frequency.setValueAtTime(600, ctx.currentTime)
+      osc.frequency.exponentialRampToValueAtTime(100, ctx.currentTime + 0.1)
+      gain.gain.setValueAtTime(0.3, ctx.currentTime)
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1)
+      osc.connect(gain).connect(dest)
+      osc.start()
+      osc.stop(ctx.currentTime + 0.1)
+
+      // Noise burst
+      const noise = createNoiseBuffer(ctx, 0.05)
+      const noiseGain = ctx.createGain()
+      noiseGain.gain.setValueAtTime(0.2, ctx.currentTime)
+      noiseGain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.05)
+      noise.connect(noiseGain).connect(dest)
+      noise.start()
+    },
+  },
+
+  // ... other effects
+}
+
+function createNoiseBuffer(ctx: AudioContext, duration: number): AudioBufferSourceNode {
+  const bufferSize = ctx.sampleRate * duration
+  const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate)
+  const data = buffer.getChannelData(0)
+  for (let i = 0; i < bufferSize; i++) {
+    data[i] = Math.random() * 2 - 1
+  }
+  const source = ctx.createBufferSource()
+  source.buffer = buffer
+  return source
+}
+```
+
+### Integration with Game Events
+
+```tsx
+// client/src/hooks/useGameAudio.ts
+import { useEffect } from 'react'
+import { audio } from '../audio/engine'
+import type { GameState, GameEvent } from '../../../shared/types'
+
+export function useGameAudio(state: GameState | null, enhanced: boolean) {
+  // Initialize audio on first interaction
+  useEffect(() => {
+    const initAudio = () => {
+      audio.init()
+      audio.playMusic(enhanced ? 'enhanced' : 'normal')
+      document.removeEventListener('keydown', initAudio)
+    }
+    document.addEventListener('keydown', initAudio)
+    return () => document.removeEventListener('keydown', initAudio)
+  }, [enhanced])
+
+  // Adjust tempo based on aliens remaining
+  useEffect(() => {
+    if (!state || state.status !== 'playing') return
+    const alive = state.aliens.filter(a => a.alive).length
+    const total = state.aliens.length
+    const ratio = alive / total
+
+    let tempo = 1.0
+    if (ratio < 0.1) tempo = 1.75
+    else if (ratio < 0.25) tempo = 1.5
+    else if (ratio < 0.5) tempo = 1.3
+    else if (ratio < 0.75) tempo = 1.15
+
+    audio.setMusicTempo(tempo)
+  }, [state?.aliens])
+}
+
+// In useGameConnection.ts, handle events:
+function handleEvent(name: GameEvent, data: unknown) {
+  switch (name) {
+    case 'alien_killed':
+      audio.playSfx('alien_killed')
+      break
+    case 'player_died':
+      audio.playSfx('player_death')
+      break
+    case 'wave_complete':
+      audio.playSfx('wave_complete')
+      break
+    case 'game_over':
+      audio.playSfx('game_over')
+      break
+    case 'countdown_start':
+      audio.playSfx('countdown')
+      break
+    case 'game_start':
+      audio.playSfx('game_start')
+      break
+  }
+}
+```
+
+### Mute Indicator
+
+When muted, show indicator in status bar:
+
+```
+│←/→ Move  SPACE Shoot  Q Quit  🔇                    ►Alice:12  Bob:8        │
+```
 
 ---
 
