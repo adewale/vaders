@@ -288,9 +288,7 @@ Row 5:  {ö} {ö} {ö} ...         # Octopuses (11)
 
 † Commander: 150 in formation, 400 solo dive, 800 with one escort, 1600 with two escorts
 
-### Commander Behavior (Galaga Boss) — Phase 2
-
-> **Note:** Commander behavior is specified but not implemented in the initial release. Planned for Phase 2.
+### Commander Behavior (Galaga Boss)
 
 ```typescript
 interface Commander extends Alien {
@@ -313,9 +311,7 @@ interface Commander extends Alien {
 - Escorts follow in V-formation behind Commander
 - Bonus points for destroying escorts before Commander
 
-### Dive Bomber Behavior (Galaxian Purple) — Phase 2
-
-> **Note:** Dive Bomber behavior is specified but not implemented in the initial release. Planned for Phase 2.
+### Dive Bomber Behavior (Galaxian Purple)
 
 ```typescript
 interface DiveBomber extends Alien {
@@ -342,9 +338,7 @@ interface DiveBomber extends Alien {
 | 7-9 | 2 | 6 | 5 rows | Commanders use tractor beam |
 | 10+ | 2 | 8 | 6 rows | All abilities active |
 
-### Challenging Stages (Enhanced Mode) — Phase 2
-
-> **Note:** Challenging Stages are specified but not implemented in the initial release. Planned for Phase 2.
+### Challenging Stages (Enhanced Mode)
 
 Bonus rounds occur at **Wave 3, 7, 11, 15...** (every 4th wave starting from 3).
 
@@ -384,9 +378,7 @@ function isChallengingStage(wave: number): boolean {
 }
 ```
 
-### Transform Enemies (Wave 4+) — Phase 2
-
-> **Note:** Transform enemies are specified but not implemented in the initial release. Planned for Phase 2.
+### Transform Enemies (Wave 4+)
 
 When a Dive Bomber is destroyed, it has a 20% chance to split into 3 smaller enemies:
 
@@ -620,11 +612,11 @@ interface GameState {
   bullets: Bullet[]
   barriers: Barrier[]
 
-  // Phase 2 Enhanced mode only (not implemented in initial release)
-  // commanders?: Commander[]
-  // diveBombers?: DiveBomber[]
-  // transforms?: TransformEnemy[]
-  // capturedPlayerIds?: Record<string, string>
+  // Enhanced mode only
+  commanders?: Commander[]
+  diveBombers?: DiveBomber[]
+  transforms?: TransformEnemy[]
+  capturedPlayerIds?: Record<string, string>  // playerId → commanderId
 
   wave: number
   lives: number                     // 3 solo, 5 co-op
@@ -646,7 +638,7 @@ interface GameConfig {
   baseAlienShootRate: number        // Probability per tick
   playerCooldown: number            // Ticks between shots
   respawnDelay: number              // Ticks (180 = 3 seconds at 60fps)
-  disconnectGracePeriod: number     // Ticks (600 = 10 seconds at 60fps)
+  disconnectGracePeriod: number     // Ticks (625 = 10 seconds at 16ms/tick)
 }
 
 const DEFAULT_CONFIG: GameConfig = {
@@ -659,7 +651,7 @@ const DEFAULT_CONFIG: GameConfig = {
   baseAlienShootRate: 0.5,
   playerCooldown: 10,
   respawnDelay: 180,
-  disconnectGracePeriod: 600,
+  disconnectGracePeriod: 625,
 }
 
 // ─── Layout Constants ─────────────────────────────────────────────────────────
@@ -669,6 +661,8 @@ const LAYOUT = {
   PLAYER_Y: 20,              // Y position for player ships
   PLAYER_MIN_X: 2,           // Left boundary for player movement
   PLAYER_MAX_X: 77,          // Right boundary for player movement
+  PLAYER_WIDTH: 3,           // Width of player sprite
+  BULLET_SPAWN_OFFSET: 1,    // Bullet spawns this far above player
   BARRIER_Y: 16,             // Y position for barrier row
   ALIEN_START_Y: 2,          // Initial Y position for top alien row
   ALIEN_COL_SPACING: 5,      // Horizontal spacing between alien columns
@@ -692,7 +686,7 @@ const PLAYER_COLORS: Record<PlayerSlot, PlayerColor> = {
 interface Player {
   id: string
   name: string
-  x: number
+  x: number                         // Horizontal position (y is always LAYOUT.PLAYER_Y)
   slot: PlayerSlot
   color: PlayerColor
   lastShot: number
@@ -706,7 +700,7 @@ interface Player {
 
 type ClassicAlienType = 'squid' | 'crab' | 'octopus'
 
-// Phase 2 alien types - Commander and DiveBomber have separate interfaces
+// Enhanced mode alien types - Commander and DiveBomber have separate interfaces
 // with additional state (health, diveState, etc.) so they extend BaseAlien directly
 
 interface BaseAlien extends GameEntity {
@@ -734,6 +728,16 @@ interface DiveBomber extends BaseAlien {
   diveDirection: 1 | -1
 }
 
+// ─── Alien Registry ──────────────────────────────────────────────────────────
+
+const ALIEN_REGISTRY = {
+  squid:   { points: 30, sprite: '╔═╗', color: 'magenta' },
+  crab:    { points: 20, sprite: '/°\\', color: 'cyan' },
+  octopus: { points: 10, sprite: '{ö}', color: 'green' },
+} as const
+
+const FORMATION_ROWS: ClassicAlienType[] = ['squid', 'crab', 'crab', 'octopus', 'octopus']
+
 // ─── Projectiles & Obstacles ──────────────────────────────────────────────────
 
 interface Bullet extends GameEntity {
@@ -749,7 +753,7 @@ interface Barrier {
 interface BarrierSegment {
   offsetX: number
   offsetY: number
-  health: number                    // 4=full → 3 → 2 → 1 → 0=destroyed
+  health: 0 | 1 | 2 | 3 | 4         // 4=full → 3 → 2 → 1 → 0=destroyed
                                     // Visual: █(4) → ▓(3) → ▒(2) → ░(1) → gone(0)
 }
 
@@ -787,17 +791,14 @@ export function getScaledConfig(playerCount: number, baseConfig: GameConfig) {
   }
 }
 
-export function getPlayerSpawnX(slot: number, screenWidth: number): number {
-  const positions = {
-    1: [40],                          // Center
-    2: [25, 55],                      // Left-center, right-center
-    3: [15, 40, 65],                  // Thirds
-    4: [12, 30, 50, 68],              // Quarters
+export function getPlayerSpawnX(slot: number, playerCount: number, screenWidth: number): number {
+  const positions: Record<number, number[]> = {
+    1: [Math.floor(screenWidth / 2)],
+    2: [Math.floor(screenWidth / 3), Math.floor(2 * screenWidth / 3)],
+    3: [Math.floor(screenWidth / 4), Math.floor(screenWidth / 2), Math.floor(3 * screenWidth / 4)],
+    4: [Math.floor(screenWidth / 5), Math.floor(2 * screenWidth / 5), Math.floor(3 * screenWidth / 5), Math.floor(4 * screenWidth / 5)],
   }
-  const playerCount = Object.keys(positions).find(k => 
-    positions[Number(k)].length >= slot
-  )
-  return positions[Number(playerCount)]?.[slot - 1] ?? 40
+  return positions[playerCount]?.[slot - 1] ?? Math.floor(screenWidth / 2)
 }
 
 ```
@@ -817,10 +818,24 @@ type ClientMessage =
   | { type: 'ping' }
 
 // Server → Client
+type ServerEvent =
+  | { type: 'event'; name: 'player_joined'; data: { player: Player } }
+  | { type: 'event'; name: 'player_left'; data: { playerId: string; reason?: string } }
+  | { type: 'event'; name: 'player_ready'; data: { playerId: string } }
+  | { type: 'event'; name: 'player_unready'; data: { playerId: string } }
+  | { type: 'event'; name: 'player_died'; data: { playerId: string } }
+  | { type: 'event'; name: 'player_respawned'; data: { playerId: string } }
+  | { type: 'event'; name: 'countdown_tick'; data: { count: number } }
+  | { type: 'event'; name: 'game_start'; data: void }
+  | { type: 'event'; name: 'alien_killed'; data: { alienId: number; playerId: string | null } }
+  | { type: 'event'; name: 'wave_complete'; data: { wave: number } }
+  | { type: 'event'; name: 'game_over'; data: { result: 'victory' | 'defeat' } }
+  | { type: 'event'; name: 'ufo_spawn'; data: { x: number } }
+
 type ServerMessage =
   | { type: 'sync'; state: GameState; playerId: string }
   | { type: 'tick'; tick: number; delta: DeltaState }
-  | { type: 'event'; name: GameEvent; data?: unknown }
+  | ServerEvent
   | { type: 'pong'; serverTime: number }
   | { type: 'error'; code: ErrorCode; message: string }
 
@@ -831,6 +846,7 @@ type DeltaState = {
   score?: number
   lives?: number
   status?: GameState['status']
+  mode?: GameState['mode']
   wave?: number
   readyCount?: number
 }
@@ -842,14 +858,27 @@ type GameEvent =
   | 'player_unready'
   | 'player_died'
   | 'player_respawned'
-  | 'countdown_start'
+  | 'countdown_tick'
   | 'game_start'
   | 'alien_killed'
   | 'wave_complete'
   | 'game_over'
-  // 'ufo_spawn' - Phase 2 feature
+  | 'ufo_spawn'
 
 type ErrorCode = 'room_full' | 'game_in_progress' | 'invalid_action'
+```
+
+### Keep-Alive Strategy
+
+Clients send a `ping` message every 30 seconds while connected. Server responds with `pong` including `serverTime`. If no `pong` received within 5 seconds, client should reconnect.
+
+```typescript
+// Client-side keep-alive
+setInterval(() => {
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'ping' }))
+  }
+}, 30000)
 ```
 
 ### Durable Object Implementation
@@ -912,7 +941,10 @@ export class GameRoom implements DurableObject {
         })
       }
       if (Object.keys(this.game.players).length >= 4) {
-        return new Response('Room full', { status: 429 })
+        return new Response(JSON.stringify({ code: 'room_full', message: 'Room is full' }), {
+          status: 429,
+          headers: { 'Content-Type': 'application/json' }
+        })
       }
       
       const pair = new WebSocketPair()
@@ -961,7 +993,7 @@ export class GameRoom implements DurableObject {
         const player: Player = {
           id: crypto.randomUUID(),
           name: msg.name.slice(0, 12),
-          x: getPlayerSpawnX(slot, 80),
+          x: getPlayerSpawnX(slot, Object.keys(this.game.players).length + 1, 80),
           slot,
           color: PLAYER_COLORS[slot],
           lastShot: 0,
@@ -1044,7 +1076,7 @@ export class GameRoom implements DurableObject {
     this.game.status = 'countdown'
     let count = 3
     
-    this.broadcast({ type: 'event', name: 'countdown_start', data: { count } })
+    this.broadcast({ type: 'event', name: 'countdown_tick', data: { count } })
     
     this.countdownInterval = setInterval(() => {
       count--
@@ -1052,7 +1084,7 @@ export class GameRoom implements DurableObject {
         clearInterval(this.countdownInterval!)
         this.startGame()
       } else {
-        this.broadcast({ type: 'event', name: 'countdown_start', data: { count } })
+        this.broadcast({ type: 'event', name: 'countdown_tick', data: { count } })
       }
     }, 1000)
   }
@@ -1094,7 +1126,7 @@ export class GameRoom implements DurableObject {
       for (const player of Object.values(this.game.players)) {
         if (!player.alive && player.respawnAt && this.game.tick >= player.respawnAt) {
           player.alive = true
-          player.x = getPlayerSpawnX(player.slot, 80)
+          player.x = getPlayerSpawnX(player.slot, Object.keys(this.game.players).length, 80)
           player.respawnAt = null
           delta.players = delta.players || {}
           delta.players[player.id] = { alive: true, x: player.x, respawnAt: null }
@@ -1805,7 +1837,7 @@ export const SPRITES = {
     octopus: '{ö}',
   },
   player: '▲█▲',
-  // ufo: '◄══►',  // Phase 2 feature
+  ufo: '◄══►',
 } as const
 
 export const COLORS = {
@@ -2321,7 +2353,7 @@ type SoundEffect =
   | 'menu_select'
   | 'menu_navigate'
   | 'ready_up'
-  | 'countdown_start'
+  | 'countdown_tick'
   | 'game_start'
 
 /** Synthesized sound effect interface */
@@ -2374,13 +2406,13 @@ const SFX_LIBRARY: Record<SoundEffect, SynthSound> = {
   player_respawned: { play: (ctx, dest) => playTone(ctx, dest, 880, 0.1, 'sine') },   // A5 respawn chime
   wave_complete: { play: (ctx, dest) => playArpeggio(ctx, dest, [523, 659, 784], 0.5) }, // C-E-G triumphant
   game_over: { play: (ctx, dest) => playArpeggio(ctx, dest, [392, 330, 262], 1.0) },  // G-E-C descending minor
-  countdown_start: { play: (ctx, dest) => playTone(ctx, dest, 440, 0.1, 'square') },  // A4 beep
+  countdown_tick: { play: (ctx, dest) => playTone(ctx, dest, 440, 0.1, 'square') },  // A4 beep
   game_start: { play: (ctx, dest) => playArpeggio(ctx, dest, [262, 330, 392, 523], 0.8) }, // C-E-G-C fanfare
   ready_up: { play: (ctx, dest) => playTone(ctx, dest, 660, 0.15, 'sine') },          // E5 positive chime
   menu_select: { play: (ctx, dest) => playTone(ctx, dest, 440, 0.03, 'square') },     // Quick click
   menu_navigate: { play: (ctx, dest) => playTone(ctx, dest, 220, 0.02, 'square') },   // Soft tick
 
-  // Phase 2 Enhanced mode sounds
+  // Enhanced mode sounds
   commander_hit: { play: (ctx, dest) => playTone(ctx, dest, 150, 0.15, 'sawtooth') }, // Metallic clang
   tractor_beam: { play: (ctx, dest) => playWarble(ctx, dest, 300, 2.0) },             // Sustained warble
   transform_spawn: { play: (ctx, dest) => playSparkle(ctx, dest, 0.2) },              // Splitting effect
@@ -2515,7 +2547,7 @@ const EVENT_SOUND_MAP: Record<GameEvent, SoundEffect> = {
   player_unready: 'menu_select',   // UI feedback sound
   player_died: 'player_died',
   player_respawned: 'player_respawned',
-  countdown_start: 'countdown_start',
+  countdown_tick: 'countdown_tick',
   game_start: 'game_start',
   alien_killed: 'alien_killed',
   wave_complete: 'wave_complete',
@@ -2696,12 +2728,12 @@ describe('getScaledConfig', () => {
 
 describe('getPlayerSpawnX', () => {
   test('solo player spawns at center', () => {
-    expect(getPlayerSpawnX(1, 80)).toBe(40)
+    expect(getPlayerSpawnX(1, 1, 80)).toBe(40)
   })
 
-  test('2 players spawn at quarter positions', () => {
-    expect(getPlayerSpawnX(1, 80)).toBe(25)
-    expect(getPlayerSpawnX(2, 80)).toBe(55)
+  test('2 players spawn at thirds positions', () => {
+    expect(getPlayerSpawnX(1, 2, 80)).toBe(26)  // Math.floor(80/3)
+    expect(getPlayerSpawnX(2, 2, 80)).toBe(53)  // Math.floor(2*80/3)
   })
 })
 ```
@@ -2821,8 +2853,8 @@ describe('GameRoom WebSocket protocol', () => {
     ws1.receive({ type: 'ready' })
     ws2.receive({ type: 'ready' })
 
-    // Should broadcast countdown_start
-    expect(ws1.messages.some(m => m.name === 'countdown_start')).toBe(true)
+    // Should broadcast countdown_tick
+    expect(ws1.messages.some(m => m.name === 'countdown_tick')).toBe(true)
   })
 
   test('ping returns pong with server time', async () => {
@@ -2833,6 +2865,45 @@ describe('GameRoom WebSocket protocol', () => {
     const pong = mockWs.lastSent()
     expect(pong.type).toBe('pong')
     expect(pong.serverTime).toBeGreaterThan(0)
+  })
+
+  test('countdown ticks from 3 to 1 then starts game', async () => {
+    // Setup 2 players, both ready
+    const ws1 = new MockWebSocket()
+    const ws2 = new MockWebSocket()
+    await room.handleSession(ws1)
+    await room.handleSession(ws2)
+    ws1.receive({ type: 'join', name: 'Alice' })
+    ws2.receive({ type: 'join', name: 'Bob' })
+    ws1.receive({ type: 'ready' })
+    ws2.receive({ type: 'ready' })
+
+    // Expect countdown_tick events with counts 3, 2, 1
+    const countdownEvents = ws1.messages.filter(m => m.name === 'countdown_tick')
+    expect(countdownEvents.map(e => e.data.count)).toEqual([3, 2, 1])
+
+    // Expect game_start after countdown
+    expect(ws1.messages.some(m => m.name === 'game_start')).toBe(true)
+  })
+
+  test('player respawns after respawnDelay ticks in coop', async () => {
+    // Setup coop game with 2 players
+    const ws1 = new MockWebSocket()
+    const ws2 = new MockWebSocket()
+    await room.handleSession(ws1)
+    await room.handleSession(ws2)
+    ws1.receive({ type: 'join', name: 'Alice' })
+    ws2.receive({ type: 'join', name: 'Bob' })
+    ws1.receive({ type: 'ready' })
+    ws2.receive({ type: 'ready' })
+
+    // Wait for game to start and kill player
+    // ... simulate player death
+    // Wait respawnDelay ticks
+    // Expect player_respawned event
+    // Expect player.alive = true, correct x position
+    const respawnedEvents = ws1.messages.filter(m => m.name === 'player_respawned')
+    expect(respawnedEvents.length).toBeGreaterThan(0)
   })
 })
 
