@@ -66,6 +66,289 @@ vaders --room ABC123 --name "Alice"
 
 ---
 
+## Enhanced Mode
+
+Enhanced Mode adds two additional rows of enemies above the classic formation, featuring attack patterns inspired by Galaga and Galaxian. Enable with `--enhanced` flag.
+
+```bash
+vaders --enhanced
+vaders --room ABC123 --enhanced
+```
+
+### Formation Layout (Enhanced)
+
+```
+Row 0:  ◄══►  ◄══►              # Commanders (2) - Galaga Boss behavior
+Row 1:  ♦ ♦ ♦ ♦ ♦ ♦             # Dive Bombers (6) - Galaxian purple dive
+Row 2:  ╔═╗ ╔═╗ ╔═╗ ...         # Squids (11) - Classic Space Invaders
+Row 3:  /°\ /°\ /°\ ...         # Crabs (11)
+Row 4:  {ö} {ö} {ö} ...         # Octopuses (11)
+Row 5:  {ö} {ö} {ö} ...         # Octopuses (11)
+```
+
+### Enhanced Enemy Types
+
+| Type | Sprite | Points | Behavior |
+|------|--------|--------|----------|
+| **Commander** | `◄══►` | 150/400† | Tractor beam capture, takes escorts when diving |
+| **Dive Bomber** | `♦` | 80/160 | Wide-angle Galaxian dive, reverses mid-path |
+| **Squid** | `╔═╗` | 30/60 | Classic side-to-side, drops when edge hit |
+| **Crab** | `/°\` | 20/40 | Classic movement |
+| **Octopus** | `{ö}` | 10/20 | Classic movement |
+
+† Commander: 150 in formation, 400 solo dive, 800 with one escort, 1600 with two escorts
+
+### Commander Behavior (Galaga Boss)
+
+```typescript
+interface Commander extends Alien {
+  type: 'commander'
+  health: 2                    // Requires 2 hits (green → purple → dead)
+  tractorBeamCooldown: number
+  capturedPlayerId: string | null
+}
+```
+
+**Tractor Beam Attack:**
+1. Commander dives solo in straight line
+2. Stops ~4 rows above player area
+3. Deploys tractor beam (3-char wide capture zone)
+4. If player caught: ship disabled for 5 seconds, Commander gains shield
+5. Other players can free captured player by destroying Commander
+
+**Escort Dive:**
+- When diving normally, Commander recruits up to 2 adjacent Dive Bombers
+- Escorts follow in V-formation behind Commander
+- Bonus points for destroying escorts before Commander
+
+### Dive Bomber Behavior (Galaxian Purple)
+
+```typescript
+interface DiveBomber extends Alien {
+  type: 'divebomber'
+  diveState: 'formation' | 'diving' | 'returning'
+  divePathProgress: number
+  diveDirection: 1 | -1
+}
+```
+
+**Dive Pattern:**
+1. Breaks from formation, moves toward screen edge
+2. Sweeps across screen in wide arc
+3. **Reverses direction** at midpoint (signature Galaxian purple move)
+4. Fires 4 shots during dive (2 before turn, 2 after)
+5. Returns to formation from bottom if survives
+
+### Wave Progression (Enhanced)
+
+| Wave | Commanders | Dive Bombers | Classic Rows | Special |
+|------|------------|--------------|--------------|---------|
+| 1-3 | 1 | 4 | 4 rows | — |
+| 4-6 | 2 | 6 | 5 rows | Dive Bombers transform on death |
+| 7-9 | 2 | 6 | 5 rows | Commanders use tractor beam |
+| 10+ | 2 | 8 | 6 rows | All abilities active |
+
+### Transform Enemies (Wave 4+)
+
+When a Dive Bomber is destroyed, it has a 20% chance to split into 3 smaller enemies:
+
+| Wave | Transform Into | Points (×3) |
+|------|----------------|-------------|
+| 4-6 | Scorpions `∿` | 1000 |
+| 7-9 | Stingrays `◇` | 2000 |
+| 10+ | Mini-Commanders `◄►` | 3000 |
+
+Transform enemies dive rapidly and exit screen (don't rejoin formation).
+
+### Enhanced Mode Scoring
+
+| Action | Points |
+|--------|--------|
+| Commander in formation | 150 |
+| Commander solo dive | 400 |
+| Commander + 1 escort | 800 |
+| Commander + 2 escorts | 1600 |
+| Free captured player | 500 |
+| Dive Bomber in formation | 80 |
+| Dive Bomber while diving | 160 |
+| Transform group (all 3) | 1000-3000 |
+
+### Enhanced State Schema
+
+```typescript
+interface GameState {
+  // ... existing fields ...
+  enhancedMode: boolean
+
+  // Enhanced-specific
+  commanders: Commander[]
+  diveBombers: DiveBomber[]
+  transforms: TransformEnemy[]
+  capturedPlayers: Record<string, string>  // playerId → commanderId
+}
+
+interface TransformEnemy {
+  id: number
+  type: 'scorpion' | 'stingray' | 'mini-commander'
+  x: number
+  y: number
+  velocity: { x: number, y: number }
+  lifetime: number  // Ticks until auto-despawn
+}
+```
+
+### Enhanced Sprites
+
+```typescript
+export const ENHANCED_SPRITES = {
+  commander: {
+    healthy: '◄══►',
+    damaged: '◄──►',  // After first hit
+  },
+  diveBomber: '♦',
+  transform: {
+    scorpion: '∿',
+    stingray: '◇',
+    miniCommander: '◄►',
+  },
+  tractorBeam: '╠╬╣',  // 3-char beam effect
+} as const
+```
+
+### Visual Effects (Amiga Copper-Inspired)
+
+Enhanced Mode uses true-color ANSI sequences to recreate classic Amiga demoscene aesthetics. These effects run client-side only and don't affect game state.
+
+#### Gradient Sky Background
+
+Per-row background color changes, inspired by Shadow of the Beast's copper-driven sky:
+
+```typescript
+// client/src/effects/gradient.ts
+
+interface GradientStop {
+  row: number
+  color: [number, number, number]  // RGB
+}
+
+const SKY_GRADIENT: GradientStop[] = [
+  { row: 0,  color: [15, 10, 40] },    // Deep purple
+  { row: 6,  color: [40, 20, 80] },    // Purple
+  { row: 12, color: [80, 40, 100] },   // Magenta
+  { row: 18, color: [20, 10, 30] },    // Dark purple
+  { row: 23, color: [0, 0, 0] },       // Black
+]
+
+function interpolateGradient(row: number): string {
+  // Find surrounding stops and lerp between them
+  // Return ANSI: \x1b[48;2;r;g;bm
+}
+```
+
+#### Raster Bars
+
+Horizontal color bands that animate behind the alien formation:
+
+```typescript
+// client/src/effects/rasterBars.ts
+
+interface RasterBar {
+  y: number           // Current vertical position
+  velocity: number    // Pixels per frame
+  colors: string[]    // 5-row gradient (bright center, fading edges)
+  amplitude: number   // Sine wave motion range
+}
+
+const RASTER_BARS: RasterBar[] = [
+  { y: 4, velocity: 0.5, colors: ['#001', '#113', '#33f', '#113', '#001'], amplitude: 3 },
+  { y: 8, velocity: -0.3, colors: ['#100', '#311', '#f33', '#311', '#100'], amplitude: 4 },
+]
+
+function updateRasterBars(tick: number) {
+  for (const bar of RASTER_BARS) {
+    bar.y += bar.velocity
+    bar.y += Math.sin(tick * 0.05) * 0.1 * bar.amplitude
+    // Wrap around screen
+    if (bar.y > 24) bar.y = -5
+    if (bar.y < -5) bar.y = 24
+  }
+}
+```
+
+#### Color Cycling Effects
+
+Palette rotation for animated elements without redrawing:
+
+| Element | Cycle Speed | Colors |
+|---------|-------------|--------|
+| Tractor beam | 6 fps | Blue → cyan → white → cyan → blue |
+| Commander shield | 4 fps | Purple → magenta → pink → magenta |
+| Transform enemies | 8 fps | Rainbow cycle |
+| Player respawn | 10 fps | White flash → player color |
+
+```typescript
+// client/src/effects/colorCycle.ts
+
+const TRACTOR_BEAM_PALETTE = [
+  '#0033ff', '#0066ff', '#0099ff', '#00ccff',
+  '#00ffff', '#66ffff', '#ffffff',
+  '#66ffff', '#00ffff', '#00ccff', '#0099ff', '#0066ff',
+]
+
+function getTractorBeamColor(tick: number): string {
+  const index = Math.floor(tick / 10) % TRACTOR_BEAM_PALETTE.length
+  return TRACTOR_BEAM_PALETTE[index]
+}
+```
+
+#### Challenging Stage Plasma Background
+
+Sinusoidal plasma effect for bonus rounds:
+
+```typescript
+// client/src/effects/plasma.ts
+
+function plasmaValue(x: number, y: number, time: number): number {
+  return (
+    Math.sin(x * 0.1 + time) +
+    Math.sin(y * 0.1 + time * 0.5) +
+    Math.sin((x + y) * 0.1 + time * 0.3) +
+    Math.sin(Math.sqrt(x * x + y * y) * 0.1)
+  ) / 4  // Normalize to -1..1
+}
+
+function plasmaColor(value: number): [number, number, number] {
+  // Map -1..1 to purple-blue-cyan-green palette
+  const t = (value + 1) / 2  // 0..1
+  return [
+    Math.floor(128 + 127 * Math.sin(t * Math.PI * 2)),
+    Math.floor(64 + 64 * Math.sin(t * Math.PI * 2 + 2)),
+    Math.floor(196 + 59 * Math.sin(t * Math.PI * 2 + 4)),
+  ]
+}
+```
+
+#### Effect Layering Order
+
+```
+1. Gradient sky background (lowest)
+2. Raster bars (additive blend simulation)
+3. Plasma (Challenging Stages only, replaces sky)
+4. Game elements (aliens, bullets, barriers)
+5. Color-cycled effects (tractor beam, shields)
+6. UI overlay (score, lives)
+```
+
+#### Performance Considerations
+
+- Pre-calculate gradient lookup tables at startup
+- Only update raster bar rows that changed
+- Use double-buffering to prevent flicker
+- Limit plasma resolution (calculate every 2nd column, interpolate)
+- Disable effects on terminals without true-color support
+
+---
+
 ## Architecture
 
 ```
@@ -853,7 +1136,7 @@ async function main() {
   
   process.on('SIGINT', () => {
     root.unmount()
-    process.exit(0)
+    renderer.destroy()
   })
 }
 
@@ -864,7 +1147,7 @@ main()
 
 ```tsx
 // client/src/App.tsx
-import { useKeyboard } from '@opentui/react'
+import { useKeyboard, useRenderer } from '@opentui/react'
 import { useGameConnection } from './hooks/useGameConnection'
 import { GameScreen } from './components/GameScreen'
 import { LobbyScreen } from './components/LobbyScreen'
@@ -876,12 +1159,12 @@ interface AppProps {
 }
 
 export function App({ roomUrl, playerName }: AppProps) {
+  const renderer = useRenderer()
   const { state, playerId, send, connected } = useGameConnection(roomUrl, playerName)
-  
+
   useKeyboard((event) => {
-    if (event.eventType === 'release') return
     if (state?.status !== 'playing') return
-    
+
     switch (event.name) {
       case 'left':
       case 'a':
@@ -895,14 +1178,14 @@ export function App({ roomUrl, playerName }: AppProps) {
         send({ type: 'input', action: 'shoot' })
         break
       case 'q':
-        process.exit(0)
+        renderer.destroy()
     }
   })
-  
+
   if (!connected || !state || !playerId) {
     return (
       <box width="100%" height="100%" justifyContent="center" alignItems="center">
-        <text color="cyan">Connecting to server...</text>
+        <text fg="cyan">Connecting to server...</text>
       </box>
     )
   }
@@ -926,7 +1209,7 @@ export function App({ roomUrl, playerName }: AppProps) {
     case 'paused':
       return (
         <box width="100%" height="100%" justifyContent="center" alignItems="center">
-          <text color="yellow">Game Paused - Waiting for players...</text>
+          <text fg="yellow">Game Paused - Waiting for players...</text>
         </box>
       )
   }
@@ -956,7 +1239,6 @@ export function LobbyScreen({ state, currentPlayerId, onReady, onUnready, onStar
   const readyCount = players.filter(p => p.ready).length
   
   useKeyboard((event) => {
-    if (event.eventType === 'release') return
     switch (event.name) {
       case 'space':
       case 'enter':
@@ -971,40 +1253,40 @@ export function LobbyScreen({ state, currentPlayerId, onReady, onUnready, onStar
   
   return (
     <box flexDirection="column" width={60} height={20} borderStyle="double" borderColor="cyan" alignSelf="center" padding={2}>
-      <text color="cyan" bold>◀ SPACE INVADERS ▶</text>
+      <text fg="cyan"><strong>◀ SPACE INVADERS ▶</strong></text>
       <box height={1} />
-      <text color="white">Room: {state.roomId}</text>
+      <text fg="white">Room: {state.roomId}</text>
       <box height={1} />
-      <text color="yellow">Players ({playerCount}/4):</text>
+      <text fg="yellow">Players ({playerCount}/4):</text>
       <box height={1} />
       
       {players.map((player) => (
         <box key={player.id}>
-          <text color={player.color}>
+          <text fg={player.color}>
             {player.id === currentPlayerId ? '► ' : '  '}P{player.slot} {player.name}
           </text>
           <box flex={1} />
-          <text color={player.ready ? 'green' : 'gray'}>
+          <text fg={player.ready ? 'green' : 'gray'}>
             {player.ready ? '✓ READY' : '○ waiting'}
           </text>
         </box>
       ))}
       
       {Array.from({ length: 4 - playerCount }).map((_, i) => (
-        <text key={\`empty-\${i}\`} color="gray">  P{playerCount + i + 1} (empty)</text>
+        <text key={\`empty-\${i}\`} fg="gray">  P{playerCount + i + 1} (empty)</text>
       ))}
       
       <box flex={1} />
       <box borderStyle="single" borderColor="gray" padding={1}>
         {playerCount === 1 ? (
           <box flexDirection="column">
-            <text color="white">[SPACE] {isReady ? 'Cancel Ready' : 'Ready Up'} (wait for others)</text>
-            <text color="green">[S] Start Solo Game</text>
+            <text fg="white">[SPACE] {isReady ? 'Cancel Ready' : 'Ready Up'} (wait for others)</text>
+            <text fg="green">[S] Start Solo Game</text>
           </box>
         ) : (
           <box flexDirection="column">
-            <text color="white">[SPACE] {isReady ? 'Cancel Ready' : 'Ready Up'}</text>
-            <text color="gray">{readyCount}/{playerCount} ready{readyCount === playerCount ? ' - Starting...' : ''}</text>
+            <text fg="white">[SPACE] {isReady ? 'Cancel Ready' : 'Ready Up'}</text>
+            <text fg="gray">{readyCount}/{playerCount} ready{readyCount === playerCount ? ' - Starting...' : ''}</text>
           </box>
         )}
       </box>
@@ -1033,21 +1315,21 @@ export function GameScreen({ state, currentPlayerId }: GameScreenProps) {
     <box flexDirection="column" width={80} height={24}>
       {/* Header */}
       <box height={1} paddingLeft={1} paddingRight={1}>
-        <text color="white" bold>◀ SPACE INVADERS ▶</text>
+        <text fg="white"><strong>◀ SPACE INVADERS ▶</strong></text>
         <box flex={1} />
-        <text color="gray">{mode === 'solo' ? 'SOLO' : \`\${playerCount}P CO-OP\`}</text>
+        <text fg="gray">{mode === 'solo' ? 'SOLO' : \`\${playerCount}P CO-OP\`}</text>
         <box width={2} />
-        <text color="yellow">SCORE:{score.toString().padStart(5, '0')}</text>
+        <text fg="yellow">SCORE:{score.toString().padStart(5, '0')}</text>
         <box width={2} />
-        <text color="cyan">WAVE:{wave}</text>
+        <text fg="cyan">WAVE:{wave}</text>
         <box width={2} />
-        <text color="red">{'♥'.repeat(lives)}{'♡'.repeat(Math.max(0, (mode === 'solo' ? 3 : 5) - lives))}</text>
+        <text fg="red">{'♥'.repeat(lives)}{'♡'.repeat(Math.max(0, (mode === 'solo' ? 3 : 5) - lives))}</text>
       </box>
       
       {/* Countdown overlay */}
       {status === 'countdown' && (
         <box position="absolute" width="100%" height="100%" justifyContent="center" alignItems="center">
-          <text color="yellow" bold>GET READY!</text>
+          <text fg="yellow"><strong>GET READY!</strong></text>
         </box>
       )}
       
@@ -1062,7 +1344,7 @@ export function GameScreen({ state, currentPlayerId }: GameScreenProps) {
         
         {/* Bullets */}
         {bullets.map(bullet => (
-          <text key={\`bullet-\${bullet.id}\`} position="absolute" top={bullet.y} left={bullet.x} color={bullet.dy < 0 ? 'white' : 'red'}>
+          <text key={\`bullet-\${bullet.id}\`} position="absolute" top={bullet.y} left={bullet.x} fg={bullet.dy < 0 ? 'white' : 'red'}>
             {bullet.dy < 0 ? '│' : '▼'}
           </text>
         ))}
@@ -1080,7 +1362,7 @@ export function GameScreen({ state, currentPlayerId }: GameScreenProps) {
       
       {/* Status Bar */}
       <box height={1} paddingLeft={1} paddingRight={1}>
-        <text color="gray">←/→ Move  SPACE Shoot  Q Quit</text>
+        <text fg="gray">←/→ Move  SPACE Shoot  Q Quit</text>
         <box flex={1} />
         <PlayerScores players={players} currentPlayerId={currentPlayerId} />
       </box>
@@ -1096,8 +1378,8 @@ function PlayerShip({ player, isCurrentPlayer, tick }: { player: Player; isCurre
   
   return (
     <box position="absolute" top={20} left={player.x - 1}>
-      <text color={player.alive ? player.color : 'gray'}>{SPRITES.player}</text>
-      <text position="absolute" top={1} left={1} color={player.color}>
+      <text fg={player.alive ? player.color : 'gray'}>{SPRITES.player}</text>
+      <text position="absolute" top={1} left={1} fg={player.color}>
         {isCurrentPlayer ? '▼' : \`P\${player.slot}\`}
       </text>
     </box>
@@ -1109,7 +1391,7 @@ function PlayerScores({ players, currentPlayerId }: { players: Record<string, Pl
   return (
     <box>
       {sorted.map((p, i) => (
-        <text key={p.id} color={p.color}>
+        <text key={p.id} fg={p.color}>
           {i > 0 ? ' ' : ''}{p.id === currentPlayerId ? '►' : ' '}{p.name}:{p.kills}{!p.alive && p.respawnAt ? '☠' : ''}
         </text>
       ))}
@@ -1122,7 +1404,7 @@ function Barrier({ barrier }: { barrier: BarrierType }) {
     <>
       {barrier.segments.filter(s => s.health > 0).map((seg, i) => (
         <text key={i} position="absolute" top={16 + seg.offsetY} left={barrier.x + seg.offsetX}
-          color={seg.health > 3 ? 'green' : seg.health > 2 ? 'yellow' : seg.health > 1 ? 'red' : 'gray'}>
+          fg={seg.health > 3 ? 'green' : seg.health > 2 ? 'yellow' : seg.health > 1 ? 'red' : 'gray'}>
           {seg.health > 3 ? '█' : seg.health > 2 ? '▓' : seg.health > 1 ? '▒' : '░'}
         </text>
       ))}
@@ -1135,7 +1417,7 @@ function Barrier({ barrier }: { barrier: BarrierType }) {
 
 ```tsx
 // client/src/components/GameOverScreen.tsx
-import { useKeyboard } from '@opentui/react'
+import { useKeyboard, useRenderer } from '@opentui/react'
 import type { GameState } from '../../../shared/types'
 
 interface GameOverScreenProps {
@@ -1144,30 +1426,31 @@ interface GameOverScreenProps {
 }
 
 export function GameOverScreen({ state, currentPlayerId }: GameOverScreenProps) {
+  const renderer = useRenderer()
   const players = Object.values(state.players).sort((a, b) => b.kills - a.kills)
   const victory = state.aliens.every(a => !a.alive)
-  
+
   useKeyboard((event) => {
-    if (event.name === 'q' || event.name === 'escape') process.exit(0)
+    if (event.name === 'q' || event.name === 'escape') renderer.destroy()
   })
   
   return (
     <box flexDirection="column" width={50} borderStyle="double" borderColor={victory ? 'green' : 'red'} alignSelf="center" padding={2}>
-      <text color={victory ? 'green' : 'red'} bold>{victory ? '★ VICTORY ★' : '✖ GAME OVER ✖'}</text>
+      <text fg={victory ? 'green' : 'red'}><strong>{victory ? '★ VICTORY ★' : '✖ GAME OVER ✖'}</strong></text>
       <box height={1} />
-      <text color="yellow">Final Score: {state.score}</text>
-      <text color="cyan">Wave Reached: {state.wave}</text>
+      <text fg="yellow">Final Score: {state.score}</text>
+      <text fg="cyan">Wave Reached: {state.wave}</text>
       <box height={1} />
-      <text color="white" bold>Player Stats:</text>
+      <text fg="white"><strong>Player Stats:</strong></text>
       {players.map((p, i) => (
         <box key={p.id}>
-          <text color={p.color}>{i === 0 ? '🏆' : \` \${i + 1}\`} {p.name}</text>
+          <text fg={p.color}>{i === 0 ? '🏆' : \` \${i + 1}\`} {p.name}</text>
           <box flex={1} />
-          <text color="white">{p.kills} kills</text>
+          <text fg="white">{p.kills} kills</text>
         </box>
       ))}
       <box height={1} />
-      <text color="gray">[Q] Quit</text>
+      <text fg="gray">[Q] Quit</text>
     </box>
   )
 }
