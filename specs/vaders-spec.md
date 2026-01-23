@@ -288,7 +288,9 @@ Row 5:  {ö} {ö} {ö} ...         # Octopuses (11)
 
 † Commander: 150 in formation, 400 solo dive, 800 with one escort, 1600 with two escorts
 
-### Commander Behavior (Galaga Boss)
+### Commander Behavior (Galaga Boss) — Phase 2
+
+> **Note:** Commander behavior is specified but not implemented in the initial release. Planned for Phase 2.
 
 ```typescript
 interface Commander extends Alien {
@@ -311,7 +313,9 @@ interface Commander extends Alien {
 - Escorts follow in V-formation behind Commander
 - Bonus points for destroying escorts before Commander
 
-### Dive Bomber Behavior (Galaxian Purple)
+### Dive Bomber Behavior (Galaxian Purple) — Phase 2
+
+> **Note:** Dive Bomber behavior is specified but not implemented in the initial release. Planned for Phase 2.
 
 ```typescript
 interface DiveBomber extends Alien {
@@ -338,7 +342,9 @@ interface DiveBomber extends Alien {
 | 7-9 | 2 | 6 | 5 rows | Commanders use tractor beam |
 | 10+ | 2 | 8 | 6 rows | All abilities active |
 
-### Challenging Stages (Enhanced Mode)
+### Challenging Stages (Enhanced Mode) — Phase 2
+
+> **Note:** Challenging Stages are specified but not implemented in the initial release. Planned for Phase 2.
 
 Bonus rounds occur at **Wave 3, 7, 11, 15...** (every 4th wave starting from 3).
 
@@ -359,6 +365,12 @@ Bonus rounds occur at **Wave 3, 7, 11, 15...** (every 4th wave starting from 3).
 - Tempo matches formation speed
 
 ```typescript
+/** Path and timing for formation fly-through patterns */
+interface FormationPattern {
+  path: Position[]     // Waypoints for the formation to follow
+  timing: number[]     // Tick delays between waypoints
+}
+
 interface ChallengingStage {
   wave: number
   enemyCount: 40
@@ -372,7 +384,9 @@ function isChallengingStage(wave: number): boolean {
 }
 ```
 
-### Transform Enemies (Wave 4+)
+### Transform Enemies (Wave 4+) — Phase 2
+
+> **Note:** Transform enemies are specified but not implemented in the initial release. Planned for Phase 2.
 
 When a Dive Bomber is destroyed, it has a 20% chance to split into 3 smaller enemies:
 
@@ -595,7 +609,7 @@ interface GameEntity extends Position {
 interface GameState {
   roomId: string                    // 6-char alphanumeric
   mode: 'solo' | 'coop'
-  status: 'waiting' | 'countdown' | 'playing' | 'paused' | 'gameover'
+  status: 'waiting' | 'countdown' | 'playing' | 'paused' | 'game_over'
   tick: number
   enhancedMode: boolean
 
@@ -650,16 +664,23 @@ const DEFAULT_CONFIG: GameConfig = {
 
 // ─── Layout Constants ─────────────────────────────────────────────────────────
 
+/** Layout constants for the 80×24 game grid */
 const LAYOUT = {
-  PLAYER_Y: 20,
-  BARRIER_Y: 16,
-  ALIEN_START_Y: 2,
+  PLAYER_Y: 20,              // Y position for player ships
+  PLAYER_MIN_X: 2,           // Left boundary for player movement
+  PLAYER_MAX_X: 77,          // Right boundary for player movement
+  BARRIER_Y: 16,             // Y position for barrier row
+  ALIEN_START_Y: 2,          // Initial Y position for top alien row
+  ALIEN_COL_SPACING: 5,      // Horizontal spacing between alien columns
+  GAME_OVER_Y: 18,           // If aliens reach this Y, game over
+  COLLISION_H: 2,            // Horizontal collision threshold
+  COLLISION_V: 1,            // Vertical collision threshold
 } as const
 
 // ─── Player ───────────────────────────────────────────────────────────────────
 
-type PlayerSlot = 1 | 2 | 3 | 4
-type PlayerColor = 'green' | 'cyan' | 'yellow' | 'magenta'
+export type PlayerSlot = 1 | 2 | 3 | 4
+export type PlayerColor = 'green' | 'cyan' | 'yellow' | 'magenta'
 
 const PLAYER_COLORS: Record<PlayerSlot, PlayerColor> = {
   1: 'green',
@@ -688,8 +709,8 @@ type EnhancedAlienType = 'commander' | 'dive_bomber'
 type AlienType = ClassicAlienType | EnhancedAlienType
 
 interface BaseAlien extends GameEntity {
-  row: number
-  col: number
+  row: number       // Formation row index (used for bottom-row shooter selection)
+  col: number       // Formation column index (used for bottom-row shooter selection)
   alive: boolean
   points: number
 }
@@ -727,7 +748,8 @@ interface Barrier {
 interface BarrierSegment {
   offsetX: number
   offsetY: number
-  health: number                    // 0-4 (0 = destroyed)
+  health: number                    // 4=full → 3 → 2 → 1 → 0=destroyed
+                                    // Visual: █(4) → ▓(3) → ▒(2) → ░(1) → gone(0)
 }
 
 // ─── Transform Enemies (Enhanced Mode) ────────────────────────────────────────
@@ -747,12 +769,13 @@ interface TransformEnemy extends GameEntity {
 // worker/src/game/scaling.ts
 
 export function getScaledConfig(playerCount: number, baseConfig: GameConfig) {
-  const scale = {
+  const scaleTable = {
     1: { speedMult: 1.0,  shootRate: 0.5,  cols: 11, rows: 5 },
     2: { speedMult: 1.25, shootRate: 0.75, cols: 11, rows: 5 },
     3: { speedMult: 1.5,  shootRate: 1.0,  cols: 13, rows: 5 },
     4: { speedMult: 1.75, shootRate: 1.25, cols: 15, rows: 6 },
-  }[playerCount] ?? scale[1]
+  }
+  const scale = scaleTable[playerCount as keyof typeof scaleTable] ?? scaleTable[1]
   
   return {
     alienMoveInterval: Math.floor(baseConfig.baseAlienMoveInterval / scale.speedMult),
@@ -776,12 +799,7 @@ export function getPlayerSpawnX(slot: number, screenWidth: number): number {
   return positions[Number(playerCount)]?.[slot - 1] ?? 40
 }
 
-export const PLAYER_COLORS: Record<number, Player['color']> = {
-  1: 'green',
-  2: 'cyan',
-  3: 'yellow',
-  4: 'magenta',
-}
+// PLAYER_COLORS defined in shared/types.ts - use that definition
 ```
 
 ### WebSocket Protocol
@@ -791,10 +809,10 @@ export const PLAYER_COLORS: Record<number, Player['color']> = {
 
 // Client → Server
 type ClientMessage =
-  | { type: 'join'; name: string }
+  | { type: 'join'; name: string; enhancedMode?: boolean }
   | { type: 'ready' }
   | { type: 'unready' }
-  | { type: 'start_solo' }            // Skip waiting, start alone
+  | { type: 'start_solo'; enhancedMode?: boolean }  // Skip waiting, start alone
   | { type: 'input'; action: 'left' | 'right' | 'shoot' }
   | { type: 'ping' }
 
@@ -829,7 +847,7 @@ type GameEvent =
   | 'alien_killed'
   | 'wave_complete'
   | 'game_over'
-  | 'ufo_spawn'
+  // 'ufo_spawn' - Phase 2 feature
 
 type ErrorCode = 'room_full' | 'game_in_progress' | 'invalid_action'
 ```
@@ -866,16 +884,18 @@ export class GameRoom implements DurableObject {
       lives: 3,
       score: 0,
       alienDirection: 1,
+      enhancedMode: false,
       config: {
         width: 80,
         height: 24,
         maxPlayers: 4,
-        tickRate: 60,
+        tickIntervalMs: 16,
         baseAlienMoveInterval: 30,
         baseBulletSpeed: 2,
         baseAlienShootRate: 0.5,
         playerCooldown: 10,
         respawnDelay: 180,
+        disconnectGracePeriod: 600,
       },
     }
   }
@@ -885,7 +905,11 @@ export class GameRoom implements DurableObject {
     
     if (url.pathname === '/ws') {
       if (this.game.status === 'playing' && !url.searchParams.has('rejoin')) {
-        return new Response('Game in progress', { status: 409 })
+        // Return HTTP error with code before WebSocket upgrade
+        return new Response(JSON.stringify({ code: 'game_in_progress', message: 'Game in progress' }), {
+          status: 409,
+          headers: { 'Content-Type': 'application/json' }
+        })
       }
       if (Object.keys(this.game.players).length >= 4) {
         return new Response('Room full', { status: 429 })
@@ -913,7 +937,7 @@ export class GameRoom implements DurableObject {
         // Mark as disconnected, don't remove immediately (grace period)
         this.game.players[playerId].disconnectedAt = this.game.tick
         this.sessions.delete(ws)
-        this.broadcast({ type: 'event', name: 'player_disconnected', data: { playerId } })
+        this.broadcast({ type: 'event', name: 'player_left', data: { playerId, reason: 'disconnect' } })
       }
     })
   }
@@ -927,7 +951,12 @@ export class GameRoom implements DurableObject {
           ws.send(JSON.stringify({ type: 'error', code: 'room_full', message: 'Room is full' }))
           return
         }
-        
+
+        // Set enhanced mode from first player's preference
+        if (Object.keys(this.game.players).length === 0 && msg.enhancedMode !== undefined) {
+          this.game.enhancedMode = msg.enhancedMode
+        }
+
         const slot = this.getNextSlot()
         const player: Player = {
           id: crypto.randomUUID(),
@@ -955,6 +984,9 @@ export class GameRoom implements DurableObject {
         if (Object.keys(this.game.players).length === 1 && playerId) {
           this.game.mode = 'solo'
           this.game.lives = 3
+          if (msg.enhancedMode !== undefined) {
+            this.game.enhancedMode = msg.enhancedMode
+          }
           this.startGame()
         }
         break
@@ -981,6 +1013,11 @@ export class GameRoom implements DurableObject {
         if (playerId && this.game.status === 'playing') {
           this.handleInput(playerId, msg.action)
         }
+        break
+      }
+
+      case 'ping': {
+        ws.send(JSON.stringify({ type: 'pong', serverTime: Date.now() }))
         break
       }
     }
@@ -1091,10 +1128,10 @@ export class GameRoom implements DurableObject {
     
     switch (action) {
       case 'left':
-        player.x = Math.max(2, player.x - 2)
+        player.x = Math.max(LAYOUT.PLAYER_MIN_X, player.x - 2)
         break
       case 'right':
-        player.x = Math.min(77, player.x + 2)
+        player.x = Math.min(LAYOUT.PLAYER_MAX_X, player.x + 2)
         break
       case 'shoot':
         if (this.game.tick - player.lastShot >= this.game.config.playerCooldown) {
@@ -1116,7 +1153,7 @@ export class GameRoom implements DurableObject {
     
     for (const bullet of this.game.bullets) {
       bullet.y += bullet.dy * this.game.config.baseBulletSpeed
-      if (bullet.y < 0 || bullet.y > 23) {
+      if (bullet.y < 0 || bullet.y >= this.game.config.height - 1) {
         toRemove.push(bullet.id)
       }
     }
@@ -1137,7 +1174,7 @@ export class GameRoom implements DurableObject {
       if (bullet.dy === -1) {
         for (const alien of this.game.aliens) {
           if (!alien.alive) continue
-          if (Math.abs(bullet.x - alien.x) < 2 && Math.abs(bullet.y - alien.y) < 1) {
+          if (Math.abs(bullet.x - alien.x) < LAYOUT.COLLISION_H && Math.abs(bullet.y - alien.y) < LAYOUT.COLLISION_V) {
             alien.alive = false
             aliensKilled.push(alien.id)
             bulletsToRemove.push(bullet.id)
@@ -1159,7 +1196,7 @@ export class GameRoom implements DurableObject {
       if (bullet.dy === 1) {
         for (const player of Object.values(this.game.players)) {
           if (!player.alive) continue
-          if (Math.abs(bullet.x - player.x) < 2 && Math.abs(bullet.y - LAYOUT.PLAYER_Y) < 1) {
+          if (Math.abs(bullet.x - player.x) < LAYOUT.COLLISION_H && Math.abs(bullet.y - LAYOUT.PLAYER_Y) < LAYOUT.COLLISION_V) {
             bulletsToRemove.push(bullet.id)
             this.handlePlayerDeath(player.id, delta)
             break
@@ -1172,8 +1209,8 @@ export class GameRoom implements DurableObject {
         for (const seg of barrier.segments) {
           if (seg.health <= 0) continue
           const segX = barrier.x + seg.offsetX
-          const segY = 16 + seg.offsetY
-          if (Math.abs(bullet.x - segX) < 1 && Math.abs(bullet.y - segY) < 1) {
+          const segY = LAYOUT.BARRIER_Y + seg.offsetY
+          if (Math.abs(bullet.x - segX) < LAYOUT.COLLISION_V && Math.abs(bullet.y - segY) < LAYOUT.COLLISION_V) {
             seg.health--
             bulletsToRemove.push(bullet.id)
             break
@@ -1200,7 +1237,7 @@ export class GameRoom implements DurableObject {
     for (const alien of this.game.aliens) {
       if (!alien.alive) continue
       alien.x += this.game.alienDirection * 2
-      if (alien.x <= 2 || alien.x >= 77) hitEdge = true
+      if (alien.x <= LAYOUT.PLAYER_MIN_X || alien.x >= LAYOUT.PLAYER_MAX_X) hitEdge = true
     }
     
     if (hitEdge) {
@@ -1269,7 +1306,7 @@ export class GameRoom implements DurableObject {
     }
     
     const lowestAlien = Math.max(...this.game.aliens.filter(a => a.alive).map(a => a.y))
-    if (lowestAlien >= 18) {
+    if (lowestAlien >= LAYOUT.GAME_OVER_Y) {
       this.endGame('defeat')
     }
   }
@@ -1289,7 +1326,7 @@ export class GameRoom implements DurableObject {
   }
 
   private endGame(result: 'victory' | 'defeat') {
-    this.game.status = 'gameover'
+    this.game.status = 'game_over'
     if (this.interval) {
       clearInterval(this.interval)
       this.interval = null
@@ -1302,7 +1339,8 @@ export class GameRoom implements DurableObject {
     let id = 0
     const types: Array<Alien['type']> = ['squid', 'crab', 'crab', 'octopus', 'octopus']
     const points = { squid: 30, crab: 20, octopus: 10 }
-    const startX = Math.floor((80 - cols * 5) / 2)
+    // Center the alien grid: (screenWidth - gridWidth) / 2
+    const startX = Math.floor((80 - cols * LAYOUT.ALIEN_COL_SPACING) / 2)
     
     for (let row = 0; row < rows; row++) {
       const type = types[row] || 'octopus'
@@ -1312,8 +1350,8 @@ export class GameRoom implements DurableObject {
           type,
           row,
           col,
-          x: startX + col * 5,
-          y: 2 + row * 2,
+          x: startX + col * LAYOUT.ALIEN_COL_SPACING,
+          y: LAYOUT.ALIEN_START_Y + row * 2,
           alive: true,
           points: points[type],
         })
@@ -1378,7 +1416,9 @@ export class GameRoom implements DurableObject {
   }
 
   async alarm() {
-    // Cleanup empty rooms - will be garbage collected
+    // Cleanup: This alarm fires 5 minutes after the last player leaves.
+    // Empty rooms are garbage collected by Durable Objects runtime.
+    // No explicit cleanup needed - the DO instance will be evicted.
   }
 }
 ```
@@ -1495,7 +1535,7 @@ export function App({ roomUrl, playerName }: AppProps) {
     case 'countdown':
     case 'playing':
       return <GameScreen state={state} currentPlayerId={playerId} />
-    case 'gameover':
+    case 'game_over':
       return <GameOverScreen state={state} currentPlayerId={playerId} />
     case 'paused':
       return (
@@ -1696,7 +1736,7 @@ function Barrier({ barrier }: { barrier: BarrierType }) {
   return (
     <>
       {barrier.segments.filter(s => s.health > 0).map((seg, i) => (
-        <text key={i} position="absolute" top={16 + seg.offsetY} left={barrier.x + seg.offsetX}
+        <text key={i} position="absolute" top={LAYOUT.BARRIER_Y + seg.offsetY} left={barrier.x + seg.offsetX}
           fg={seg.health > 3 ? 'green' : seg.health > 2 ? 'yellow' : seg.health > 1 ? 'red' : 'gray'}>
           {seg.health > 3 ? '█' : seg.health > 2 ? '▓' : seg.health > 1 ? '▒' : '░'}
         </text>
@@ -1761,7 +1801,7 @@ export const SPRITES = {
     octopus: '{ö}',
   },
   player: '▲█▲',
-  ufo: '◄══►',
+  // ufo: '◄══►',  // Phase 2 feature
 } as const
 
 export const COLORS = {
@@ -1861,10 +1901,8 @@ function applyDelta(state: GameState, delta: DeltaState): GameState {
 }
 
 function handleEvent(name: GameEvent, data: unknown) {
-  // Legacy beep - now replaced by audio system
-  if (name === 'alien_killed' || name === 'player_died') {
-    audio.playSfx(name)
-  }
+  // Delegate to audio system for all game events
+  audio.playSfx(name as SoundEffect)
 }
 ```
 
@@ -2080,7 +2118,7 @@ All sound effects are synthesized using Web Audio API for minimal bundle size.
 |-------|-------|-------|
 | **Player shoot** | Short blip, rising pitch | 50ms, square wave |
 | **Alien killed** | Descending tone + noise burst | 100ms |
-| **Player death** | Low rumble + explosion | 300ms |
+| **Player died** | Low rumble + explosion | 300ms |
 | **Wave complete** | Triumphant arpeggio | 500ms |
 | **Game over** | Descending minor chord | 1000ms |
 | **Commander hit** (Enhanced) | Metallic clang | 150ms |
@@ -2090,7 +2128,7 @@ All sound effects are synthesized using Web Audio API for minimal bundle size.
 | **Menu select** | Click/blip | 30ms |
 | **Menu navigate** | Soft tick | 20ms |
 | **Ready up** | Positive chime | 150ms |
-| **Countdown tick** | Beep | 100ms |
+| **Countdown start** | Beep | 100ms |
 | **Game start** | Fanfare | 800ms |
 
 ### Music
@@ -2101,6 +2139,9 @@ All sound effects are synthesized using Web Audio API for minimal bundle size.
 
 ```typescript
 // client/src/audio/music.ts
+
+/** A sequence of notes for chiptune channels */
+type NoteSequence = Array<{ note: string; duration: string }>
 
 interface ChiptuneTrack {
   name: string
@@ -2154,11 +2195,17 @@ MOD/tracker-inspired music with:
 ```typescript
 // client/src/audio/amigaMusic.ts
 
+/** Pattern row data for MOD-style tracker format */
+interface Pattern {
+  rows: number                // Typically 64 rows per pattern
+  channels: unknown[][]       // 4 channels of note/effect data
+}
+
 interface AmigaTrack {
   name: string
   bpm: number
   samples: {
-    [key: string]: Float32Array  // Pre-loaded 8-bit samples
+    [key: string]: Float32Array  // Pre-loaded 8-bit samples (loadSample returns Float32Array)
   }
   patterns: Pattern[]
   sequence: number[]  // Pattern order
@@ -2260,7 +2307,10 @@ export const audio = new AudioEngine()
 type SoundEffect =
   | 'shoot'
   | 'alien_killed'
-  | 'player_death'
+  | 'player_joined'
+  | 'player_left'
+  | 'player_died'
+  | 'player_respawned'
   | 'wave_complete'
   | 'game_over'
   | 'commander_hit'
@@ -2270,8 +2320,13 @@ type SoundEffect =
   | 'menu_select'
   | 'menu_navigate'
   | 'ready_up'
-  | 'countdown'
+  | 'countdown_start'
   | 'game_start'
+
+/** Synthesized sound effect interface */
+interface SynthSound {
+  play(ctx: AudioContext, dest: AudioNode): void
+}
 
 const SFX_LIBRARY: Record<SoundEffect, SynthSound> = {
   shoot: {
@@ -2369,11 +2424,26 @@ export function useGameAudio(state: GameState | null, enhanced: boolean) {
 // In useGameConnection.ts, handle events:
 function handleEvent(name: GameEvent, data: unknown) {
   switch (name) {
+    case 'player_joined':
+      audio.playSfx('player_joined')
+      break
+    case 'player_left':
+      audio.playSfx('player_left')
+      break
+    case 'player_ready':
+      audio.playSfx('ready_up')
+      break
+    case 'player_unready':
+      audio.playSfx('menu_select')
+      break
     case 'alien_killed':
       audio.playSfx('alien_killed')
       break
     case 'player_died':
-      audio.playSfx('player_death')
+      audio.playSfx('player_died')
+      break
+    case 'player_respawned':
+      audio.playSfx('player_respawned')
       break
     case 'wave_complete':
       audio.playSfx('wave_complete')
@@ -2382,7 +2452,7 @@ function handleEvent(name: GameEvent, data: unknown) {
       audio.playSfx('game_over')
       break
     case 'countdown_start':
-      audio.playSfx('countdown')
+      audio.playSfx('countdown_start')
       break
     case 'game_start':
       audio.playSfx('game_start')
