@@ -620,11 +620,11 @@ interface GameState {
   bullets: Bullet[]
   barriers: Barrier[]
 
-  // Enhanced mode only
-  commanders?: Commander[]
-  diveBombers?: DiveBomber[]
-  transforms?: TransformEnemy[]
-  capturedPlayerIds?: Record<string, string>  // playerId → commanderId
+  // Phase 2 Enhanced mode only (not implemented in initial release)
+  // commanders?: Commander[]
+  // diveBombers?: DiveBomber[]
+  // transforms?: TransformEnemy[]
+  // capturedPlayerIds?: Record<string, string>
 
   wave: number
   lives: number                     // 3 solo, 5 co-op
@@ -705,8 +705,9 @@ interface Player {
 // ─── Enemies ──────────────────────────────────────────────────────────────────
 
 type ClassicAlienType = 'squid' | 'crab' | 'octopus'
-type EnhancedAlienType = 'commander' | 'dive_bomber'
-type AlienType = ClassicAlienType | EnhancedAlienType
+
+// Phase 2 alien types - Commander and DiveBomber have separate interfaces
+// with additional state (health, diveState, etc.) so they extend BaseAlien directly
 
 interface BaseAlien extends GameEntity {
   row: number       // Formation row index (used for bottom-row shooter selection)
@@ -799,7 +800,6 @@ export function getPlayerSpawnX(slot: number, screenWidth: number): number {
   return positions[Number(playerCount)]?.[slot - 1] ?? 40
 }
 
-// PLAYER_COLORS defined in shared/types.ts - use that definition
 ```
 
 ### WebSocket Protocol
@@ -1210,7 +1210,8 @@ export class GameRoom implements DurableObject {
           if (seg.health <= 0) continue
           const segX = barrier.x + seg.offsetX
           const segY = LAYOUT.BARRIER_Y + seg.offsetY
-          if (Math.abs(bullet.x - segX) < LAYOUT.COLLISION_V && Math.abs(bullet.y - segY) < LAYOUT.COLLISION_V) {
+          // Barrier segments are 1x1, use tight collision radius
+          if (Math.abs(bullet.x - segX) <= 1 && Math.abs(bullet.y - segY) <= 1) {
             seg.health--
             bulletsToRemove.push(bullet.id)
             break
@@ -1340,7 +1341,7 @@ export class GameRoom implements DurableObject {
     const types: Array<Alien['type']> = ['squid', 'crab', 'crab', 'octopus', 'octopus']
     const points = { squid: 30, crab: 20, octopus: 10 }
     // Center the alien grid: (screenWidth - gridWidth) / 2
-    const startX = Math.floor((80 - cols * LAYOUT.ALIEN_COL_SPACING) / 2)
+    const startX = Math.floor((this.game.config.width - cols * LAYOUT.ALIEN_COL_SPACING) / 2)
     
     for (let row = 0; row < rows; row++) {
       const type = types[row] || 'octopus'
@@ -1363,24 +1364,27 @@ export class GameRoom implements DurableObject {
   private createBarriers(playerCount: number): Barrier[] {
     const barrierCount = Math.min(4, playerCount + 2)
     const barriers: Barrier[] = []
-    const spacing = 80 / (barrierCount + 1)
-    
+    const spacing = this.game.config.width / (barrierCount + 1)
+
+    // Barrier shape: 5-wide top row, 4-segment bottom row with center gap
+    // █████
+    // ██ ██
+    const BARRIER_SHAPE = [
+      [1, 1, 1, 1, 1],  // row 0: full
+      [1, 1, 0, 1, 1],  // row 1: gap in center
+    ]
+
     for (let i = 0; i < barrierCount; i++) {
       const x = Math.floor(spacing * (i + 1)) - 3
-      barriers.push({
-        x,
-        segments: [
-          { offsetX: 0, offsetY: 0, health: 4 },
-          { offsetX: 1, offsetY: 0, health: 4 },
-          { offsetX: 2, offsetY: 0, health: 4 },
-          { offsetX: 3, offsetY: 0, health: 4 },
-          { offsetX: 4, offsetY: 0, health: 4 },
-          { offsetX: 0, offsetY: 1, health: 4 },
-          { offsetX: 1, offsetY: 1, health: 4 },
-          { offsetX: 3, offsetY: 1, health: 4 },
-          { offsetX: 4, offsetY: 1, health: 4 },
-        ],
-      })
+      const segments: BarrierSegment[] = []
+      for (let row = 0; row < BARRIER_SHAPE.length; row++) {
+        for (let col = 0; col < BARRIER_SHAPE[row].length; col++) {
+          if (BARRIER_SHAPE[row][col]) {
+            segments.push({ offsetX: col, offsetY: row, health: 4 })
+          }
+        }
+      }
+      barriers.push({ x, segments })
     }
     return barriers
   }
@@ -1900,10 +1904,7 @@ function applyDelta(state: GameState, delta: DeltaState): GameState {
   return next
 }
 
-function handleEvent(name: GameEvent, data: unknown) {
-  // Delegate to audio system for all game events
-  audio.playSfx(name as SoundEffect)
-}
+// handleEvent defined in useGameAudio.ts - see "Integration with Game Events" section
 ```
 
 ---
@@ -2346,7 +2347,7 @@ const SFX_LIBRARY: Record<SoundEffect, SynthSound> = {
 
   alien_killed: {
     play(ctx: AudioContext, dest: AudioNode) {
-      // Descending tone
+      // Descending tone + noise burst
       const osc = ctx.createOscillator()
       const gain = ctx.createGain()
       osc.type = 'square'
@@ -2358,7 +2359,6 @@ const SFX_LIBRARY: Record<SoundEffect, SynthSound> = {
       osc.start()
       osc.stop(ctx.currentTime + 0.1)
 
-      // Noise burst
       const noise = createNoiseBuffer(ctx, 0.05)
       const noiseGain = ctx.createGain()
       noiseGain.gain.setValueAtTime(0.2, ctx.currentTime)
@@ -2368,7 +2368,92 @@ const SFX_LIBRARY: Record<SoundEffect, SynthSound> = {
     },
   },
 
-  // ... other effects
+  player_joined: { play: (ctx, dest) => playTone(ctx, dest, 523, 0.1, 'sine') },      // C5 welcome chime
+  player_left: { play: (ctx, dest) => playTone(ctx, dest, 330, 0.15, 'triangle') },   // E4 departure tone
+  player_died: { play: (ctx, dest) => playExplosion(ctx, dest, 0.3) },                // Low rumble + explosion
+  player_respawned: { play: (ctx, dest) => playTone(ctx, dest, 880, 0.1, 'sine') },   // A5 respawn chime
+  wave_complete: { play: (ctx, dest) => playArpeggio(ctx, dest, [523, 659, 784], 0.5) }, // C-E-G triumphant
+  game_over: { play: (ctx, dest) => playArpeggio(ctx, dest, [392, 330, 262], 1.0) },  // G-E-C descending minor
+  countdown_start: { play: (ctx, dest) => playTone(ctx, dest, 440, 0.1, 'square') },  // A4 beep
+  game_start: { play: (ctx, dest) => playArpeggio(ctx, dest, [262, 330, 392, 523], 0.8) }, // C-E-G-C fanfare
+  ready_up: { play: (ctx, dest) => playTone(ctx, dest, 660, 0.15, 'sine') },          // E5 positive chime
+  menu_select: { play: (ctx, dest) => playTone(ctx, dest, 440, 0.03, 'square') },     // Quick click
+  menu_navigate: { play: (ctx, dest) => playTone(ctx, dest, 220, 0.02, 'square') },   // Soft tick
+
+  // Phase 2 Enhanced mode sounds
+  commander_hit: { play: (ctx, dest) => playTone(ctx, dest, 150, 0.15, 'sawtooth') }, // Metallic clang
+  tractor_beam: { play: (ctx, dest) => playWarble(ctx, dest, 300, 2.0) },             // Sustained warble
+  transform_spawn: { play: (ctx, dest) => playSparkle(ctx, dest, 0.2) },              // Splitting effect
+  capture: { play: (ctx, dest) => playSiren(ctx, dest, 0.4) },                        // Alarming siren
+}
+
+// Helper functions for sound synthesis
+function playTone(ctx: AudioContext, dest: AudioNode, freq: number, dur: number, type: OscillatorType) {
+  const osc = ctx.createOscillator()
+  const gain = ctx.createGain()
+  osc.type = type
+  osc.frequency.value = freq
+  gain.gain.setValueAtTime(0.3, ctx.currentTime)
+  gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + dur)
+  osc.connect(gain).connect(dest)
+  osc.start()
+  osc.stop(ctx.currentTime + dur)
+}
+
+function playArpeggio(ctx: AudioContext, dest: AudioNode, notes: number[], dur: number) {
+  const noteLen = dur / notes.length
+  notes.forEach((freq, i) => {
+    setTimeout(() => playTone(ctx, dest, freq, noteLen, 'square'), i * noteLen * 1000)
+  })
+}
+
+function playExplosion(ctx: AudioContext, dest: AudioNode, dur: number) {
+  const noise = createNoiseBuffer(ctx, dur)
+  const filter = ctx.createBiquadFilter()
+  filter.type = 'lowpass'
+  filter.frequency.setValueAtTime(400, ctx.currentTime)
+  filter.frequency.exponentialRampToValueAtTime(50, ctx.currentTime + dur)
+  const gain = ctx.createGain()
+  gain.gain.setValueAtTime(0.5, ctx.currentTime)
+  gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + dur)
+  noise.connect(filter).connect(gain).connect(dest)
+  noise.start()
+}
+
+function playWarble(ctx: AudioContext, dest: AudioNode, freq: number, dur: number) {
+  const osc = ctx.createOscillator()
+  const lfo = ctx.createOscillator()
+  const lfoGain = ctx.createGain()
+  lfo.frequency.value = 8
+  lfoGain.gain.value = 50
+  lfo.connect(lfoGain).connect(osc.frequency)
+  osc.frequency.value = freq
+  osc.type = 'sine'
+  const gain = ctx.createGain()
+  gain.gain.value = 0.2
+  osc.connect(gain).connect(dest)
+  lfo.start()
+  osc.start()
+  osc.stop(ctx.currentTime + dur)
+}
+
+function playSparkle(ctx: AudioContext, dest: AudioNode, dur: number) {
+  for (let i = 0; i < 5; i++) {
+    setTimeout(() => playTone(ctx, dest, 1000 + Math.random() * 2000, 0.05, 'sine'), i * 40)
+  }
+}
+
+function playSiren(ctx: AudioContext, dest: AudioNode, dur: number) {
+  const osc = ctx.createOscillator()
+  osc.type = 'sawtooth'
+  osc.frequency.setValueAtTime(400, ctx.currentTime)
+  osc.frequency.linearRampToValueAtTime(800, ctx.currentTime + dur / 2)
+  osc.frequency.linearRampToValueAtTime(400, ctx.currentTime + dur)
+  const gain = ctx.createGain()
+  gain.gain.value = 0.3
+  osc.connect(gain).connect(dest)
+  osc.start()
+  osc.stop(ctx.currentTime + dur)
 }
 
 function createNoiseBuffer(ctx: AudioContext, duration: number): AudioBufferSourceNode {
@@ -2390,7 +2475,8 @@ function createNoiseBuffer(ctx: AudioContext, duration: number): AudioBufferSour
 // client/src/hooks/useGameAudio.ts
 import { useEffect } from 'react'
 import { audio } from '../audio/engine'
-import type { GameState, GameEvent } from '../../../shared/types'
+import type { GameState } from '../../../shared/types'
+import type { GameEvent } from '../../../shared/protocol'
 
 export function useGameAudio(state: GameState | null, enhanced: boolean) {
   // Initialize audio on first interaction
@@ -2421,42 +2507,26 @@ export function useGameAudio(state: GameState | null, enhanced: boolean) {
   }, [state?.aliens])
 }
 
+// GameEvent → SoundEffect mapping (some events map to different sound names)
+const EVENT_SOUND_MAP: Record<GameEvent, SoundEffect> = {
+  player_joined: 'player_joined',
+  player_left: 'player_left',
+  player_ready: 'ready_up',        // UI feedback sound
+  player_unready: 'menu_select',   // UI feedback sound
+  player_died: 'player_died',
+  player_respawned: 'player_respawned',
+  countdown_start: 'countdown_start',
+  game_start: 'game_start',
+  alien_killed: 'alien_killed',
+  wave_complete: 'wave_complete',
+  game_over: 'game_over',
+}
+
 // In useGameConnection.ts, handle events:
 function handleEvent(name: GameEvent, data: unknown) {
-  switch (name) {
-    case 'player_joined':
-      audio.playSfx('player_joined')
-      break
-    case 'player_left':
-      audio.playSfx('player_left')
-      break
-    case 'player_ready':
-      audio.playSfx('ready_up')
-      break
-    case 'player_unready':
-      audio.playSfx('menu_select')
-      break
-    case 'alien_killed':
-      audio.playSfx('alien_killed')
-      break
-    case 'player_died':
-      audio.playSfx('player_died')
-      break
-    case 'player_respawned':
-      audio.playSfx('player_respawned')
-      break
-    case 'wave_complete':
-      audio.playSfx('wave_complete')
-      break
-    case 'game_over':
-      audio.playSfx('game_over')
-      break
-    case 'countdown_start':
-      audio.playSfx('countdown_start')
-      break
-    case 'game_start':
-      audio.playSfx('game_start')
-      break
+  const sound = EVENT_SOUND_MAP[name]
+  if (sound) {
+    audio.playSfx(sound)
   }
 }
 ```
@@ -2480,7 +2550,7 @@ Emit **one context-rich event per request per service** rather than scattering m
 ```typescript
 // worker/src/logging.ts
 
-interface GameEvent {
+interface LogEvent {
   // Environment (every event)
   service: 'vaders-worker'
   version: string
@@ -2529,10 +2599,10 @@ Include fields with many unique values to enable specific queries:
 ```typescript
 // worker/src/logger.ts
 
-import { GameEvent } from './logging'
+import { LogEvent } from './logging'
 
 class Logger {
-  private baseContext: Partial<GameEvent>
+  private baseContext: Partial<LogEvent>
 
   constructor() {
     this.baseContext = {
@@ -2543,7 +2613,7 @@ class Logger {
     }
   }
 
-  log(event: Partial<GameEvent>) {
+  log(event: Partial<LogEvent>) {
     console.log(JSON.stringify({
       ...this.baseContext,
       timestamp: new Date().toISOString(),
@@ -2573,3 +2643,483 @@ export const logger = new Logger()
 - Unstructured string messages
 - Missing deployment metadata
 - Technical details without business context (e.g., "WebSocket closed" without room/player info)
+
+---
+
+## Testing
+
+### Test Strategy
+
+Testing is organized into three layers:
+
+| Layer | Scope | Tools | Speed |
+|-------|-------|-------|-------|
+| **Unit** | Pure functions, game logic | Bun test | <1s |
+| **Integration** | WebSocket protocol, state sync | Bun test + mock WS | <5s |
+| **E2E** | Full client-server flow | Playwright + wrangler dev | <30s |
+
+### Unit Tests
+
+```typescript
+// worker/src/game/__tests__/scaling.test.ts
+import { describe, expect, test } from 'bun:test'
+import { getScaledConfig, getPlayerSpawnX } from '../scaling'
+
+describe('getScaledConfig', () => {
+  const baseConfig = {
+    baseAlienMoveInterval: 30,
+    baseBulletSpeed: 2,
+    baseAlienShootRate: 0.5,
+  }
+
+  test('solo player gets base difficulty', () => {
+    const config = getScaledConfig(1, baseConfig)
+    expect(config.lives).toBe(3)
+    expect(config.alienCols).toBe(11)
+    expect(config.alienRows).toBe(5)
+    expect(config.alienMoveInterval).toBe(30)
+  })
+
+  test('4 players get max difficulty', () => {
+    const config = getScaledConfig(4, baseConfig)
+    expect(config.lives).toBe(5)
+    expect(config.alienCols).toBe(15)
+    expect(config.alienRows).toBe(6)
+    expect(config.alienMoveInterval).toBe(17)  // 30 / 1.75 ≈ 17
+  })
+
+  test('invalid player count falls back to solo', () => {
+    const config = getScaledConfig(0, baseConfig)
+    expect(config.lives).toBe(3)
+  })
+})
+
+describe('getPlayerSpawnX', () => {
+  test('solo player spawns at center', () => {
+    expect(getPlayerSpawnX(1, 80)).toBe(40)
+  })
+
+  test('2 players spawn at quarter positions', () => {
+    expect(getPlayerSpawnX(1, 80)).toBe(25)
+    expect(getPlayerSpawnX(2, 80)).toBe(55)
+  })
+})
+```
+
+```typescript
+// worker/src/game/__tests__/collision.test.ts
+import { describe, expect, test } from 'bun:test'
+import { checkBulletAlienCollision, checkBulletPlayerCollision } from '../collision'
+
+describe('collision detection', () => {
+  test('bullet hits alien within COLLISION_H threshold', () => {
+    const bullet = { x: 10, y: 5, dy: -1 }
+    const alien = { x: 11, y: 5, alive: true }
+    expect(checkBulletAlienCollision(bullet, alien)).toBe(true)
+  })
+
+  test('bullet misses alien outside threshold', () => {
+    const bullet = { x: 10, y: 5, dy: -1 }
+    const alien = { x: 15, y: 5, alive: true }
+    expect(checkBulletAlienCollision(bullet, alien)).toBe(false)
+  })
+
+  test('bullet ignores dead aliens', () => {
+    const bullet = { x: 10, y: 5, dy: -1 }
+    const alien = { x: 10, y: 5, alive: false }
+    expect(checkBulletAlienCollision(bullet, alien)).toBe(false)
+  })
+})
+```
+
+```typescript
+// worker/src/game/__tests__/barriers.test.ts
+import { describe, expect, test } from 'bun:test'
+import { createBarriers } from '../barriers'
+
+describe('createBarriers', () => {
+  test('solo player gets 3 barriers', () => {
+    const barriers = createBarriers(1, 80)
+    expect(barriers.length).toBe(3)
+  })
+
+  test('4 players get 4 barriers (max)', () => {
+    const barriers = createBarriers(4, 80)
+    expect(barriers.length).toBe(4)
+  })
+
+  test('each barrier has 9 segments', () => {
+    const barriers = createBarriers(1, 80)
+    barriers.forEach(b => expect(b.segments.length).toBe(9))
+  })
+
+  test('barriers are evenly spaced', () => {
+    const barriers = createBarriers(4, 80)
+    const spacing = barriers[1].x - barriers[0].x
+    expect(barriers[2].x - barriers[1].x).toBe(spacing)
+    expect(barriers[3].x - barriers[2].x).toBe(spacing)
+  })
+})
+```
+
+### Integration Tests
+
+```typescript
+// worker/src/__tests__/gameroom.test.ts
+import { describe, expect, test, beforeEach, afterEach } from 'bun:test'
+import { GameRoom } from '../GameRoom'
+
+describe('GameRoom WebSocket protocol', () => {
+  let room: GameRoom
+  let mockWs: MockWebSocket
+
+  beforeEach(() => {
+    room = new GameRoom(mockState, mockEnv)
+    mockWs = new MockWebSocket()
+  })
+
+  test('join message adds player and returns sync', async () => {
+    await room.handleSession(mockWs)
+    mockWs.receive({ type: 'join', name: 'Alice' })
+
+    const response = mockWs.lastSent()
+    expect(response.type).toBe('sync')
+    expect(response.playerId).toBeDefined()
+    expect(response.state.players[response.playerId].name).toBe('Alice')
+  })
+
+  test('room full returns error after 4 players', async () => {
+    // Add 4 players
+    for (let i = 0; i < 4; i++) {
+      const ws = new MockWebSocket()
+      await room.handleSession(ws)
+      ws.receive({ type: 'join', name: `Player${i}` })
+    }
+
+    // 5th player should get error
+    const ws5 = new MockWebSocket()
+    await room.handleSession(ws5)
+    ws5.receive({ type: 'join', name: 'Player5' })
+
+    expect(ws5.lastSent()).toEqual({
+      type: 'error',
+      code: 'room_full',
+      message: 'Room is full'
+    })
+  })
+
+  test('ready state triggers countdown when all ready', async () => {
+    // Add 2 players
+    const ws1 = new MockWebSocket()
+    const ws2 = new MockWebSocket()
+    await room.handleSession(ws1)
+    await room.handleSession(ws2)
+    ws1.receive({ type: 'join', name: 'Alice' })
+    ws2.receive({ type: 'join', name: 'Bob' })
+
+    // Both ready
+    ws1.receive({ type: 'ready' })
+    ws2.receive({ type: 'ready' })
+
+    // Should broadcast countdown_start
+    expect(ws1.messages.some(m => m.name === 'countdown_start')).toBe(true)
+  })
+
+  test('ping returns pong with server time', async () => {
+    await room.handleSession(mockWs)
+    mockWs.receive({ type: 'join', name: 'Alice' })
+    mockWs.receive({ type: 'ping' })
+
+    const pong = mockWs.lastSent()
+    expect(pong.type).toBe('pong')
+    expect(pong.serverTime).toBeGreaterThan(0)
+  })
+})
+
+// Mock WebSocket helper
+class MockWebSocket {
+  messages: any[] = []
+  accept() {}
+  send(data: string) { this.messages.push(JSON.parse(data)) }
+  receive(msg: any) { this.onmessage?.({ data: JSON.stringify(msg) }) }
+  lastSent() { return this.messages[this.messages.length - 1] }
+  onmessage?: (event: { data: string }) => void
+  onclose?: () => void
+}
+```
+
+### State Synchronization Tests
+
+```typescript
+// client/src/__tests__/applyDelta.test.ts
+import { describe, expect, test } from 'bun:test'
+import { applyDelta } from '../hooks/useGameConnection'
+
+describe('applyDelta', () => {
+  const baseState = {
+    players: { p1: { x: 40, kills: 0, alive: true } },
+    bullets: [{ id: 1, x: 10, y: 5 }],
+    aliens: [{ id: 1, alive: true }, { id: 2, alive: true }],
+    score: 0,
+    lives: 3,
+  }
+
+  test('updates player position', () => {
+    const delta = { players: { p1: { x: 42 } } }
+    const next = applyDelta(baseState, delta)
+    expect(next.players.p1.x).toBe(42)
+    expect(next.players.p1.kills).toBe(0)  // unchanged
+  })
+
+  test('removes killed aliens', () => {
+    const delta = { aliens: { killed: [1] } }
+    const next = applyDelta(baseState, delta)
+    expect(next.aliens[0].alive).toBe(false)
+    expect(next.aliens[1].alive).toBe(true)
+  })
+
+  test('adds and removes bullets', () => {
+    const delta = {
+      bullets: {
+        add: [{ id: 2, x: 20, y: 10 }],
+        remove: [1]
+      }
+    }
+    const next = applyDelta(baseState, delta)
+    expect(next.bullets.length).toBe(1)
+    expect(next.bullets[0].id).toBe(2)
+  })
+
+  test('updates score and lives', () => {
+    const delta = { score: 100, lives: 2 }
+    const next = applyDelta(baseState, delta)
+    expect(next.score).toBe(100)
+    expect(next.lives).toBe(2)
+  })
+})
+```
+
+### E2E Tests
+
+```typescript
+// e2e/game.spec.ts
+import { test, expect } from '@playwright/test'
+import { spawn } from 'child_process'
+
+test.describe('Vaders E2E', () => {
+  let workerProcess: ReturnType<typeof spawn>
+
+  test.beforeAll(async () => {
+    // Start local worker
+    workerProcess = spawn('bunx', ['wrangler', 'dev'], { cwd: './worker' })
+    await new Promise(r => setTimeout(r, 3000))  // Wait for startup
+  })
+
+  test.afterAll(() => {
+    workerProcess?.kill()
+  })
+
+  test('solo game flow', async ({ page }) => {
+    // Start client
+    const client = spawn('bun', ['run', 'dev'], { cwd: './client' })
+
+    // Verify connection
+    await expect(page.locator('text=Connecting')).toBeHidden({ timeout: 5000 })
+
+    // Start solo game
+    await page.keyboard.press('s')
+
+    // Verify game started
+    await expect(page.locator('text=WAVE:1')).toBeVisible()
+
+    // Shoot and verify score
+    await page.keyboard.press('Space')
+    await expect(page.locator('text=SCORE:00030')).toBeVisible({ timeout: 2000 })
+
+    client.kill()
+  })
+
+  test('multiplayer lobby ready flow', async ({ browser }) => {
+    const player1 = await browser.newPage()
+    const player2 = await browser.newPage()
+
+    // Both join same room
+    // ... room joining logic
+
+    // Player 1 readies
+    await player1.keyboard.press('Enter')
+    await expect(player1.locator('text=✓ READY')).toBeVisible()
+
+    // Player 2 readies - should trigger countdown
+    await player2.keyboard.press('Enter')
+    await expect(player1.locator('text=GET READY')).toBeVisible()
+    await expect(player2.locator('text=GET READY')).toBeVisible()
+  })
+})
+```
+
+### Test Commands
+
+```bash
+# Run all tests
+bun test
+
+# Run specific test file
+bun test worker/src/game/__tests__/scaling.test.ts
+
+# Run with coverage
+bun test --coverage
+
+# Watch mode
+bun test --watch
+
+# E2E tests (requires wrangler dev running)
+bunx playwright test
+```
+
+### Test Coverage Requirements
+
+| Module | Minimum Coverage |
+|--------|------------------|
+| `game/scaling.ts` | 100% |
+| `game/collision.ts` | 100% |
+| `game/barriers.ts` | 90% |
+| `GameRoom.ts` | 80% |
+| `hooks/useGameConnection.ts` | 80% |
+| `audio/*` | 50% (hard to test audio) |
+
+### CI Pipeline
+
+```yaml
+# .github/workflows/test.yml
+name: Test
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v1
+
+      - name: Install dependencies
+        run: |
+          cd worker && bun install
+          cd ../client && bun install
+
+      - name: Run unit tests
+        run: bun test
+
+      - name: Run integration tests
+        run: bun test --filter integration
+
+      - name: Start worker for E2E
+        run: cd worker && bunx wrangler dev &
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_TOKEN }}
+
+      - name: Run E2E tests
+        run: bunx playwright test
+```
+
+### Test Data Factories
+
+```typescript
+// test/factories.ts
+
+export function createPlayer(overrides: Partial<Player> = {}): Player {
+  return {
+    id: crypto.randomUUID(),
+    name: 'TestPlayer',
+    x: 40,
+    slot: 1,
+    color: 'green',
+    lastShot: 0,
+    alive: true,
+    respawnAt: null,
+    kills: 0,
+    disconnectedAt: null,
+    ...overrides,
+  }
+}
+
+export function createAlien(overrides: Partial<Alien> = {}): Alien {
+  return {
+    id: 0,
+    type: 'octopus',
+    row: 0,
+    col: 0,
+    x: 10,
+    y: 2,
+    alive: true,
+    points: 10,
+    ...overrides,
+  }
+}
+
+export function createGameState(overrides: Partial<GameState> = {}): GameState {
+  return {
+    roomId: 'TEST01',
+    mode: 'solo',
+    status: 'playing',
+    tick: 0,
+    enhancedMode: false,
+    players: {},
+    readyPlayerIds: [],
+    aliens: [],
+    bullets: [],
+    barriers: [],
+    wave: 1,
+    lives: 3,
+    score: 0,
+    alienDirection: 1,
+    config: DEFAULT_CONFIG,
+    ...overrides,
+  }
+}
+```
+
+### Property-Based Testing
+
+```typescript
+// worker/src/game/__tests__/properties.test.ts
+import { describe, test } from 'bun:test'
+import fc from 'fast-check'
+import { getScaledConfig } from '../scaling'
+
+describe('scaling properties', () => {
+  test('more players = faster aliens', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 1, max: 4 }),
+        fc.integer({ min: 1, max: 4 }),
+        (p1, p2) => {
+          if (p1 < p2) {
+            const c1 = getScaledConfig(p1, DEFAULT_CONFIG)
+            const c2 = getScaledConfig(p2, DEFAULT_CONFIG)
+            return c1.alienMoveInterval >= c2.alienMoveInterval
+          }
+          return true
+        }
+      )
+    )
+  })
+
+  test('alien grid size increases with players', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 1, max: 4 }),
+        fc.integer({ min: 1, max: 4 }),
+        (p1, p2) => {
+          if (p1 < p2) {
+            const c1 = getScaledConfig(p1, DEFAULT_CONFIG)
+            const c2 = getScaledConfig(p2, DEFAULT_CONFIG)
+            return c1.alienCols * c1.alienRows <= c2.alienCols * c2.alienRows
+          }
+          return true
+        }
+      )
+    )
+  })
+})
+```
