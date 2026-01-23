@@ -18,19 +18,19 @@ The project has three main parts:
 
 ```bash
 # Install globally
-npm install -g space-invaders-mp
+bun add -g vaders
 
 # Start a new game (creates room, shows room code)
-space-invaders
+vaders
 
 # Join existing room
-space-invaders --room ABC123
+vaders --room ABC123
 
 # Auto-matchmaking
-space-invaders --matchmake
+vaders --matchmake
 
 # With player name
-space-invaders --name "Alice" --room ABC123
+vaders --name "Alice" --room ABC123
 ```
 
 ## Development Commands
@@ -43,9 +43,9 @@ bun run dev                    # Run client (connects to ws://localhost:8787/ws)
 
 # Worker
 cd worker
-npm install
-npx wrangler dev               # Local development
-npx wrangler deploy            # Deploy to Cloudflare
+bun install
+bunx wrangler dev              # Local development
+bunx wrangler deploy           # Deploy to Cloudflare
 ```
 
 ## Key Technical Details

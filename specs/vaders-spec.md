@@ -14,30 +14,26 @@ TUI Space Invaders clone supporting solo play or 2-4 player co-op, synchronized 
 ### Installation
 
 ```bash
-# Install globally via npm
-npm install -g space-invaders-mp
-
-# Or via bun
-bun add -g space-invaders-mp
+bun add -g vaders
 ```
 
 ### Starting a Game
 
 ```bash
 # Create a new room (generates shareable room code)
-space-invaders
+vaders
 
 # Join an existing room
-space-invaders --room ABC123
+vaders --room ABC123
 
 # Auto-matchmaking (join any open room or create one)
-space-invaders --matchmake
+vaders --matchmake
 
 # Specify your player name
-space-invaders --name "Alice"
+vaders --name "Alice"
 
 # Full example: join room with custom name
-space-invaders --room ABC123 --name "Alice"
+vaders --room ABC123 --name "Alice"
 ```
 
 ### Controls
@@ -53,9 +49,9 @@ space-invaders --room ABC123 --name "Alice"
 
 ### Multiplayer Flow
 
-1. First player runs `space-invaders` → gets room code (e.g., `ABC123`)
+1. First player runs `vaders` → gets room code (e.g., `ABC123`)
 2. Share room code with friends
-3. Friends run `space-invaders --room ABC123`
+3. Friends run `vaders --room ABC123`
 4. All players press `ENTER` to ready up
 5. Game starts after 3-second countdown
 
@@ -821,7 +817,7 @@ export class GameRoom implements DurableObject {
 
 ```json
 {
-  "name": "space-invaders-client",
+  "name": "vaders-client",
   "type": "module",
   "scripts": {
     "dev": "bun run src/index.tsx",
@@ -1298,7 +1294,7 @@ function handleEvent(name: string, data: unknown) {
 ## File Structure
 
 ```
-space-invaders-mp/
+vaders/
 ├── worker/
 │   ├── src/
 │   │   ├── index.ts              # Worker entry + routing
@@ -1339,7 +1335,7 @@ space-invaders-mp/
 
 ```toml
 # worker/wrangler.toml
-name = "space-invaders-mp"
+name = "vaders"
 main = "src/index.ts"
 compatibility_date = "2024-01-15"
 
@@ -1497,7 +1493,7 @@ Emit **one context-rich event per request per service** rather than scattering m
 
 interface GameEvent {
   // Environment (every event)
-  service: 'space-invaders-worker'
+  service: 'vaders-worker'
   version: string
   commitHash: string
   region: string
@@ -1551,7 +1547,7 @@ class Logger {
 
   constructor() {
     this.baseContext = {
-      service: 'space-invaders-worker',
+      service: 'vaders-worker',
       version: process.env.VERSION,
       commitHash: process.env.COMMIT_HASH,
       region: process.env.CF_REGION,
