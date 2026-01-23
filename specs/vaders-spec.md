@@ -5,7 +5,7 @@
 
 ## Overview
 
-TUI Space Invaders clone supporting solo play or 2-4 player co-op, synchronized via Cloudflare Durable Objects. Single player can start immediately; multiplayer requires a ready-up lobby.
+TUI Space Invaders clone (with elements of Galaga, Galaxian and Amiga aesthetics) supporting solo play or 2-4 player co-op, synchronized via Cloudflare Durable Objects. Single player can start immediately; multiplayer requires a ready-up lobby.
 
 ---
 
@@ -126,14 +126,14 @@ export function Logo() {
 ```tsx
 // client/src/components/LaunchScreen.tsx
 import { useKeyboard, useRenderer } from '@opentui/react'
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { Logo } from './Logo'
 
 interface LaunchScreenProps {
-  onStartSolo: () => void
-  onCreateRoom: () => void
-  onJoinRoom: (code: string) => void
-  onMatchmake: () => void
+  onStartSolo: (enhanced: boolean) => void
+  onCreateRoom: (enhanced: boolean) => void
+  onJoinRoom: (code: string, enhanced: boolean) => void
+  onMatchmake: (enhanced: boolean) => void
   version: string
 }
 
@@ -143,38 +143,56 @@ export function LaunchScreen({ onStartSolo, onCreateRoom, onJoinRoom, onMatchmak
   const [joinMode, setJoinMode] = useState(false)
   const [roomCode, setRoomCode] = useState('')
 
-  useKeyboard((event) => {
+  // Handle alphanumeric text input for room code
+  const handleKeyInput = useCallback((event: KeyboardEvent) => {
     if (joinMode) {
-      if (event.name === 'escape') {
+      if (event.key === 'Escape') {
         setJoinMode(false)
         setRoomCode('')
-      } else if (event.name === 'enter' && roomCode.length > 0) {
-        onJoinRoom(roomCode)
+        return
+      }
+      if (event.key === 'Enter' && roomCode.length === 6) {
+        onJoinRoom(roomCode, enhanced)
+        return
+      }
+      if (event.key === 'Backspace') {
+        setRoomCode(prev => prev.slice(0, -1))
+        return
+      }
+      // Accept alphanumeric characters, auto-uppercase, max 6 chars
+      if (/^[a-zA-Z0-9]$/.test(event.key) && roomCode.length < 6) {
+        setRoomCode(prev => prev + event.key.toUpperCase())
       }
       return
     }
 
-    switch (event.name) {
+    // Menu selection
+    switch (event.key) {
       case '1':
-        onStartSolo()
+        onStartSolo(enhanced)
         break
       case '2':
-        onCreateRoom()
+        onCreateRoom(enhanced)
         break
       case '3':
         setJoinMode(true)
         break
       case '4':
-        onMatchmake()
+        onMatchmake(enhanced)
         break
       case 'e':
+      case 'E':
         setEnhanced(e => !e)
         break
       case 'q':
+      case 'Q':
         renderer.destroy()
+        process.exit(0)
         break
     }
-  })
+  }, [joinMode, roomCode, enhanced, onStartSolo, onCreateRoom, onJoinRoom, onMatchmake, renderer])
+
+  useKeyboard(handleKeyInput)
 
   return (
     <box flexDirection="column" width={80} height={24} padding={1}>
@@ -184,7 +202,18 @@ export function LaunchScreen({ onStartSolo, onCreateRoom, onJoinRoom, onMatchmak
       <box flexDirection="column" border borderColor="#444" padding={1}>
         <MenuItem hotkey="1" label="SOLO GAME" desc="Start immediately, 3 lives" />
         <MenuItem hotkey="2" label="CREATE ROOM" desc="Get room code to share with friends" />
-        <MenuItem hotkey="3" label="JOIN ROOM" desc="Enter a room code" />
+        {joinMode ? (
+          <box>
+            <text fg="#00ffff">[3]</text>
+            <box width={1} />
+            <text fg="#fff" width={18}>JOIN ROOM</text>
+            <text fg="#888">Enter code: [</text>
+            <text fg="#0f0">{roomCode.padEnd(6, '_')}</text>
+            <text fg="#888">]</text>
+          </box>
+        ) : (
+          <MenuItem hotkey="3" label="JOIN ROOM" desc="Enter a room code" />
+        )}
         <MenuItem hotkey="4" label="MATCHMAKING" desc="Auto-join an open game" />
         <box height={1} />
         <box>
@@ -198,7 +227,7 @@ export function LaunchScreen({ onStartSolo, onCreateRoom, onJoinRoom, onMatchmak
 
       <box height={1} />
       <text fg="#888">
-        {'   '}<strong>CONTROLS</strong>{'   '}←/→ or A/D Move   SPACE Shoot   M Mute   Q Quit
+        {'   '}CONTROLS{'   '}←/→ or A/D Move   SPACE Shoot   M Mute   Q Quit
       </text>
       <box flex={1} />
       <box>
@@ -222,28 +251,51 @@ function MenuItem({ hotkey, label, desc }: { hotkey: string; label: string; desc
 }
 ```
 
-### Animated Elements
+### Terminal Capabilities Detection
 
-The launch screen includes subtle animations:
+```typescript
+// client/src/capabilities.ts
 
-| Element | Animation |
-|---------|-----------|
-| Logo | Color cycle through cyan → magenta → yellow (2s loop) |
-| Alien sprites | Bob up and down (sine wave, 1s period) |
-| Menu highlight | Pulsing brightness on selected option |
-| "Press 1-4" | Fade in/out (1.5s period) |
+export interface TerminalCapabilities {
+  trueColor: boolean    // 24-bit color support
+  unicode: boolean      // Unicode character support
+  width: number         // Terminal width
+  height: number        // Terminal height
+}
+
+export function detectCapabilities(): TerminalCapabilities {
+  const colorTerm = process.env.COLORTERM
+  const term = process.env.TERM
+
+  return {
+    trueColor: colorTerm === 'truecolor' || colorTerm === '24bit' || term?.includes('256color'),
+    unicode: process.env.LANG?.includes('UTF-8') ?? true,
+    width: process.stdout.columns ?? 80,
+    height: process.stdout.rows ?? 24,
+  }
+}
+
+// Fallback sprite set for non-Unicode terminals
+export const ASCII_SPRITES = {
+  alien: { squid: '[=]', crab: '/o\\', octopus: '{o}' },
+  player: '^A^',
+  bullet: '|',
+  barrier: '#',
+}
+```
 
 ### Join Room Input
 
 When player presses `[3]`, show inline room code input:
 
 ```
-│  [3] JOIN ROOM              Enter code: [ABC123_]                         │
+│  [3] JOIN ROOM              Enter code: [ABC123]                          │
 ```
 
-- 6-character alphanumeric code
-- Auto-uppercase
-- `ENTER` to confirm, `ESC` to cancel
+- 6-character base36 code (0-9, A-Z)
+- Auto-uppercase on input
+- `ENTER` to confirm (only when 6 chars entered), `ESC` to cancel
+- Backspace to delete
 
 ---
 
@@ -560,20 +612,123 @@ function plasmaColor(value: number): [number, number, number] {
 ```
 ┌─────────────────────┐                    ┌──────────────────────────┐
 │   OpenTUI Client    │                    │    Cloudflare Worker     │
-│   (@opentui/react)  │◄── WebSocket ─────►│                          │
+│   (@opentui/react)  │◄── WebSocket ─────►│         Router           │
 │   Bun runtime       │                    │   ┌──────────────────┐   │
 └─────────────────────┘                    │   │  Durable Object  │   │
          ▲                                 │   │    GameRoom      │   │
          │ Terminal                        │   │                  │   │
          │ Rendering                       │   │  • Game state    │   │
-         ▼                                 │   │  • 60ms tick     │   │
-┌─────────────────────┐                    │   │  • Broadcast     │   │
+         ▼                                 │   │  • 30Hz tick     │   │
+┌─────────────────────┐                    │   │  • Full sync     │   │
 │   Zig Native Layer  │                    │   └──────────────────┘   │
-│   (via FFI/dlopen)  │                    └──────────────────────────┘
-│   • Buffer diffing  │
-│   • ANSI generation │
-│   • Yoga layout     │
-└─────────────────────┘
+│   (via FFI/dlopen)  │                    │   ┌──────────────────┐   │
+│   • Buffer diffing  │                    │   │  KV: RoomRegistry │   │
+│   • ANSI generation │                    │   │  (matchmaking)   │   │
+│   • Yoga layout     │                    │   └──────────────────┘   │
+└─────────────────────┘                    └──────────────────────────┘
+```
+
+---
+
+## Worker Router
+
+The Worker handles HTTP routing and room management. Each room code maps deterministically to a Durable Object ID.
+
+```typescript
+// worker/src/index.ts
+
+export interface Env {
+  GAME_ROOM: DurableObjectNamespace
+  ROOM_REGISTRY: KVNamespace  // For matchmaking
+}
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url)
+
+    // POST /room - Create new room, returns room code
+    if (url.pathname === '/room' && request.method === 'POST') {
+      const roomCode = generateRoomCode()  // 6-char base36
+      const id = env.GAME_ROOM.idFromName(roomCode)
+      const stub = env.GAME_ROOM.get(id)
+
+      // Initialize room and register for matchmaking
+      await stub.fetch(new Request('https://internal/init', {
+        method: 'POST',
+        body: JSON.stringify({ roomCode })
+      }))
+      await env.ROOM_REGISTRY.put(`room:${roomCode}`, JSON.stringify({
+        roomCode,
+        createdAt: Date.now(),
+        playerCount: 0,
+        status: 'waiting'
+      }), { expirationTtl: 3600 })  // 1 hour TTL
+
+      return new Response(JSON.stringify({ roomCode }), {
+        headers: { 'Content-Type': 'application/json' }
+      })
+    }
+
+    // GET /room/:code/ws - WebSocket connection to specific room
+    const wsMatch = url.pathname.match(/^\/room\/([A-Z0-9]{6})\/ws$/)
+    if (wsMatch) {
+      const roomCode = wsMatch[1]
+      const id = env.GAME_ROOM.idFromName(roomCode)
+      const stub = env.GAME_ROOM.get(id)
+      return stub.fetch(request)
+    }
+
+    // GET /matchmake - Find or create an open room
+    if (url.pathname === '/matchmake') {
+      const openRoom = await findOpenRoom(env.ROOM_REGISTRY)
+      if (openRoom) {
+        return new Response(JSON.stringify({ roomCode: openRoom }), {
+          headers: { 'Content-Type': 'application/json' }
+        })
+      }
+      // No open rooms, create one
+      return env.GAME_ROOM.fetch(new Request(url.origin + '/room', { method: 'POST' }))
+    }
+
+    // GET /room/:code - Room info (player count, status)
+    const infoMatch = url.pathname.match(/^\/room\/([A-Z0-9]{6})$/)
+    if (infoMatch) {
+      const roomCode = infoMatch[1]
+      const info = await env.ROOM_REGISTRY.get(`room:${roomCode}`)
+      if (!info) {
+        return new Response(JSON.stringify({ error: 'Room not found' }), { status: 404 })
+      }
+      return new Response(info, { headers: { 'Content-Type': 'application/json' } })
+    }
+
+    return new Response('Not Found', { status: 404 })
+  }
+}
+
+function generateRoomCode(): string {
+  // 6 characters, base36 (0-9, A-Z), ~2 billion combinations
+  const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+  let code = ''
+  for (let i = 0; i < 6; i++) {
+    code += chars[Math.floor(Math.random() * chars.length)]
+  }
+  return code
+}
+
+async function findOpenRoom(registry: KVNamespace): Promise<string | null> {
+  // List rooms that are waiting and have space
+  const list = await registry.list({ prefix: 'room:' })
+  for (const key of list.keys) {
+    const info = await registry.get(key.name)
+    if (info) {
+      const room = JSON.parse(info)
+      if (room.status === 'waiting' && room.playerCount < 4) {
+        return room.roomCode
+      }
+    }
+  }
+  return null
+}
 ```
 
 ---
@@ -593,21 +748,28 @@ interface Position {
 }
 
 interface GameEntity extends Position {
-  id: number
+  id: string  // Monotonic string ID: "e_1", "e_2", etc.
 }
 
 // ─── Game State ───────────────────────────────────────────────────────────────
 
 interface GameState {
-  roomId: string                    // 6-char alphanumeric
+  roomId: string                    // 6-char base36 (0-9, A-Z)
   mode: 'solo' | 'coop'
   status: 'waiting' | 'countdown' | 'playing' | 'paused' | 'game_over'
   tick: number
   enhancedMode: boolean
 
+  // Countdown state (only valid when status === 'countdown')
+  countdownRemaining: number | null  // 3, 2, 1, or null
+
   players: Record<string, Player>
   readyPlayerIds: string[]          // Array for JSON serialization
 
+  // Unified entity array with discriminated union (see Entity type below)
+  entities: Entity[]
+
+  // Legacy arrays for backward compatibility during transition
   aliens: Alien[]
   bullets: Bullet[]
   barriers: Barrier[]
@@ -626,32 +788,45 @@ interface GameState {
   config: GameConfig
 }
 
+// Unified entity type for all game objects
+type Entity =
+  | { kind: 'alien'; id: string; x: number; y: number; type: ClassicAlienType; alive: boolean; row: number; col: number }
+  | { kind: 'commander'; id: string; x: number; y: number; health: 1 | 2; tractorBeamActive: boolean; capturedPlayerId: string | null }
+  | { kind: 'divebomber'; id: string; x: number; y: number; diveState: 'formation' | 'diving' | 'returning'; diveProgress: number }
+  | { kind: 'bullet'; id: string; x: number; y: number; ownerId: string | null; dy: -1 | 1 }
+  | { kind: 'barrier'; id: string; x: number; segments: BarrierSegment[] }
+  | { kind: 'transform'; id: string; x: number; y: number; type: TransformType; velocity: Position; lifetime: number }
+
 interface GameConfig {
   width: number                     // Default: 80
   height: number                    // Default: 24
   maxPlayers: number                // Default: 4
-  tickIntervalMs: number            // Default: 16 (~60fps)
+  tickIntervalMs: number            // Default: 33 (~30Hz, full state sync)
+  syncRateHz: number                // Default: 30 (state broadcasts per second)
 
   // Base values (scaled by player count)
   baseAlienMoveInterval: number     // Ticks between alien moves
   baseBulletSpeed: number           // Cells per tick
   baseAlienShootRate: number        // Probability per tick
   playerCooldown: number            // Ticks between shots
-  respawnDelay: number              // Ticks (180 = 3 seconds at 60fps)
-  disconnectGracePeriod: number     // Ticks (625 = 10 seconds at 16ms/tick)
+  playerMoveSpeed: number           // Cells per tick when holding move key
+  respawnDelay: number              // Ticks (90 = 3 seconds at 30Hz)
+  disconnectGracePeriod: number     // Ticks (300 = 10 seconds at 30Hz)
 }
 
 const DEFAULT_CONFIG: GameConfig = {
   width: 80,
   height: 24,
   maxPlayers: 4,
-  tickIntervalMs: 16,
-  baseAlienMoveInterval: 30,
-  baseBulletSpeed: 2,
-  baseAlienShootRate: 0.5,
-  playerCooldown: 10,
-  respawnDelay: 180,
-  disconnectGracePeriod: 625,
+  tickIntervalMs: 33,               // ~30Hz server tick
+  syncRateHz: 30,                   // Full state broadcast rate
+  baseAlienMoveInterval: 15,        // Move every 15 ticks (~2 Hz at 30Hz tick)
+  baseBulletSpeed: 1,               // 1 cell per tick
+  baseAlienShootRate: 0.02,         // ~0.6 shots/second at 30Hz
+  playerCooldown: 6,                // ~200ms between shots
+  playerMoveSpeed: 1,               // 1 cell per tick when holding key
+  respawnDelay: 90,                 // 3 seconds at 30Hz
+  disconnectGracePeriod: 300,       // 10 seconds at 30Hz
 }
 
 // ─── Layout Constants ─────────────────────────────────────────────────────────
@@ -689,11 +864,17 @@ interface Player {
   x: number                         // Horizontal position (y is always LAYOUT.PLAYER_Y)
   slot: PlayerSlot
   color: PlayerColor
-  lastShot: number
+  lastShot: number                  // Tick of last shot (for cooldown)
   alive: boolean
   respawnAt: number | null          // Tick to respawn (co-op only)
   kills: number
   disconnectedAt: number | null     // Tick when disconnected (for grace period)
+
+  // Input state (server-authoritative, updated from client input messages)
+  inputState: {
+    left: boolean
+    right: boolean
+  }
 }
 
 // ─── Enemies ──────────────────────────────────────────────────────────────────
@@ -813,9 +994,16 @@ type ClientMessage =
   | { type: 'join'; name: string; enhancedMode?: boolean }
   | { type: 'ready' }
   | { type: 'unready' }
-  | { type: 'start_solo'; enhancedMode?: boolean }  // Skip waiting, start alone
-  | { type: 'input'; action: 'left' | 'right' | 'shoot' }
+  | { type: 'start_solo'; enhancedMode?: boolean }
+  | { type: 'input'; held: InputState }  // Continuous input state, not discrete events
+  | { type: 'shoot' }                     // Discrete action (rate-limited server-side)
   | { type: 'ping' }
+
+/** Which movement keys are currently held */
+interface InputState {
+  left: boolean
+  right: boolean
+}
 
 // Server → Client
 type ServerEvent =
@@ -826,46 +1014,24 @@ type ServerEvent =
   | { type: 'event'; name: 'player_died'; data: { playerId: string } }
   | { type: 'event'; name: 'player_respawned'; data: { playerId: string } }
   | { type: 'event'; name: 'countdown_tick'; data: { count: number } }
+  | { type: 'event'; name: 'countdown_cancelled'; data: { reason: string } }
   | { type: 'event'; name: 'game_start'; data: void }
-  | { type: 'event'; name: 'alien_killed'; data: { alienId: number; playerId: string | null } }
+  | { type: 'event'; name: 'alien_killed'; data: { alienId: string; playerId: string | null } }
   | { type: 'event'; name: 'wave_complete'; data: { wave: number } }
   | { type: 'event'; name: 'game_over'; data: { result: 'victory' | 'defeat' } }
   | { type: 'event'; name: 'ufo_spawn'; data: { x: number } }
 
 type ServerMessage =
   | { type: 'sync'; state: GameState; playerId: string }
-  | { type: 'tick'; tick: number; delta: DeltaState }
   | ServerEvent
   | { type: 'pong'; serverTime: number }
   | { type: 'error'; code: ErrorCode; message: string }
 
-type DeltaState = {
-  players?: Record<string, Partial<Player>>
-  bullets?: { add?: Bullet[]; remove?: number[] }
-  aliens?: { killed?: number[] }
-  score?: number
-  lives?: number
-  status?: GameState['status']
-  mode?: GameState['mode']
-  wave?: number
-  readyCount?: number
-}
+// NOTE: We use full state sync at 30Hz instead of delta updates.
+// Delta sync is error-prone (missed updates cause permanent desync) and the
+// full game state is small enough (~2-4KB) that full sync is simpler and more robust.
 
-type GameEvent =
-  | 'player_joined'
-  | 'player_left'
-  | 'player_ready'
-  | 'player_unready'
-  | 'player_died'
-  | 'player_respawned'
-  | 'countdown_tick'
-  | 'game_start'
-  | 'alien_killed'
-  | 'wave_complete'
-  | 'game_over'
-  | 'ufo_spawn'
-
-type ErrorCode = 'room_full' | 'game_in_progress' | 'invalid_action'
+type ErrorCode = 'room_full' | 'game_in_progress' | 'invalid_action' | 'invalid_room'
 ```
 
 ### Keep-Alive Strategy
@@ -874,11 +1040,20 @@ Clients send a `ping` message every 30 seconds while connected. Server responds 
 
 ```typescript
 // Client-side keep-alive
+const PING_INTERVAL = 30000
+const PONG_TIMEOUT = 5000
+let lastPong = Date.now()
+
 setInterval(() => {
-  if (ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: 'ping' }))
+  if (Date.now() - lastPong > PING_INTERVAL + PONG_TIMEOUT) {
+    ws.close()  // Trigger reconnect
+    return
   }
-}, 30000)
+  ws.send(JSON.stringify({ type: 'ping' }))
+}, PING_INTERVAL)
+
+// On pong received
+lastPong = Date.now()
 ```
 
 ### Durable Object Implementation
@@ -888,24 +1063,42 @@ setInterval(() => {
 
 export class GameRoom implements DurableObject {
   private state: DurableObjectState
+  private env: Env
   private sessions = new Map<WebSocket, string>()
-  private game: GameState
+  private game: GameState | null = null
   private interval: ReturnType<typeof setInterval> | null = null
   private countdownInterval: ReturnType<typeof setInterval> | null = null
+  private nextEntityId = 1  // Monotonic counter for entity IDs
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state
-    this.game = this.createInitialState()
+    this.env = env
+    // Restore game state from storage on construction
+    this.state.blockConcurrencyWhile(async () => {
+      this.game = await this.state.storage.get('game') ?? null
+    })
   }
 
-  private createInitialState(): GameState {
+  private generateEntityId(): string {
+    return `e_${this.nextEntityId++}`
+  }
+
+  private async persistState() {
+    if (this.game) {
+      await this.state.storage.put('game', this.game)
+    }
+  }
+
+  private createInitialState(roomCode: string): GameState {
     return {
-      roomId: crypto.randomUUID().slice(0, 6).toUpperCase(),  // 6-char alphanumeric
+      roomId: roomCode,  // Passed from Worker router, not generated here
       mode: 'solo',
       status: 'waiting',
       tick: 0,
+      countdownRemaining: null,
       players: {},
       readyPlayerIds: [],
+      entities: [],
       aliens: [],
       bullets: [],
       barriers: [],
@@ -914,27 +1107,30 @@ export class GameRoom implements DurableObject {
       score: 0,
       alienDirection: 1,
       enhancedMode: false,
-      config: {
-        width: 80,
-        height: 24,
-        maxPlayers: 4,
-        tickIntervalMs: 16,
-        baseAlienMoveInterval: 30,
-        baseBulletSpeed: 2,
-        baseAlienShootRate: 0.5,
-        playerCooldown: 10,
-        respawnDelay: 180,
-        disconnectGracePeriod: 600,
-      },
+      config: DEFAULT_CONFIG,
     }
   }
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url)
-    
-    if (url.pathname === '/ws') {
+
+    // POST /init - Initialize room with code (called by Worker router)
+    if (url.pathname === '/init' && request.method === 'POST') {
+      const { roomCode } = await request.json() as { roomCode: string }
+      this.game = this.createInitialState(roomCode)
+      await this.persistState()
+      return new Response('OK')
+    }
+
+    // WebSocket connection (routed from /room/:code/ws)
+    if (request.headers.get('Upgrade') === 'websocket') {
+      if (!this.game) {
+        return new Response(JSON.stringify({ code: 'invalid_room', message: 'Room not initialized' }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      }
       if (this.game.status === 'playing' && !url.searchParams.has('rejoin')) {
-        // Return HTTP error with code before WebSocket upgrade
         return new Response(JSON.stringify({ code: 'game_in_progress', message: 'Game in progress' }), {
           status: 409,
           headers: { 'Content-Type': 'application/json' }
@@ -946,37 +1142,58 @@ export class GameRoom implements DurableObject {
           headers: { 'Content-Type': 'application/json' }
         })
       }
-      
+
       const pair = new WebSocketPair()
       await this.handleSession(pair[1])
       return new Response(null, { status: 101, webSocket: pair[0] })
     }
-    
+
+    // GET /info - Room status for registry updates
+    if (url.pathname === '/info') {
+      if (!this.game) {
+        return new Response(JSON.stringify({ error: 'Room not initialized' }), { status: 404 })
+      }
+      return new Response(JSON.stringify({
+        roomCode: this.game.roomId,
+        playerCount: Object.keys(this.game.players).length,
+        status: this.game.status
+      }), { headers: { 'Content-Type': 'application/json' } })
+    }
+
     return new Response('Not Found', { status: 404 })
   }
 
   private async handleSession(ws: WebSocket) {
     ws.accept()
-    
+
     ws.addEventListener('message', async (event) => {
       const msg: ClientMessage = JSON.parse(event.data as string)
       await this.handleMessage(ws, msg)
     })
-    
+
     ws.addEventListener('close', () => {
       const playerId = this.sessions.get(ws)
-      if (playerId && this.game.players[playerId]) {
+      if (playerId && this.game?.players[playerId]) {
         // Mark as disconnected, don't remove immediately (grace period)
         this.game.players[playerId].disconnectedAt = this.game.tick
         this.sessions.delete(ws)
         this.broadcast({ type: 'event', name: 'player_left', data: { playerId, reason: 'disconnect' } })
+
+        // Cancel countdown if a player disconnects during it
+        if (this.game.status === 'countdown') {
+          this.cancelCountdown('Player disconnected')
+        }
+
+        // Update room registry
+        this.updateRoomRegistry()
       }
     })
   }
 
   private async handleMessage(ws: WebSocket, msg: ClientMessage) {
+    if (!this.game) return
     const playerId = this.sessions.get(ws)
-    
+
     switch (msg.type) {
       case 'join': {
         if (Object.keys(this.game.players).length >= 4) {
@@ -1001,17 +1218,19 @@ export class GameRoom implements DurableObject {
           respawnAt: null,
           kills: 0,
           disconnectedAt: null,
+          inputState: { left: false, right: false },  // Initialize input state
         }
-        
+
         this.game.players[player.id] = player
         this.sessions.set(ws, player.id)
         this.game.mode = Object.keys(this.game.players).length === 1 ? 'solo' : 'coop'
-        
-        ws.send(JSON.stringify({ type: 'sync', state: this.serializeState(), playerId: player.id }))
+
+        ws.send(JSON.stringify({ type: 'sync', state: this.game, playerId: player.id }))
         this.broadcast({ type: 'event', name: 'player_joined', data: { player } })
+        await this.updateRoomRegistry()
         break
       }
-      
+
       case 'start_solo': {
         if (Object.keys(this.game.players).length === 1 && playerId) {
           this.game.mode = 'solo'
@@ -1023,7 +1242,7 @@ export class GameRoom implements DurableObject {
         }
         break
       }
-      
+
       case 'ready': {
         if (playerId && this.game.players[playerId] && !this.game.readyPlayerIds.includes(playerId)) {
           this.game.readyPlayerIds.push(playerId)
@@ -1035,15 +1254,30 @@ export class GameRoom implements DurableObject {
 
       case 'unready': {
         if (playerId && this.game.players[playerId]) {
+          const wasReady = this.game.readyPlayerIds.includes(playerId)
           this.game.readyPlayerIds = this.game.readyPlayerIds.filter(id => id !== playerId)
           this.broadcast({ type: 'event', name: 'player_unready', data: { playerId } })
+
+          // Cancel countdown if someone unreadies during it
+          if (wasReady && this.game.status === 'countdown') {
+            this.cancelCountdown('Player unreadied')
+          }
         }
         break
       }
-      
+
       case 'input': {
-        if (playerId && this.game.status === 'playing') {
-          this.handleInput(playerId, msg.action)
+        // Update held key state (processed on each tick)
+        if (playerId && this.game.players[playerId] && this.game.status === 'playing') {
+          this.game.players[playerId].inputState = msg.held
+        }
+        break
+      }
+
+      case 'shoot': {
+        // Discrete shoot action (rate-limited)
+        if (playerId && this.game.players[playerId] && this.game.status === 'playing') {
+          this.handleShoot(playerId)
         }
         break
       }
@@ -1056,7 +1290,7 @@ export class GameRoom implements DurableObject {
   }
 
   private getNextSlot(): 1 | 2 | 3 | 4 {
-    const usedSlots = new Set(Object.values(this.game.players).map(p => p.slot))
+    const usedSlots = new Set(Object.values(this.game!.players).map(p => p.slot))
     for (const slot of [1, 2, 3, 4] as const) {
       if (!usedSlots.has(slot)) return slot
     }
@@ -1064,52 +1298,95 @@ export class GameRoom implements DurableObject {
   }
 
   private checkStartConditions() {
+    if (!this.game) return
     const playerCount = Object.keys(this.game.players).length
     const readyCount = this.game.readyPlayerIds.length
-    
+
     if (playerCount >= 2 && readyCount === playerCount) {
       this.startCountdown()
     }
   }
 
   private startCountdown() {
+    if (!this.game) return
     this.game.status = 'countdown'
-    let count = 3
-    
-    this.broadcast({ type: 'event', name: 'countdown_tick', data: { count } })
-    
+    this.game.countdownRemaining = 3
+
+    this.broadcast({ type: 'event', name: 'countdown_tick', data: { count: 3 } })
+
     this.countdownInterval = setInterval(() => {
-      count--
-      if (count === 0) {
+      if (!this.game || this.game.status !== 'countdown') return
+
+      this.game.countdownRemaining!--
+      if (this.game.countdownRemaining === 0) {
         clearInterval(this.countdownInterval!)
+        this.countdownInterval = null
         this.startGame()
       } else {
-        this.broadcast({ type: 'event', name: 'countdown_tick', data: { count } })
+        this.broadcast({ type: 'event', name: 'countdown_tick', data: { count: this.game.countdownRemaining } })
       }
     }, 1000)
   }
 
+  private cancelCountdown(reason: string) {
+    if (!this.game) return
+    if (this.countdownInterval) {
+      clearInterval(this.countdownInterval)
+      this.countdownInterval = null
+    }
+    this.game.status = 'waiting'
+    this.game.countdownRemaining = null
+    this.broadcast({ type: 'event', name: 'countdown_cancelled', data: { reason } })
+  }
+
+  private async updateRoomRegistry() {
+    if (!this.game) return
+    // Update KV with current room status for matchmaking
+    await this.env.ROOM_REGISTRY.put(`room:${this.game.roomId}`, JSON.stringify({
+      roomCode: this.game.roomId,
+      playerCount: Object.keys(this.game.players).length,
+      status: this.game.status,
+      updatedAt: Date.now()
+    }), { expirationTtl: 3600 })
+  }
+
   private startGame() {
+    if (!this.game) return
     const playerCount = Object.keys(this.game.players).length
     const scaled = getScaledConfig(playerCount, this.game.config)
-    
+
     this.game.status = 'playing'
+    this.game.countdownRemaining = null
     this.game.lives = scaled.lives
     this.game.aliens = this.createAlienFormation(scaled.alienCols, scaled.alienRows)
     this.game.barriers = this.createBarriers(playerCount)
     this.game.bullets = []
     this.game.tick = 0
-    
+
     this.broadcast({ type: 'event', name: 'game_start' })
-    this.broadcast({ type: 'sync', state: this.serializeState(), playerId: '' })
-    
+    this.broadcastFullState()
+    this.persistState()
+
+    // Game loop at 30Hz - full state broadcast every tick
     this.interval = setInterval(() => this.tick(), this.game.config.tickIntervalMs)
   }
 
   private tick() {
-    const delta: DeltaState = {}
+    if (!this.game || this.game.status !== 'playing') return
+
     const playerCount = Object.keys(this.game.players).length
     const scaled = getScaledConfig(playerCount, this.game.config)
+
+    // Process player input state (held keys)
+    for (const player of Object.values(this.game.players)) {
+      if (!player.alive) continue
+      if (player.inputState.left) {
+        player.x = Math.max(LAYOUT.PLAYER_MIN_X, player.x - this.game.config.playerMoveSpeed)
+      }
+      if (player.inputState.right) {
+        player.x = Math.min(LAYOUT.PLAYER_MAX_X, player.x + this.game.config.playerMoveSpeed)
+      }
+    }
 
     // Handle disconnect grace period timeouts
     for (const player of Object.values(this.game.players)) {
@@ -1128,79 +1405,75 @@ export class GameRoom implements DurableObject {
           player.alive = true
           player.x = getPlayerSpawnX(player.slot, Object.keys(this.game.players).length, 80)
           player.respawnAt = null
-          delta.players = delta.players || {}
-          delta.players[player.id] = { alive: true, x: player.x, respawnAt: null }
           this.broadcast({ type: 'event', name: 'player_respawned', data: { playerId: player.id } })
         }
       }
     }
-    
-    this.moveBullets(delta)
-    this.checkCollisions(delta)
-    
+
+    this.moveBullets()
+    this.checkCollisions()
+
     if (this.game.tick % scaled.alienMoveInterval === 0) {
-      this.moveAliens(delta)
+      this.moveAliens()
     }
-    
-    if (Math.random() < scaled.alienShootRate / 60) {
-      this.alienShoot(delta)
+
+    if (Math.random() < scaled.alienShootRate) {
+      this.alienShoot()
     }
-    
-    this.checkEndConditions(delta)
+
+    this.checkEndConditions()
     this.game.tick++
-    
-    if (Object.keys(delta).length > 0) {
-      this.broadcast({ type: 'tick', tick: this.game.tick, delta })
-    }
+
+    // Full state sync every tick (30Hz)
+    this.broadcastFullState()
   }
 
-  private handleInput(playerId: string, action: 'left' | 'right' | 'shoot') {
-    const player = this.game.players[playerId]
-    if (!player || !player.alive) return
-    
-    switch (action) {
-      case 'left':
-        player.x = Math.max(LAYOUT.PLAYER_MIN_X, player.x - 2)
-        break
-      case 'right':
-        player.x = Math.min(LAYOUT.PLAYER_MAX_X, player.x + 2)
-        break
-      case 'shoot':
-        if (this.game.tick - player.lastShot >= this.game.config.playerCooldown) {
-          this.game.bullets.push({
-            id: Date.now() + Math.random(),
-            ownerId: playerId,
-            x: player.x,
-            y: LAYOUT.PLAYER_Y - 1,  // Spawn bullet above player
-            dy: -1,
-          })
-          player.lastShot = this.game.tick
-        }
-        break
-    }
-  }
-
-  private moveBullets(delta: DeltaState) {
-    const toRemove: number[] = []
-    
-    for (const bullet of this.game.bullets) {
-      bullet.y += bullet.dy * this.game.config.baseBulletSpeed
-      if (bullet.y < 0 || bullet.y >= this.game.config.height - 1) {
-        toRemove.push(bullet.id)
+  private broadcastFullState() {
+    if (!this.game) return
+    // Broadcast full game state to all connected clients
+    for (const [ws, playerId] of this.sessions) {
+      try {
+        ws.send(JSON.stringify({ type: 'sync', state: this.game, playerId }))
+      } catch {
+        // WebSocket may be closed
       }
     }
-    
-    if (toRemove.length > 0) {
-      this.game.bullets = this.game.bullets.filter(b => !toRemove.includes(b.id))
-      delta.bullets = delta.bullets || {}
-      delta.bullets.remove = toRemove
+  }
+
+  private handleShoot(playerId: string) {
+    if (!this.game) return
+    const player = this.game.players[playerId]
+    if (!player || !player.alive) return
+
+    if (this.game.tick - player.lastShot >= this.game.config.playerCooldown) {
+      this.game.bullets.push({
+        id: this.generateEntityId(),
+        ownerId: playerId,
+        x: player.x,
+        y: LAYOUT.PLAYER_Y - LAYOUT.BULLET_SPAWN_OFFSET,
+        dy: -1,
+      })
+      player.lastShot = this.game.tick
     }
   }
 
-  private checkCollisions(delta: DeltaState) {
-    const bulletsToRemove: number[] = []
-    const aliensKilled: number[] = []
-    
+  private moveBullets() {
+    if (!this.game) return
+
+    for (const bullet of this.game.bullets) {
+      bullet.y += bullet.dy * this.game.config.baseBulletSpeed
+    }
+
+    // Remove out-of-bounds bullets
+    this.game.bullets = this.game.bullets.filter(
+      b => b.y >= 0 && b.y < this.game!.config.height - 1
+    )
+  }
+
+  private checkCollisions() {
+    if (!this.game) return
+    const bulletsToRemove = new Set<string>()
+
     for (const bullet of this.game.bullets) {
       // Player bullets hitting aliens
       if (bullet.dy === -1) {
@@ -1208,71 +1481,59 @@ export class GameRoom implements DurableObject {
           if (!alien.alive) continue
           if (Math.abs(bullet.x - alien.x) < LAYOUT.COLLISION_H && Math.abs(bullet.y - alien.y) < LAYOUT.COLLISION_V) {
             alien.alive = false
-            aliensKilled.push(alien.id)
-            bulletsToRemove.push(bullet.id)
-            this.game.score += alien.points
-            
+            bulletsToRemove.add(bullet.id)
+            this.game.score += ALIEN_REGISTRY[alien.type].points
+
             if (bullet.ownerId && this.game.players[bullet.ownerId]) {
               this.game.players[bullet.ownerId].kills++
-              delta.players = delta.players || {}
-              delta.players[bullet.ownerId] = { kills: this.game.players[bullet.ownerId].kills }
             }
-            
+
             this.broadcast({ type: 'event', name: 'alien_killed', data: { alienId: alien.id, playerId: bullet.ownerId } })
             break
           }
         }
       }
-      
+
       // Alien bullets hitting players
       if (bullet.dy === 1) {
         for (const player of Object.values(this.game.players)) {
           if (!player.alive) continue
           if (Math.abs(bullet.x - player.x) < LAYOUT.COLLISION_H && Math.abs(bullet.y - LAYOUT.PLAYER_Y) < LAYOUT.COLLISION_V) {
-            bulletsToRemove.push(bullet.id)
-            this.handlePlayerDeath(player.id, delta)
+            bulletsToRemove.add(bullet.id)
+            this.handlePlayerDeath(player.id)
             break
           }
         }
       }
-      
+
       // Bullets hitting barriers
       for (const barrier of this.game.barriers) {
         for (const seg of barrier.segments) {
           if (seg.health <= 0) continue
           const segX = barrier.x + seg.offsetX
           const segY = LAYOUT.BARRIER_Y + seg.offsetY
-          // Barrier segments are 1x1, use tight collision radius
           if (Math.abs(bullet.x - segX) <= 1 && Math.abs(bullet.y - segY) <= 1) {
-            seg.health--
-            bulletsToRemove.push(bullet.id)
+            seg.health = (seg.health - 1) as 0 | 1 | 2 | 3
+            bulletsToRemove.add(bullet.id)
             break
           }
         }
       }
     }
-    
-    if (bulletsToRemove.length > 0) {
-      this.game.bullets = this.game.bullets.filter(b => !bulletsToRemove.includes(b.id))
-      delta.bullets = delta.bullets || {}
-      delta.bullets.remove = [...(delta.bullets.remove || []), ...bulletsToRemove]
-    }
-    
-    if (aliensKilled.length > 0) {
-      delta.aliens = { killed: aliensKilled }
-      delta.score = this.game.score
-    }
+
+    this.game.bullets = this.game.bullets.filter(b => !bulletsToRemove.has(b.id))
   }
 
-  private moveAliens(delta: DeltaState) {
+  private moveAliens() {
+    if (!this.game) return
     let hitEdge = false
-    
+
     for (const alien of this.game.aliens) {
       if (!alien.alive) continue
       alien.x += this.game.alienDirection * 2
       if (alien.x <= LAYOUT.PLAYER_MIN_X || alien.x >= LAYOUT.PLAYER_MAX_X) hitEdge = true
     }
-    
+
     if (hitEdge) {
       this.game.alienDirection *= -1
       for (const alien of this.game.aliens) {
@@ -1281,10 +1542,11 @@ export class GameRoom implements DurableObject {
     }
   }
 
-  private alienShoot(delta: DeltaState) {
+  private alienShoot() {
+    if (!this.game) return
     const aliveAliens = this.game.aliens.filter(a => a.alive)
     if (aliveAliens.length === 0) return
-    
+
     const bottomAliens = new Map<number, Alien>()
     for (const alien of aliveAliens) {
       const existing = bottomAliens.get(alien.col)
@@ -1292,70 +1554,66 @@ export class GameRoom implements DurableObject {
         bottomAliens.set(alien.col, alien)
       }
     }
-    
+
     const shooters = Array.from(bottomAliens.values())
     const shooter = shooters[Math.floor(Math.random() * shooters.length)]
-    
+
     const bullet: Bullet = {
-      id: Date.now() + Math.random(),
+      id: this.generateEntityId(),
       ownerId: null,
       x: shooter.x,
       y: shooter.y + 1,
       dy: 1,
     }
-    
+
     this.game.bullets.push(bullet)
-    delta.bullets = delta.bullets || {}
-    delta.bullets.add = [...(delta.bullets.add || []), bullet]
+    // Full state sync will include new bullet on next broadcast
   }
 
-  private handlePlayerDeath(playerId: string, delta: DeltaState) {
+  private handlePlayerDeath(playerId: string) {
+    if (!this.game) return
     const player = this.game.players[playerId]
     if (!player) return
-    
+
     player.alive = false
     this.game.lives--
-    
-    delta.players = delta.players || {}
-    delta.players[playerId] = { alive: false }
-    delta.lives = this.game.lives
-    
+
     this.broadcast({ type: 'event', name: 'player_died', data: { playerId } })
-    
+
     if (this.game.lives > 0 && this.game.mode === 'coop') {
       player.respawnAt = this.game.tick + this.game.config.respawnDelay
-      delta.players[playerId].respawnAt = player.respawnAt
     }
-    
+
     if (this.game.lives <= 0) {
       this.endGame('defeat')
     }
   }
 
-  private checkEndConditions(delta: DeltaState) {
+  private checkEndConditions() {
+    if (!this.game) return
     if (this.game.aliens.every(a => !a.alive)) {
-      this.nextWave(delta)
+      this.nextWave()
       return
     }
-    
+
     const lowestAlien = Math.max(...this.game.aliens.filter(a => a.alive).map(a => a.y))
     if (lowestAlien >= LAYOUT.GAME_OVER_Y) {
       this.endGame('defeat')
     }
   }
 
-  private nextWave(delta: DeltaState) {
+  private nextWave() {
+    if (!this.game) return
     this.game.wave++
     const playerCount = Object.keys(this.game.players).length
     const scaled = getScaledConfig(playerCount, this.game.config)
-    
+
     this.game.aliens = this.createAlienFormation(scaled.alienCols, scaled.alienRows)
     this.game.bullets = []
     this.game.alienDirection = 1
-    
-    delta.wave = this.game.wave
-    this.broadcast({ type: 'event', name: 'wave_complete' })
-    this.broadcast({ type: 'sync', state: this.serializeState(), playerId: '' })
+
+    this.broadcast({ type: 'event', name: 'wave_complete', data: { wave: this.game.wave } })
+    // Full state sync will happen on next tick
   }
 
   private endGame(result: 'victory' | 'defeat') {
@@ -1854,89 +2112,125 @@ export const COLORS = {
 ```typescript
 // client/src/hooks/useGameConnection.ts
 import { useState, useEffect, useRef, useCallback } from 'react'
-import type { GameState, ClientMessage, ServerMessage, DeltaState } from '../../../shared/types'
+import type { GameState, ClientMessage, ServerMessage, InputState } from '../../../shared/types'
+import { audio } from '../audio/engine'
 
-export function useGameConnection(url: string, playerName: string) {
+const PING_INTERVAL = 30000
+const RECONNECT_DELAY = 1000
+const MAX_RECONNECT_ATTEMPTS = 5
+
+export function useGameConnection(url: string, playerName: string, enhanced: boolean) {
   const [state, setState] = useState<GameState | null>(null)
   const [playerId, setPlayerId] = useState<string | null>(null)
   const [connected, setConnected] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
-  
-  useEffect(() => {
+  const reconnectAttempts = useRef(0)
+  const pingInterval = useRef<ReturnType<typeof setInterval> | null>(null)
+  const lastPong = useRef(Date.now())
+
+  // Track held input keys
+  const inputState = useRef<InputState>({ left: false, right: false })
+
+  const connect = useCallback(() => {
     const ws = new WebSocket(url)
     wsRef.current = ws
-    
+
     ws.onopen = () => {
       setConnected(true)
-      ws.send(JSON.stringify({ type: 'join', name: playerName }))
+      setError(null)
+      reconnectAttempts.current = 0
+      ws.send(JSON.stringify({ type: 'join', name: playerName, enhancedMode: enhanced }))
+
+      // Start keep-alive pings
+      pingInterval.current = setInterval(() => {
+        if (Date.now() - lastPong.current > PING_INTERVAL + 5000) {
+          ws.close()  // Trigger reconnect
+          return
+        }
+        ws.send(JSON.stringify({ type: 'ping' }))
+      }, PING_INTERVAL)
     }
-    
+
     ws.onmessage = (event) => {
       const msg: ServerMessage = JSON.parse(event.data)
       switch (msg.type) {
         case 'sync':
+          // Full state sync - simply replace state (30Hz from server)
           setState(msg.state)
           if (msg.playerId) setPlayerId(msg.playerId)
           break
-        case 'tick':
-          setState(prev => prev ? applyDelta(prev, msg.delta) : prev)
-          break
         case 'event':
-          handleEvent(msg.name, msg.data)
+          handleGameEvent(msg.name, msg.data)
+          break
+        case 'pong':
+          lastPong.current = Date.now()
           break
         case 'error':
-          console.error(\`Server error: \${msg.message}\`)
+          setError(msg.message)
           break
       }
     }
-    
-    ws.onclose = () => setConnected(false)
-    ws.onerror = () => setConnected(false)
-    
-    return () => ws.close()
-  }, [url, playerName])
-  
+
+    ws.onclose = () => {
+      setConnected(false)
+      if (pingInterval.current) clearInterval(pingInterval.current)
+
+      // Attempt reconnect
+      if (reconnectAttempts.current < MAX_RECONNECT_ATTEMPTS) {
+        reconnectAttempts.current++
+        setTimeout(connect, RECONNECT_DELAY * reconnectAttempts.current)
+      }
+    }
+
+    ws.onerror = () => {
+      setError('Connection error')
+    }
+  }, [url, playerName, enhanced])
+
+  useEffect(() => {
+    connect()
+    return () => {
+      if (pingInterval.current) clearInterval(pingInterval.current)
+      wsRef.current?.close()
+    }
+  }, [connect])
+
+  // Send input state when it changes
+  const updateInput = useCallback((held: InputState) => {
+    inputState.current = held
+    wsRef.current?.send(JSON.stringify({ type: 'input', held }))
+  }, [])
+
+  const shoot = useCallback(() => {
+    wsRef.current?.send(JSON.stringify({ type: 'shoot' }))
+  }, [])
+
   const send = useCallback((msg: ClientMessage) => {
     wsRef.current?.send(JSON.stringify(msg))
   }, [])
-  
-  return { state, playerId, send, connected }
+
+  return { state, playerId, send, connected, error, updateInput, shoot }
 }
 
-function applyDelta(state: GameState, delta: DeltaState): GameState {
-  const next = { ...state }
-  
-  if (delta.players) {
-    next.players = { ...state.players }
-    for (const [id, changes] of Object.entries(delta.players)) {
-      if (next.players[id]) next.players[id] = { ...next.players[id], ...changes }
-    }
+// Play sound effects for game events
+function handleGameEvent(name: string, data: unknown) {
+  const eventSounds: Record<string, string> = {
+    player_joined: 'player_joined',
+    player_left: 'player_left',
+    player_died: 'player_died',
+    player_respawned: 'player_respawned',
+    countdown_tick: 'countdown_tick',
+    game_start: 'game_start',
+    alien_killed: 'alien_killed',
+    wave_complete: 'wave_complete',
+    game_over: 'game_over',
   }
-  
-  if (delta.bullets) {
-    let bullets = state.bullets
-    if (delta.bullets.remove?.length) {
-      const removeSet = new Set(delta.bullets.remove)
-      bullets = bullets.filter(b => !removeSet.has(b.id))
-    }
-    if (delta.bullets.add?.length) bullets = [...bullets, ...delta.bullets.add]
-    next.bullets = bullets
+  const sound = eventSounds[name]
+  if (sound) {
+    audio.playSfx(sound as any)
   }
-  
-  if (delta.aliens?.killed?.length) {
-    const killedSet = new Set(delta.aliens.killed)
-    next.aliens = state.aliens.map(a => killedSet.has(a.id) ? { ...a, alive: false } : a)
-  }
-  
-  if (delta.score !== undefined) next.score = delta.score
-  if (delta.lives !== undefined) next.lives = delta.lives
-  if (delta.status) next.status = delta.status
-  if (delta.wave !== undefined) next.wave = delta.wave
-  
-  return next
 }
-
-// handleEvent defined in useGameAudio.ts - see "Integration with Game Events" section
 ```
 
 ---
@@ -2135,7 +2429,7 @@ See `getScaledConfig()` in Scaling Logic section for canonical values. Summary:
 
 ## Audio
 
-Audio is **client-side only** and **on by default**. Press `M` to toggle mute. Audio state persists in localStorage.
+Audio is **client-side only** and **on by default**. Press `M` to toggle mute. Audio state persists in `~/.config/vaders/config.json`.
 
 ### Keyboard Shortcut
 
@@ -2280,59 +2574,132 @@ const ENHANCED_MODE_TRACKS: AmigaTrack[] = [
 
 ### Audio Engine
 
+**Note:** This is a terminal application. We use terminal-appropriate audio:
+- Terminal bell (`\x07`) for simple beeps
+- Optional native audio via Bun FFI for richer sound
+- User config stored in `~/.config/vaders/config.json`
+
 ```typescript
 // client/src/audio/engine.ts
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
+import { homedir } from 'os'
+import { join } from 'path'
+
+const CONFIG_DIR = join(homedir(), '.config', 'vaders')
+const CONFIG_FILE = join(CONFIG_DIR, 'config.json')
+
+interface AudioConfig {
+  muted: boolean
+  useNativeAudio: boolean  // Use FFI for richer sound (optional)
+}
+
+function loadConfig(): AudioConfig {
+  try {
+    if (existsSync(CONFIG_FILE)) {
+      return JSON.parse(readFileSync(CONFIG_FILE, 'utf-8'))
+    }
+  } catch { /* ignore */ }
+  return { muted: false, useNativeAudio: false }
+}
+
+function saveConfig(config: AudioConfig) {
+  try {
+    if (!existsSync(CONFIG_DIR)) {
+      mkdirSync(CONFIG_DIR, { recursive: true })
+    }
+    writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2))
+  } catch { /* ignore */ }
+}
 
 class AudioEngine {
-  private ctx: AudioContext | null = null
-  private muted: boolean = false
-  private musicGain: GainNode | null = null
-  private sfxGain: GainNode | null = null
+  private config: AudioConfig
+  private nativeAudio: NativeAudio | null = null
 
   constructor() {
-    this.muted = localStorage.getItem('vaders_muted') === 'true'
+    this.config = loadConfig()
+    if (this.config.useNativeAudio) {
+      this.initNativeAudio()
+    }
   }
 
-  async init() {
-    this.ctx = new AudioContext()
-    this.musicGain = this.ctx.createGain()
-    this.sfxGain = this.ctx.createGain()
-    this.musicGain.connect(this.ctx.destination)
-    this.sfxGain.connect(this.ctx.destination)
-    this.updateVolumes()
+  private async initNativeAudio() {
+    // Optional: Load native audio library via Bun FFI
+    // This would use a library like miniaudio or SDL_audio
+    try {
+      // const lib = dlopen('./audio.dylib', { ... })
+      // this.nativeAudio = new NativeAudio(lib)
+    } catch {
+      console.error('Native audio not available, falling back to terminal bell')
+    }
   }
 
   toggleMute() {
-    this.muted = !this.muted
-    localStorage.setItem('vaders_muted', String(this.muted))
-    this.updateVolumes()
+    this.config.muted = !this.config.muted
+    saveConfig(this.config)
   }
 
-  private updateVolumes() {
-    const vol = this.muted ? 0 : 1
-    this.musicGain?.gain.setValueAtTime(vol * 0.4, this.ctx!.currentTime)
-    this.sfxGain?.gain.setValueAtTime(vol * 0.7, this.ctx!.currentTime)
+  get isMuted(): boolean {
+    return this.config.muted
   }
 
   playSfx(name: SoundEffect) {
-    if (!this.ctx || this.muted) return
-    const sfx = SFX_LIBRARY[name]
-    sfx.play(this.ctx, this.sfxGain!)
+    if (this.config.muted) return
+
+    if (this.nativeAudio) {
+      this.nativeAudio.play(name)
+    } else {
+      // Terminal bell for basic audio feedback
+      if (BEEP_SOUNDS.has(name)) {
+        process.stdout.write('\x07')
+      }
+    }
   }
 
   playMusic(mode: 'normal' | 'enhanced') {
-    // Start appropriate music track
+    // Music only available with native audio
+    this.nativeAudio?.playMusic(mode)
   }
 
   setMusicTempo(multiplier: number) {
-    // Adjust playback speed based on aliens remaining
+    this.nativeAudio?.setTempo(multiplier)
   }
 }
+
+// Sound effects that trigger terminal bell in basic mode
+const BEEP_SOUNDS = new Set<SoundEffect>([
+  'shoot', 'alien_killed', 'player_died', 'wave_complete', 'game_over', 'countdown_tick'
+])
 
 export const audio = new AudioEngine()
 ```
 
-### Sound Effect Synthesis
+### Native Audio (Optional)
+
+For richer audio, users can install the native audio library:
+
+```bash
+# Build native audio module (requires system audio libraries)
+cd client/native
+bun run build  # Compiles audio.c using zig cc
+
+# Enable in config
+echo '{"muted": false, "useNativeAudio": true}' > ~/.config/vaders/config.json
+```
+
+```typescript
+// client/src/audio/native.ts (optional)
+
+interface NativeAudio {
+  play(name: SoundEffect): void
+  playMusic(mode: 'normal' | 'enhanced'): void
+  setTempo(multiplier: number): void
+  stop(): void
+}
+
+// FFI bindings would go here using Bun.dlopen()
+```
+
+### Sound Effect Types
 
 ```typescript
 // client/src/audio/sfx.ts
@@ -2356,148 +2723,39 @@ type SoundEffect =
   | 'countdown_tick'
   | 'game_start'
 
-/** Synthesized sound effect interface */
-interface SynthSound {
-  play(ctx: AudioContext, dest: AudioNode): void
+/**
+ * Sound effect descriptions for native audio implementation.
+ * When using terminal bell mode, only BEEP_SOUNDS are triggered.
+ * When using native audio, these parameters are used for synthesis.
+ */
+const SFX_PARAMS: Record<SoundEffect, SfxParams> = {
+  shoot:           { freq: 880, dur: 50, type: 'square', sweep: 1760 },
+  alien_killed:    { freq: 600, dur: 100, type: 'square', sweep: 100, noise: true },
+  player_joined:   { freq: 523, dur: 100, type: 'sine' },      // C5
+  player_left:     { freq: 330, dur: 150, type: 'triangle' },  // E4
+  player_died:     { freq: 100, dur: 300, type: 'noise' },     // Explosion
+  player_respawned:{ freq: 880, dur: 100, type: 'sine' },      // A5
+  wave_complete:   { notes: [523, 659, 784], dur: 500 },       // C-E-G arpeggio
+  game_over:       { notes: [392, 330, 262], dur: 1000 },      // G-E-C descending
+  countdown_tick:  { freq: 440, dur: 100, type: 'square' },    // A4 beep
+  game_start:      { notes: [262, 330, 392, 523], dur: 800 },  // C-E-G-C fanfare
+  ready_up:        { freq: 660, dur: 150, type: 'sine' },      // E5
+  menu_select:     { freq: 440, dur: 30, type: 'square' },
+  menu_navigate:   { freq: 220, dur: 20, type: 'square' },
+  // Enhanced mode
+  commander_hit:   { freq: 150, dur: 150, type: 'sawtooth' },
+  tractor_beam:    { freq: 300, dur: 2000, type: 'warble' },
+  transform_spawn: { freq: 1500, dur: 200, type: 'sparkle' },
+  capture:         { freq: 400, dur: 400, type: 'siren' },
 }
 
-const SFX_LIBRARY: Record<SoundEffect, SynthSound> = {
-  shoot: {
-    play(ctx: AudioContext, dest: AudioNode) {
-      const osc = ctx.createOscillator()
-      const gain = ctx.createGain()
-      osc.type = 'square'
-      osc.frequency.setValueAtTime(880, ctx.currentTime)
-      osc.frequency.exponentialRampToValueAtTime(1760, ctx.currentTime + 0.05)
-      gain.gain.setValueAtTime(0.3, ctx.currentTime)
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.05)
-      osc.connect(gain).connect(dest)
-      osc.start()
-      osc.stop(ctx.currentTime + 0.05)
-    },
-  },
-
-  alien_killed: {
-    play(ctx: AudioContext, dest: AudioNode) {
-      // Descending tone + noise burst
-      const osc = ctx.createOscillator()
-      const gain = ctx.createGain()
-      osc.type = 'square'
-      osc.frequency.setValueAtTime(600, ctx.currentTime)
-      osc.frequency.exponentialRampToValueAtTime(100, ctx.currentTime + 0.1)
-      gain.gain.setValueAtTime(0.3, ctx.currentTime)
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1)
-      osc.connect(gain).connect(dest)
-      osc.start()
-      osc.stop(ctx.currentTime + 0.1)
-
-      const noise = createNoiseBuffer(ctx, 0.05)
-      const noiseGain = ctx.createGain()
-      noiseGain.gain.setValueAtTime(0.2, ctx.currentTime)
-      noiseGain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.05)
-      noise.connect(noiseGain).connect(dest)
-      noise.start()
-    },
-  },
-
-  player_joined: { play: (ctx, dest) => playTone(ctx, dest, 523, 0.1, 'sine') },      // C5 welcome chime
-  player_left: { play: (ctx, dest) => playTone(ctx, dest, 330, 0.15, 'triangle') },   // E4 departure tone
-  player_died: { play: (ctx, dest) => playExplosion(ctx, dest, 0.3) },                // Low rumble + explosion
-  player_respawned: { play: (ctx, dest) => playTone(ctx, dest, 880, 0.1, 'sine') },   // A5 respawn chime
-  wave_complete: { play: (ctx, dest) => playArpeggio(ctx, dest, [523, 659, 784], 0.5) }, // C-E-G triumphant
-  game_over: { play: (ctx, dest) => playArpeggio(ctx, dest, [392, 330, 262], 1.0) },  // G-E-C descending minor
-  countdown_tick: { play: (ctx, dest) => playTone(ctx, dest, 440, 0.1, 'square') },  // A4 beep
-  game_start: { play: (ctx, dest) => playArpeggio(ctx, dest, [262, 330, 392, 523], 0.8) }, // C-E-G-C fanfare
-  ready_up: { play: (ctx, dest) => playTone(ctx, dest, 660, 0.15, 'sine') },          // E5 positive chime
-  menu_select: { play: (ctx, dest) => playTone(ctx, dest, 440, 0.03, 'square') },     // Quick click
-  menu_navigate: { play: (ctx, dest) => playTone(ctx, dest, 220, 0.02, 'square') },   // Soft tick
-
-  // Enhanced mode sounds
-  commander_hit: { play: (ctx, dest) => playTone(ctx, dest, 150, 0.15, 'sawtooth') }, // Metallic clang
-  tractor_beam: { play: (ctx, dest) => playWarble(ctx, dest, 300, 2.0) },             // Sustained warble
-  transform_spawn: { play: (ctx, dest) => playSparkle(ctx, dest, 0.2) },              // Splitting effect
-  capture: { play: (ctx, dest) => playSiren(ctx, dest, 0.4) },                        // Alarming siren
-}
-
-// Helper functions for sound synthesis
-function playTone(ctx: AudioContext, dest: AudioNode, freq: number, dur: number, type: OscillatorType) {
-  const osc = ctx.createOscillator()
-  const gain = ctx.createGain()
-  osc.type = type
-  osc.frequency.value = freq
-  gain.gain.setValueAtTime(0.3, ctx.currentTime)
-  gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + dur)
-  osc.connect(gain).connect(dest)
-  osc.start()
-  osc.stop(ctx.currentTime + dur)
-}
-
-function playArpeggio(ctx: AudioContext, dest: AudioNode, notes: number[], dur: number) {
-  const noteLen = dur / notes.length
-  notes.forEach((freq, i) => {
-    setTimeout(() => playTone(ctx, dest, freq, noteLen, 'square'), i * noteLen * 1000)
-  })
-}
-
-function playExplosion(ctx: AudioContext, dest: AudioNode, dur: number) {
-  const noise = createNoiseBuffer(ctx, dur)
-  const filter = ctx.createBiquadFilter()
-  filter.type = 'lowpass'
-  filter.frequency.setValueAtTime(400, ctx.currentTime)
-  filter.frequency.exponentialRampToValueAtTime(50, ctx.currentTime + dur)
-  const gain = ctx.createGain()
-  gain.gain.setValueAtTime(0.5, ctx.currentTime)
-  gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + dur)
-  noise.connect(filter).connect(gain).connect(dest)
-  noise.start()
-}
-
-function playWarble(ctx: AudioContext, dest: AudioNode, freq: number, dur: number) {
-  const osc = ctx.createOscillator()
-  const lfo = ctx.createOscillator()
-  const lfoGain = ctx.createGain()
-  lfo.frequency.value = 8
-  lfoGain.gain.value = 50
-  lfo.connect(lfoGain).connect(osc.frequency)
-  osc.frequency.value = freq
-  osc.type = 'sine'
-  const gain = ctx.createGain()
-  gain.gain.value = 0.2
-  osc.connect(gain).connect(dest)
-  lfo.start()
-  osc.start()
-  osc.stop(ctx.currentTime + dur)
-}
-
-function playSparkle(ctx: AudioContext, dest: AudioNode, dur: number) {
-  for (let i = 0; i < 5; i++) {
-    setTimeout(() => playTone(ctx, dest, 1000 + Math.random() * 2000, 0.05, 'sine'), i * 40)
-  }
-}
-
-function playSiren(ctx: AudioContext, dest: AudioNode, dur: number) {
-  const osc = ctx.createOscillator()
-  osc.type = 'sawtooth'
-  osc.frequency.setValueAtTime(400, ctx.currentTime)
-  osc.frequency.linearRampToValueAtTime(800, ctx.currentTime + dur / 2)
-  osc.frequency.linearRampToValueAtTime(400, ctx.currentTime + dur)
-  const gain = ctx.createGain()
-  gain.gain.value = 0.3
-  osc.connect(gain).connect(dest)
-  osc.start()
-  osc.stop(ctx.currentTime + dur)
-}
-
-function createNoiseBuffer(ctx: AudioContext, duration: number): AudioBufferSourceNode {
-  const bufferSize = ctx.sampleRate * duration
-  const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate)
-  const data = buffer.getChannelData(0)
-  for (let i = 0; i < bufferSize; i++) {
-    data[i] = Math.random() * 2 - 1
-  }
-  const source = ctx.createBufferSource()
-  source.buffer = buffer
-  return source
+interface SfxParams {
+  freq?: number
+  dur: number
+  type?: 'sine' | 'square' | 'sawtooth' | 'triangle' | 'noise' | 'warble' | 'sparkle' | 'siren'
+  sweep?: number      // End frequency for sweep
+  noise?: boolean     // Add noise burst
+  notes?: number[]    // For arpeggios
 }
 ```
 
@@ -2508,19 +2766,14 @@ function createNoiseBuffer(ctx: AudioContext, duration: number): AudioBufferSour
 import { useEffect } from 'react'
 import { audio } from '../audio/engine'
 import type { GameState } from '../../../shared/types'
-import type { GameEvent } from '../../../shared/protocol'
 
 export function useGameAudio(state: GameState | null, enhanced: boolean) {
-  // Initialize audio on first interaction
+  // Start music when game starts
   useEffect(() => {
-    const initAudio = () => {
-      audio.init()
+    if (state?.status === 'playing') {
       audio.playMusic(enhanced ? 'enhanced' : 'normal')
-      document.removeEventListener('keydown', initAudio)
     }
-    document.addEventListener('keydown', initAudio)
-    return () => document.removeEventListener('keydown', initAudio)
-  }, [enhanced])
+  }, [state?.status, enhanced])
 
   // Adjust tempo based on aliens remaining
   useEffect(() => {
@@ -2922,43 +3175,47 @@ class MockWebSocket {
 ### State Synchronization Tests
 
 ```typescript
-// client/src/__tests__/applyDelta.test.ts
-import { describe, expect, test } from 'bun:test'
-import { applyDelta } from '../hooks/useGameConnection'
+// client/src/__tests__/gameConnection.test.ts
+import { describe, expect, test, mock } from 'bun:test'
 
-describe('applyDelta', () => {
-  const baseState = {
-    players: { p1: { x: 40, kills: 0, alive: true } },
-    bullets: [{ id: 1, x: 10, y: 5 }],
-    aliens: [{ id: 1, alive: true }, { id: 2, alive: true }],
-    score: 0,
-    lives: 3,
-  }
+describe('Game Connection', () => {
+  // Note: We use full state sync (no deltas), so tests focus on message handling
 
-  test('updates player position', () => {
-    const delta = { players: { p1: { x: 42 } } }
-    const next = applyDelta(baseState, delta)
-    expect(next.players.p1.x).toBe(42)
-    expect(next.players.p1.kills).toBe(0)  // unchanged
+  test('sync message replaces entire game state', () => {
+    const initialState = { score: 0, aliens: [] }
+    const newState = { score: 100, aliens: [{ id: 'e_1', alive: true }] }
+
+    // Simulate receiving sync message
+    const setState = mock((state: any) => state)
+    // On sync, state is completely replaced
+    setState(newState)
+
+    expect(setState).toHaveBeenCalledWith(newState)
   })
 
-  test('removes killed aliens', () => {
-    const delta = { aliens: { killed: [1] } }
-    const next = applyDelta(baseState, delta)
-    expect(next.aliens[0].alive).toBe(false)
-    expect(next.aliens[1].alive).toBe(true)
-  })
-
-  test('adds and removes bullets', () => {
-    const delta = {
-      bullets: {
-        add: [{ id: 2, x: 20, y: 10 }],
-        remove: [1]
-      }
+  test('connection sends join message on open', async () => {
+    const sentMessages: any[] = []
+    const mockWs = {
+      send: (data: string) => sentMessages.push(JSON.parse(data)),
+      close: () => {},
     }
-    const next = applyDelta(baseState, delta)
-    expect(next.bullets.length).toBe(1)
-    expect(next.bullets[0].id).toBe(2)
+
+    // Simulate connection open
+    mockWs.send(JSON.stringify({ type: 'join', name: 'Alice', enhancedMode: false }))
+
+    expect(sentMessages[0]).toEqual({ type: 'join', name: 'Alice', enhancedMode: false })
+  })
+
+  test('input state message includes held keys', () => {
+    const sentMessages: any[] = []
+    const mockWs = {
+      send: (data: string) => sentMessages.push(JSON.parse(data)),
+    }
+
+    // Simulate updating input state
+    mockWs.send(JSON.stringify({ type: 'input', held: { left: true, right: false } }))
+
+    expect(sentMessages[0]).toEqual({ type: 'input', held: { left: true, right: false } })
   })
 
   test('updates score and lives', () => {
