@@ -404,7 +404,7 @@ interface Commander extends Alien {
 
 ```typescript
 interface DiveBomber extends Alien {
-  type: 'divebomber'
+  type: 'dive_bomber'  // Use underscore consistently
   diveState: 'formation' | 'diving' | 'returning'
   divePathProgress: number
   diveDirection: 1 | -1
@@ -738,8 +738,8 @@ function plasmaColor(value: number): [number, number, number] {
    Client                           Server
      │                                │
      │◄─── { type: "event",          │  gameReducer returns events[]
-     │       name: "entity_killed",  │  which shell broadcasts
-     │       data: {entityId, pts} } │
+     │       name: "alien_killed",   │  which shell broadcasts
+     │       data: {alienId, ...} }  │
      │                                │
 ```
 
@@ -1367,16 +1367,18 @@ const enhancedMode: GameMode = {
   },
 
   getPoints(entityType) {
+    // Base points match scoring table: Commander=150, DiveBomber=80
+    // These are in-formation values; diving/escort bonuses handled separately
     const points: Record<string, number> = {
       squid: 30, crab: 20, octopus: 10,
-      commander: 100, diveBomber: 150, ufo: 300,
+      commander: 150, dive_bomber: 80, ufo: 300,
     }
     return points[entityType] ?? 0
   },
 
   getWaveConfig(wave) {
-    // Challenging stages every 4 waves
-    if (wave % 4 === 0) {
+    // Challenging stages on waves 3, 7, 11, 15... (every 4 waves starting at 3)
+    if (wave >= 3 && (wave - 3) % 4 === 0) {
       return { speedMultiplier: 1.5, challengingStage: true }
     }
     return { speedMultiplier: 1 + (wave - 1) * 0.15 }
@@ -1559,8 +1561,8 @@ const collisionSystem = {
               if (entity.score) {
                 events.push({
                   type: 'event',
-                  name: 'entity_killed',
-                  data: { entityId: entity.id, points: entity.score.points },
+                  name: 'alien_killed',  // Matches protocol ServerEvent type
+                  data: { alienId: entity.id, playerId: bullet.ownerId, points: entity.score.points },
                 })
               }
             }
@@ -1701,7 +1703,7 @@ describe('gameReducer', () => {
     const alien = result.state.entities.find(e => e.id === 'a1')
     expect(alien?.alive).toBe(false)
     expect(result.events).toContainEqual(
-      expect.objectContaining({ name: 'entity_killed', data: { entityId: 'a1', points: 30 } })
+      expect.objectContaining({ name: 'alien_killed', data: { alienId: 'a1', playerId: 'p1', points: 30 } })
     )
   })
 })
@@ -2026,15 +2028,16 @@ interface CommanderEntity {
 }
 
 interface DiveBomberEntity {
-  kind: 'divebomber'
+  kind: 'dive_bomber'  // Matches type in DiveBomber interface
   id: string
   x: number
   y: number
   alive: boolean
   diveState: 'formation' | 'diving' | 'returning'
   divePathProgress: number
-  formationX: number
-  formationY: number
+  diveDirection: 1 | -1
+  row: number  // Formation position for returning
+  col: number
 }
 
 interface BulletEntity {
@@ -2071,7 +2074,7 @@ function getCommanders(entities: Entity[]): CommanderEntity[] {
   return entities.filter((e): e is CommanderEntity => e.kind === 'commander')
 }
 function getDiveBombers(entities: Entity[]): DiveBomberEntity[] {
-  return entities.filter((e): e is DiveBomberEntity => e.kind === 'divebomber')
+  return entities.filter((e): e is DiveBomberEntity => e.kind === 'dive_bomber')
 }
 function getBullets(entities: Entity[]): BulletEntity[] {
   return entities.filter((e): e is BulletEntity => e.kind === 'bullet')
@@ -2183,8 +2186,10 @@ interface Alien extends BaseAlien {
 interface Commander extends BaseAlien {
   type: 'commander'
   health: 2 | 1                     // 2 hits to kill (green → purple → dead)
-  tractorBeamCooldown: number
-  capturedPlayerId: string | null
+  tractorBeamActive: boolean        // Currently firing tractor beam
+  tractorBeamCooldown: number       // Ticks until beam can fire again
+  capturedPlayerId: string | null   // Player currently captured
+  escorts: string[]                 // IDs of escorting aliens in V-formation
 }
 
 interface DiveBomber extends BaseAlien {
@@ -2356,7 +2361,7 @@ type ServerEvent =
   | { type: 'event'; name: 'countdown_tick'; data: { count: number } }
   | { type: 'event'; name: 'countdown_cancelled'; data: { reason: string } }
   | { type: 'event'; name: 'game_start'; data: void }
-  | { type: 'event'; name: 'alien_killed'; data: { alienId: string; playerId: string | null } }
+  | { type: 'event'; name: 'alien_killed'; data: { alienId: string; playerId: string | null; points: number } }
   | { type: 'event'; name: 'wave_complete'; data: { wave: number } }
   | { type: 'event'; name: 'game_over'; data: { result: 'victory' | 'defeat' } }
   | { type: 'event'; name: 'ufo_spawn'; data: { x: number } }
@@ -3115,11 +3120,12 @@ export class GameRoom implements DurableObject {
     return aliens
   }
 
-  private createBarriers(playerCount: number): BarrierEntity[] {
+  private createBarriers(playerCount: number, screenWidth?: number): BarrierEntity[] {
     if (!this.game) return []
+    const width = screenWidth ?? this.game.config.width
     const barrierCount = Math.min(4, playerCount + 2)
     const barriers: BarrierEntity[] = []
-    const spacing = this.game.config.width / (barrierCount + 1)
+    const spacing = width / (barrierCount + 1)
 
     // Barrier shape: 5-wide top row, 4-segment bottom row with center gap
     // █████
@@ -4710,27 +4716,32 @@ describe('collision detection', () => {
 
 ```typescript
 // worker/src/game/__tests__/barriers.test.ts
+// Note: Tests use standalone createBarriers function, GameRoom.createBarriers wraps it
 import { describe, expect, test } from 'bun:test'
 import { createBarriers } from '../barriers'
 
 describe('createBarriers', () => {
+  // Helper to generate IDs for testing
+  let idCounter = 0
+  const generateId = () => `b_${++idCounter}`
+
   test('solo player gets 3 barriers', () => {
-    const barriers = createBarriers(1, 80)
-    expect(barriers.length).toBe(3)
+    const barriers = createBarriers(1, 80, generateId)
+    expect(barriers.length).toBe(3)  // playerCount + 2 = 3
   })
 
   test('4 players get 4 barriers (max)', () => {
-    const barriers = createBarriers(4, 80)
-    expect(barriers.length).toBe(4)
+    const barriers = createBarriers(4, 80, generateId)
+    expect(barriers.length).toBe(4)  // min(4, 4+2) = 4
   })
 
-  test('each barrier has 9 segments', () => {
-    const barriers = createBarriers(1, 80)
+  test('each barrier has 9 segments (5 top + 4 bottom with gap)', () => {
+    const barriers = createBarriers(1, 80, generateId)
     barriers.forEach(b => expect(b.segments.length).toBe(9))
   })
 
   test('barriers are evenly spaced', () => {
-    const barriers = createBarriers(4, 80)
+    const barriers = createBarriers(4, 80, generateId)
     const spacing = barriers[1].x - barriers[0].x
     expect(barriers[2].x - barriers[1].x).toBe(spacing)
     expect(barriers[3].x - barriers[2].x).toBe(spacing)
