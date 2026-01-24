@@ -193,6 +193,10 @@ export function LaunchScreen({ onStartSolo, onCreateRoom, onJoinRoom, onMatchmak
         renderer.destroy()
         process.exit(0)
         break
+      case 'm':
+      case 'M':
+        audio.toggleMute()
+        break
     }
   }, [joinMode, roomCode, enhanced, onStartSolo, onCreateRoom, onJoinRoom, onMatchmake, renderer])
 
@@ -3535,12 +3539,12 @@ export function LobbyScreen({ state, currentPlayerId, onReady, onUnready, onStar
       <box borderStyle="single" borderColor="gray" padding={1}>
         {playerCount === 1 ? (
           <box flexDirection="column">
-            <text fg="white">[SPACE] {isReady ? 'Cancel Ready' : 'Ready Up'} (wait for others)</text>
+            <text fg="white">[ENTER] {isReady ? 'Cancel Ready' : 'Ready Up'} (wait for others)</text>
             <text fg="green">[S] Start Solo Game</text>
           </box>
         ) : (
           <box flexDirection="column">
-            <text fg="white">[SPACE] {isReady ? 'Cancel Ready' : 'Ready Up'}</text>
+            <text fg="white">[ENTER] {isReady ? 'Cancel Ready' : 'Ready Up'}</text>
             <text fg="gray">{readyCount}/{playerCount} ready{readyCount === playerCount ? ' - Starting...' : ''}</text>
           </box>
         )}
