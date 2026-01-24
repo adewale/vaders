@@ -666,24 +666,28 @@ function plasmaColor(value: number): [number, number, number] {
 │        ▼          │                                   │          │           │
 │  ┌─────────────┐  │                                   │          ▼           │
 │  │  useGame()  │  │                                   │  ┌────────────────┐  │
-│  │  Hook       │  │                                   │  │ Durable Object │  │
-│  │  • state    │  │         ┌─────────────┐          │  │   GameRoom     │  │
-│  │  • send()   │  │         │  Full State │          │  │  ┌──────────┐  │  │
-│  └─────────────┘  │◄────────│  Sync @30Hz │◄─────────│  │  │GameState │  │  │
-│        │          │         └─────────────┘          │  │  │• players │  │  │
-│        ▼          │                                   │  │  │• aliens  │  │  │
-│  ┌─────────────┐  │         ┌─────────────┐          │  │  │• bullets │  │  │
-│  │ Zig Native  │  │────────►│ InputState  │─────────►│  │  │• score   │  │  │
-│  │ • diffing   │  │         │ {left,right}│          │  │  └──────────┘  │  │
-│  │ • ANSI      │  │         │ + shoot     │          │  │  tick() @30Hz  │  │
-│  └─────────────┘  │         └─────────────┘          │  └────────────────┘  │
-│        │          │                                   │          │           │
-│        ▼          │                                   │          ▼           │
-│   ┌─────────┐     │                                   │  ┌────────────────┐  │
-│   │ stdout  │     │                                   │  │ KV: Registry   │  │
-│   │ 80×24   │     │                                   │  │ • open rooms   │  │
-│   └─────────┘     │                                   │  │ • matchmaking  │  │
-└───────────────────┘                                   │  └────────────────┘  │
+│  │  Hook       │  │                                   │  │    GameRoom    │  │
+│  │  • state    │  │         ┌─────────────┐          │  │ (Imper. Shell) │  │
+│  │  • send()   │  │         │  Full State │          │  │ ┌────────────┐ │  │
+│  └─────────────┘  │◄────────│  Sync @30Hz │◄─────────│  │ │InputQueue  │ │  │
+│        │          │         └─────────────┘          │  │ └─────┬──────┘ │  │
+│        ▼          │                                   │  │       ▼        │  │
+│  ┌─────────────┐  │         ┌─────────────┐          │  │ ┌────────────┐ │  │
+│  │ Zig Native  │  │────────►│ InputState  │─────────►│  │ │gameReducer │ │  │
+│  │ • diffing   │  │         │ {left,right}│          │  │ │(Pure Core) │ │  │
+│  │ • ANSI      │  │         │ + seq + shoot│         │  │ └─────┬──────┘ │  │
+│  └─────────────┘  │         └─────────────┘          │  │       ▼        │  │
+│        │          │                                   │  │ ┌────────────┐ │  │
+│        ▼          │                                   │  │ │ECS Systems │ │  │
+│   ┌─────────┐     │                                   │  │ └────────────┘ │  │
+│   │ stdout  │     │                                   │  └────────────────┘  │
+│   │ 80×24   │     │                                   │          │           │
+│   └─────────┘     │                                   │          ▼           │
+└───────────────────┘                                   │  ┌────────────────┐  │
+                                                        │  │  Matchmaker DO │  │
+                                                        │  │  • O(1) lookup │  │
+                                                        │  │  • room registry│ │
+                                                        │  └────────────────┘  │
                                                         └──────────────────────┘
 ```
 
@@ -697,37 +701,45 @@ function plasmaColor(value: number): [number, number, number] {
 1. PLAYER JOINS
    Client                           Server
      │                                │
-     │──── POST /room ───────────────►│  Create room
+     │──── POST /room ───────────────►│  Create room (via Matchmaker DO)
      │◄─── { roomCode: "ABC123" } ────│
      │                                │
      │──── WS /room/ABC123/ws ───────►│  Upgrade to WebSocket
-     │◄─── { type: "sync", state } ───│  Full state sync
+     │◄─── { type: "sync", state,    │  Full state + lastInputSeq
+     │       lastInputSeq: 0 } ───────│
      │                                │
 
-2. GAME LOOP (30Hz)
+2. GAME LOOP (30Hz) - Input Queue + Reducer Pattern
    Client                           Server
      │                                │
      │──── { type: "input",          │
-     │       held: {left:T,right:F} } │  Input state (continuous)
+     │       seq: N,                 │  Messages queued (not processed
+     │       held: {left:T,right:F} } │  immediately)
      │                                │
-     │──── { type: "shoot" } ────────►│  Discrete action
+     │──── { type: "shoot" } ────────►│  → inputQueue.push(action)
      │                                │
-     │         ┌──────────────────────┤  Server tick():
-     │         │  • Move players      │    - Process inputs
-     │         │  • Move aliens       │    - Update positions
-     │         │  • Move bullets      │    - Check collisions
-     │         │  • Check collisions  │    - Broadcast state
-     │         └──────────────────────┤
+     │         ┌──────────────────────┤  tick() {
+     │         │ 1. Process queue:    │    for (action of inputQueue)
+     │         │    gameReducer(s,a)  │      state = gameReducer(state, action)
+     │         │                      │    inputQueue = []
+     │         │ 2. Run tick action:  │
+     │         │    gameReducer(s,TICK)│   // ECS pipeline:
+     │         │    ├─ inputSystem    │   //   Input → Physics → Collision
+     │         │    ├─ physicsSystem  │   //   → Behavior → Spawn → Cleanup
+     │         │    ├─ collisionSystem│
+     │         │    └─ behaviorSystem │
+     │         └──────────────────────┤  }
      │                                │
-     │◄─── { type: "sync", state } ───│  Full state @30Hz
+     │◄─── { type: "sync", state,    │  Full state @30Hz + lastInputSeq
+     │       lastInputSeq: N } ───────│  (for prediction reconciliation)
      │                                │
 
-3. GAME EVENTS
+3. GAME EVENTS (from Reducer)
    Client                           Server
      │                                │
-     │◄─── { type: "event",          │
-     │       name: "alien_killed",   │  Game events broadcast
-     │       data: {alienId, ...} }  │  to all clients
+     │◄─── { type: "event",          │  gameReducer returns events[]
+     │       name: "entity_killed",  │  which shell broadcasts
+     │       data: {entityId, pts} } │
      │                                │
 ```
 
@@ -741,27 +753,35 @@ function plasmaColor(value: number): [number, number, number] {
 CLIENT (Bun + OpenTUI)
 ├── App.tsx ─────────────── Root component, screen routing
 ├── useGame() ───────────── WebSocket connection, state management
-├── useKeyboard() ───────── Input capture, key state tracking
+├── useKeyboard() ───────── Input capture (release: true for held keys)
 ├── GameScreen.tsx ──────── Main gameplay rendering
 ├── LobbyScreen.tsx ─────── Room code display, ready state
 ├── AudioEngine ─────────── Terminal bell + optional native FFI
 └── Zig Native ──────────── Buffer diffing, ANSI escape codes
 
-SERVER (Cloudflare)
+SERVER (Cloudflare) - Functional Core / Imperative Shell
 ├── Worker Router
-│   ├── POST /room ──────── Create room, register in KV
-│   ├── GET /room/:code/ws  Route to Durable Object
-│   └── GET /matchmake ──── Find open room from KV
+│   ├── POST /room ──────── Create room (via Matchmaker DO)
+│   ├── GET /room/:code/ws  Route to GameRoom DO
+│   └── GET /matchmake ──── O(1) lookup via Matchmaker DO
 │
-├── Durable Object: GameRoom
-│   ├── state.storage ───── Persist game state across restarts
-│   ├── tick() ──────────── Game loop at 30Hz (33ms interval)
-│   ├── broadcast() ─────── Send state to all connected clients
-│   └── WebSocket handlers  join, ready, input, shoot, ping
+├── Durable Object: GameRoom (Imperative Shell - I/O only)
+│   ├── inputQueue[] ────── Queued actions, processed at tick start
+│   ├── tick() ──────────── Calls gameReducer, broadcasts result
+│   ├── persistState() ──── Storage I/O (when reducer says persist)
+│   └── WebSocket handlers  Queue actions, don't process directly
 │
-└── KV: RoomRegistry
-    ├── room:{code} ─────── Room metadata (playerCount, status)
-    └── TTL: 1 hour ─────── Auto-cleanup of stale rooms
+├── Functional Core (Pure Functions - no I/O)
+│   ├── gameReducer() ───── (state, action) → {state, events, persist}
+│   ├── stateMachine ────── Guards status transitions
+│   ├── GameMode ────────── Strategy: classic vs enhanced behaviors
+│   └── ECS Systems ─────── Input → Physics → Collision → Behavior
+│
+└── Durable Object: Matchmaker
+    ├── rooms Map ───────── In-memory room registry
+    ├── /register ────────── Rooms register on create/update
+    ├── /unregister ──────── Rooms unregister on cleanup
+    └── /find ────────────── O(1) open room lookup
 ```
 
 ### State Synchronization Model
