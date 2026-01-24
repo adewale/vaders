@@ -3320,7 +3320,7 @@ export function App({ roomUrl, playerName, enhanced }: AppProps) {
 
   // Handle key press/release events to track held state
   // OpenTUI keyboard API: eventType is "press" | "repeat" | "release"
-  // See: https://github.com/anthropics/opentui/blob/main/docs/keyboard.md
+  // See: https://github.com/anomalyco/opentui
   useKeyboard((event) => {
     const isPress = event.eventType === 'press' && !event.repeated
     const isRelease = event.eventType === 'release'
