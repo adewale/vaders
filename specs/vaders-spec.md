@@ -1106,7 +1106,7 @@ type GameAction =
 // Result includes new state plus any side effects to execute
 interface ReducerResult {
   state: GameState
-  events: GameEvent[]        // Events to broadcast to clients
+  events: ServerEvent[]      // Events to broadcast to clients
   persist: boolean           // Whether to persist state
   scheduleAlarm?: number     // Schedule DO alarm (ms from now)
 }
@@ -1134,7 +1134,7 @@ export function gameReducer(state: GameState, action: GameAction): ReducerResult
 // Tick reducer runs all ECS systems
 function tickReducer(state: GameState, deltaTime: number): ReducerResult {
   let entities = state.entities
-  let events: GameEvent[] = []
+  let events: ServerEvent[] = []
 
   // Run systems in order
   entities = inputSystem(entities, state.players)
@@ -1442,8 +1442,9 @@ interface ScoreComponent {
   points: number
 }
 
-// Entity is a composition of components
-interface Entity {
+// ECSEntity is a composition of components (alternative pattern shown for reference)
+// NOTE: The actual implementation uses discriminated union Entity type in types.ts
+interface ECSEntity {
   id: string
   kind: string  // For quick filtering: 'alien', 'bullet', 'player', 'barrier'
   alive: boolean
@@ -1463,13 +1464,13 @@ interface Entity {
 ```typescript
 // worker/src/game/ecs/systems.ts
 
-// System interface
+// System interface (works with ECSEntity pattern)
 interface System {
   // Components this system requires
-  requiredComponents: (keyof Entity)[]
+  requiredComponents: (keyof ECSEntity)[]
 
   // Pure update function
-  update(entities: Entity[], context: SystemContext): Entity[]
+  update(entities: ECSEntity[], context: SystemContext): ECSEntity[]
 }
 
 interface SystemContext {
@@ -1481,7 +1482,7 @@ interface SystemContext {
 }
 
 // Helper to filter entities with required components
-function query(entities: Entity[], required: (keyof Entity)[]): Entity[] {
+function query(entities: ECSEntity[], required: (keyof ECSEntity)[]): ECSEntity[] {
   return entities.filter(e =>
     e.alive && required.every(comp => e[comp] !== undefined)
   )
@@ -1538,8 +1539,8 @@ const inputSystem: System = {
 const collisionSystem = {
   requiredComponents: ['position', 'hitbox'],
 
-  update(entities: Entity[], ctx: SystemContext): { entities: Entity[]; events: GameEvent[] } {
-    const events: GameEvent[] = []
+  update(entities: ECSEntity[], ctx: SystemContext): { entities: ECSEntity[]; events: ServerEvent[] } {
+    const events: ServerEvent[] = []
     const bullets = entities.filter(e => e.kind === 'bullet' && e.alive)
 
     const updated = entities.map(entity => {
@@ -1630,11 +1631,11 @@ const SYSTEM_ORDER: System[] = [
 ]
 
 export function runSystems(
-  entities: Entity[],
+  entities: ECSEntity[],
   context: SystemContext
-): { entities: Entity[]; events: GameEvent[] } {
+): { entities: ECSEntity[]; events: ServerEvent[] } {
   let current = entities
-  const allEvents: GameEvent[] = []
+  const allEvents: ServerEvent[] = []
 
   for (const system of SYSTEM_ORDER) {
     const result = system.update(current, context)
@@ -2947,9 +2948,10 @@ export class GameRoom implements DurableObject {
       const bullet: BulletEntity = {
         kind: 'bullet',
         id: this.generateEntityId(),
-        ownerId: playerId,
         x: player.x,
         y: LAYOUT.PLAYER_Y - LAYOUT.BULLET_SPAWN_OFFSET,
+        alive: true,
+        ownerId: playerId,
         dy: -1,
       }
       this.game.entities.push(bullet)
@@ -3044,7 +3046,7 @@ export class GameRoom implements DurableObject {
     for (const alien of aliens) {
       if (!alien.alive) continue
       alien.x += this.game.alienDirection * 2
-      if (alien.x <= LAYOUT.PLAYER_MIN_X || alien.x >= LAYOUT.PLAYER_MAX_X) hitEdge = true
+      if (alien.x <= LAYOUT.ALIEN_MIN_X || alien.x >= LAYOUT.ALIEN_MAX_X) hitEdge = true
     }
 
     if (hitEdge) {
@@ -3075,9 +3077,10 @@ export class GameRoom implements DurableObject {
     const bullet: BulletEntity = {
       kind: 'bullet',
       id: this.generateEntityId(),
-      ownerId: null,
       x: shooter.x,
       y: shooter.y + 1,
+      alive: true,
+      ownerId: null,
       dy: 1,
     }
 
@@ -3250,6 +3253,7 @@ export class GameRoom implements DurableObject {
         kind: 'barrier',
         id: this.generateEntityId(),
         x,
+        y: LAYOUT.BARRIER_Y,
         segments,
       })
     }
@@ -4575,7 +4579,7 @@ export function useGameAudio(state: GameState | null, enhanced: boolean) {
 }
 
 // GameEvent → SoundEffect mapping (some events map to different sound names)
-const EVENT_SOUND_MAP: Record<GameEvent, SoundEffect> = {
+const EVENT_SOUND_MAP: Record<GameEvent, SoundEffect | null> = {
   player_joined: 'player_joined',
   player_left: 'player_left',
   player_ready: 'ready_up',        // UI feedback sound
@@ -4583,10 +4587,12 @@ const EVENT_SOUND_MAP: Record<GameEvent, SoundEffect> = {
   player_died: 'player_died',
   player_respawned: 'player_respawned',
   countdown_tick: 'countdown_tick',
+  countdown_cancelled: null,       // No sound for cancelled countdown
   game_start: 'game_start',
   alien_killed: 'alien_killed',
   wave_complete: 'wave_complete',
   game_over: 'game_over',
+  ufo_spawn: 'ufo_spawn',
 }
 
 // In useGameConnection.ts, handle events:
@@ -5366,9 +5372,7 @@ Pin all `@opentui/*` packages to the same version to avoid reconciler mismatches
 
 ### Cloudflare Workers
 
-- Wrangler v3.0+
-- Durable Objects requires Workers Paid plan
-- SQLite storage (beta) recommended for new projects
+- Wrangler v3.0+ Make sure the version date is set to today.
 
 ---
 
