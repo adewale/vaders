@@ -1276,27 +1276,90 @@ export function gameReducer(state: GameState, action: GameAction): ReducerResult
   }
 }
 
-// Tick reducer runs all ECS systems
+// Tick reducer runs all game systems (pure, deterministic)
 function tickReducer(state: GameState, deltaTime: number): ReducerResult {
+  const scaled = getScaledConfig(Object.keys(state.players).length, state.config)
   let entities = state.entities
+  let players = { ...state.players }
   let events: ServerEvent[] = []
+  let rngSeed = state.rngSeed
+  let alienDirection = state.alienDirection
+  let lives = state.lives
+  let score = state.score
 
-  // Run systems in order
-  entities = inputSystem(entities, state.players)
-  entities = physicsSystem(entities, deltaTime)
-  const collisionResult = collisionSystem(entities, state)
+  // 1. Apply player movement from held input
+  for (const [id, player] of Object.entries(players)) {
+    if (!player.alive) continue
+    let x = player.x
+    if (player.inputState.left) x = Math.max(LAYOUT.PLAYER_MIN_X, x - state.config.playerMoveSpeed)
+    if (player.inputState.right) x = Math.min(LAYOUT.PLAYER_MAX_X, x + state.config.playerMoveSpeed)
+    if (x !== player.x) players[id] = { ...player, x }
+  }
+
+  // 2. Move bullets (physics)
+  entities = entities.map(e => {
+    if (e.kind !== 'bullet') return e
+    return { ...e, y: e.y + e.dy * state.config.baseBulletSpeed }
+  }).filter(e => e.kind !== 'bullet' || (e.y > 0 && e.y < state.config.height))
+
+  // 3. Check collisions
+  const collisionResult = collisionSystem(entities, state, players)
   entities = collisionResult.entities
+  players = collisionResult.players
   events = [...events, ...collisionResult.events]
-  entities = behaviorSystem(entities, state)
+  score += collisionResult.scoreGained
+  lives -= collisionResult.livesLost
 
-  // Check end conditions
-  const endResult = checkEndConditions({ ...state, entities })
+  // 4. Move aliens (at scaled interval)
+  if (state.tick % scaled.alienMoveIntervalTicks === 0) {
+    const moveResult = moveAliens(entities, alienDirection, state.config)
+    entities = moveResult.entities
+    alienDirection = moveResult.newDirection
+  }
+
+  // 5. Alien shooting (seeded RNG for determinism)
+  let tempState = { ...state, rngSeed }
+  if (seededRandom(tempState) < scaled.alienShootProbability) {
+    const shootResult = alienShoot(entities, tempState)
+    entities = shootResult.entities
+  }
+  rngSeed = tempState.rngSeed
+
+  // 6. Player respawns (co-op only)
+  const nextTick = state.tick + 1
+  for (const [id, player] of Object.entries(players)) {
+    if (!player.alive && player.respawnAtTick && nextTick >= player.respawnAtTick) {
+      players[id] = {
+        ...player,
+        alive: true,
+        respawnAtTick: null,
+        x: getPlayerSpawnX(player.slot, Object.keys(players).length, state.config.width),
+      }
+      events.push({ type: 'event', name: 'player_respawned', data: { playerId: id } })
+    }
+  }
+
+  // 7. Enhanced mode systems
+  if (state.enhancedMode) {
+    const enhancedResult = tickEnhancedMode(entities, state, tempState)
+    entities = enhancedResult.entities
+    events = [...events, ...enhancedResult.events]
+    rngSeed = tempState.rngSeed
+  }
+
+  // 8. Check end conditions
+  const endResult = checkEndConditions({ ...state, entities, players, lives })
 
   return {
     state: {
       ...state,
       entities,
-      tick: state.tick + 1,
+      players,
+      tick: nextTick,
+      rngSeed,
+      alienDirection,
+      lives,
+      score,
       status: endResult.status ?? state.status,
     },
     events: [...events, ...endResult.events],
@@ -1500,8 +1563,8 @@ const enhancedMode: GameMode = {
     if (tick % 300 === 0 && state.wave >= 2) {
       entities.push(createDiveBomber(state))
     }
-    // Spawn UFO randomly
-    if (Math.random() < 0.001) {
+    // Spawn UFO randomly (uses seeded RNG for determinism)
+    if (seededRandom(state) < 0.001) {
       entities.push(createUFO())
     }
     return entities
@@ -2150,6 +2213,7 @@ interface GameState {
   status: 'waiting' | 'countdown' | 'playing' | 'game_over'
   tick: number
   enhancedMode: boolean
+  rngSeed: number                   // Seeded RNG state for determinism
 
   // Countdown state (only valid when status === 'countdown')
   countdownRemaining: number | null  // 3, 2, 1, or null
@@ -2169,6 +2233,15 @@ interface GameState {
   alienDirection: 1 | -1
 
   config: GameConfig
+}
+
+// Seeded random number generator (mulberry32) for deterministic simulation
+// Mutates state.rngSeed and returns value in [0, 1)
+function seededRandom(state: GameState): number {
+  let t = state.rngSeed += 0x6D2B79F5
+  t = Math.imul(t ^ t >>> 15, t | 1)
+  t ^= t + Math.imul(t ^ t >>> 7, t | 61)
+  return ((t ^ t >>> 14) >>> 0) / 4294967296
 }
 
 // Unified entity type for all game objects (discriminated union on 'kind')
@@ -2686,6 +2759,7 @@ export class GameRoom implements DurableObject {
       mode: 'solo',
       status: 'waiting',
       tick: 0,
+      rngSeed: Date.now(),  // Seed for deterministic random (advances each use)
       countdownRemaining: null,
       players: {},
       readyPlayerIds: [],
@@ -3025,16 +3099,19 @@ export class GameRoom implements DurableObject {
       for (const event of result.events) {
         this.broadcast(event)
       }
+      if (result.persist) void this.persistState()
     }
 
-    // 2. Run TICK action via reducer (movement, collisions, AI, spawning)
+    // 2. Run TICK action via reducer (movement, collisions, AI, respawns, end conditions)
+    // All game logic is in the pure reducer - shell only handles I/O
     const tickResult = gameReducer(this.game, { type: 'TICK', deltaTime: this.game.config.tickIntervalMs })
     this.game = tickResult.state
     for (const event of tickResult.events) {
       this.broadcast(event)
     }
+    if (tickResult.persist) void this.persistState()
 
-    // 3. Handle disconnect grace period (only during playing - lobby removes immediately)
+    // 3. Handle disconnect grace period (I/O concern - stays in shell)
     const toRemove: string[] = []
     const now = Date.now()
     for (const player of Object.values(this.game.players)) {
@@ -3045,26 +3122,11 @@ export class GameRoom implements DurableObject {
         }
       }
     }
-
-    // 4. Check game-ending conditions
-
-    if (this.game.tick % scaled.alienMoveIntervalTicks === 0) {
-      this.moveAliens()
+    for (const playerId of toRemove) {
+      void this.removePlayer(playerId)
     }
 
-    if (Math.random() < scaled.alienShootProbability) {
-      this.alienShoot()
-    }
-
-    // Enhanced mode: process commanders, dive bombers, transforms
-    if (this.game.enhancedMode) {
-      this.tickEnhancedMode()
-    }
-
-    this.checkEndConditions()
-    this.game.tick++
-
-    // Heartbeat: update registry every ~60s to prevent staleness eviction
+    // 4. Heartbeat: update registry every ~60s to prevent staleness eviction
     // At 30Hz, 1800 ticks ≈ 60 seconds
     if (this.game.tick % 1800 === 0) {
       void this.updateRoomRegistry()
@@ -3124,6 +3186,12 @@ export class GameRoom implements DurableObject {
       e.kind !== 'bullet' || (e.y >= 0 && e.y < this.game!.config.height - 1)
     )
   }
+
+  // ─── Reference Implementations ─────────────────────────────────────────────
+  // The methods below show the game logic for illustration. In the actual
+  // implementation, all game logic runs through the pure `gameReducer` and its
+  // helper functions (collisionSystem, moveAliens, alienShoot, etc.) which use
+  // seeded RNG for determinism. These imperative methods are kept as reference.
 
   private checkCollisions() {
     if (!this.game) return
@@ -4647,6 +4715,7 @@ type SoundEffect =
   | 'ready_up'
   | 'countdown_tick'
   | 'game_start'
+  | 'ufo_spawn'
 
 /**
  * Sound effect descriptions for native audio implementation.
@@ -5428,6 +5497,7 @@ export function createGameState(overrides: Partial<GameState> = {}): GameState {
     mode: 'solo',
     status: 'playing',
     tick: 0,
+    rngSeed: 12345,  // Fixed seed for deterministic tests
     enhancedMode: false,
     countdownRemaining: null,
     players: {},
