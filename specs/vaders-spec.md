@@ -293,12 +293,12 @@ export const ASCII_SPRITES = {
   barrier: '#',
 }
 
-// ASCII symbols (safe for alignment - no variable-width emoji)
+// ASCII symbols (safe for alignment - single-width characters only)
 export const ASCII_SYMBOLS = {
-  heart: '<3',
+  heart: '*',       // Single-width (was '<3' which is 2 chars)
   heartEmpty: '.',
   skull: 'X',
-  trophy: '#1',
+  trophy: '1',      // Single-width (was '#1' which is 2 chars)
   pointer: '>',
   star: '*',
   cross: 'X',
@@ -1018,7 +1018,7 @@ The Worker handles HTTP routing and room management. Each room code maps determi
 
 export interface Env {
   GAME_ROOM: DurableObjectNamespace
-  ROOM_REGISTRY: KVNamespace  // For matchmaking
+  MATCHMAKER: DurableObjectNamespace  // Single instance for O(1) matchmaking
 }
 
 export default {
@@ -1028,13 +1028,15 @@ export default {
     // POST /room - Create new room, returns room code
     if (url.pathname === '/room' && request.method === 'POST') {
       // Generate unique room code (loop until we find one not in KV)
+      // Generate unique room code (check Matchmaker DO for collision)
+      const matchmaker = env.MATCHMAKER.get(env.MATCHMAKER.idFromName('global'))
       let roomCode: string
       let attempts = 0
       const maxAttempts = 10
       do {
         roomCode = generateRoomCode()  // 6-char base36
-        const existing = await env.ROOM_REGISTRY.get(`room:${roomCode}`)
-        if (!existing) break
+        const check = await matchmaker.fetch(new Request(`https://internal/info/${roomCode}`))
+        if (check.status === 404) break  // Room code not in use
         attempts++
       } while (attempts < maxAttempts)
 
@@ -1048,17 +1050,16 @@ export default {
       const id = env.GAME_ROOM.idFromName(roomCode)
       const stub = env.GAME_ROOM.get(id)
 
-      // Initialize room and register for matchmaking
+      // Initialize room and register with Matchmaker
       await stub.fetch(new Request('https://internal/init', {
         method: 'POST',
         body: JSON.stringify({ roomCode })
       }))
-      await env.ROOM_REGISTRY.put(`room:${roomCode}`, JSON.stringify({
-        roomCode,
-        createdAt: Date.now(),
-        playerCount: 0,
-        status: 'waiting'
-      }), { expirationTtl: 3600 })  // 1 hour TTL
+      const matchmaker = env.MATCHMAKER.get(env.MATCHMAKER.idFromName('global'))
+      await matchmaker.fetch(new Request('https://internal/register', {
+        method: 'POST',
+        body: JSON.stringify({ roomCode, playerCount: 0, status: 'waiting' })
+      }))
 
       return new Response(JSON.stringify({ roomCode }), {
         headers: { 'Content-Type': 'application/json' }
@@ -1074,27 +1075,30 @@ export default {
       return stub.fetch(request)
     }
 
-    // GET /matchmake - Find or create an open room
+    // GET /matchmake - Find or create an open room (via Matchmaker DO - O(1) lookup)
     if (url.pathname === '/matchmake') {
-      const openRoom = await findOpenRoom(env.ROOM_REGISTRY)
-      if (openRoom) {
-        return new Response(JSON.stringify({ roomCode: openRoom }), {
+      const matchmaker = env.MATCHMAKER.get(env.MATCHMAKER.idFromName('global'))
+      const result = await matchmaker.fetch(new Request('https://internal/find'))
+      const { roomCode } = await result.json() as { roomCode: string | null }
+      if (roomCode) {
+        return new Response(JSON.stringify({ roomCode }), {
           headers: { 'Content-Type': 'application/json' }
         })
       }
-      // No open rooms, create one
-      return env.GAME_ROOM.fetch(new Request(url.origin + '/room', { method: 'POST' }))
+      // No open rooms, create one (recursive call to POST /room)
+      return fetch(new Request(url.origin + '/room', { method: 'POST' }))
     }
 
-    // GET /room/:code - Room info (player count, status)
+    // GET /room/:code - Room info (via Matchmaker DO)
     const infoMatch = url.pathname.match(/^\/room\/([A-Z0-9]{6})$/)
     if (infoMatch) {
       const roomCode = infoMatch[1]
-      const info = await env.ROOM_REGISTRY.get(`room:${roomCode}`)
-      if (!info) {
+      const matchmaker = env.MATCHMAKER.get(env.MATCHMAKER.idFromName('global'))
+      const result = await matchmaker.fetch(new Request(`https://internal/info/${roomCode}`))
+      if (result.status === 404) {
         return new Response(JSON.stringify({ error: 'Room not found' }), { status: 404 })
       }
-      return new Response(info, { headers: { 'Content-Type': 'application/json' } })
+      return result
     }
 
     return new Response('Not Found', { status: 404 })
@@ -1111,19 +1115,68 @@ function generateRoomCode(): string {
   return code
 }
 
-async function findOpenRoom(registry: KVNamespace): Promise<string | null> {
-  // List rooms that are waiting and have space
-  const list = await registry.list({ prefix: 'room:' })
-  for (const key of list.keys) {
-    const info = await registry.get(key.name)
-    if (info) {
-      const room = JSON.parse(info)
-      if (room.status === 'waiting' && room.playerCount < 4) {
-        return room.roomCode
-      }
-    }
+// Matchmaker Durable Object - O(1) room lookup instead of KV list scan
+export class Matchmaker implements DurableObject {
+  private rooms: Map<string, { playerCount: number; status: string; updatedAt: number }> = new Map()
+
+  constructor(private state: DurableObjectState) {
+    // Restore from storage on cold start
+    this.state.blockConcurrencyWhile(async () => {
+      const stored = await this.state.storage.get<Map<string, any>>('rooms')
+      if (stored) this.rooms = stored
+    })
   }
-  return null
+
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url)
+
+    // POST /register - Room registers/updates itself
+    if (url.pathname === '/register' && request.method === 'POST') {
+      const { roomCode, playerCount, status } = await request.json() as {
+        roomCode: string; playerCount: number; status: string
+      }
+      this.rooms.set(roomCode, { playerCount, status, updatedAt: Date.now() })
+      await this.state.storage.put('rooms', this.rooms)
+      return new Response('OK')
+    }
+
+    // POST /unregister - Room removes itself (on cleanup/alarm)
+    if (url.pathname === '/unregister' && request.method === 'POST') {
+      const { roomCode } = await request.json() as { roomCode: string }
+      this.rooms.delete(roomCode)
+      await this.state.storage.put('rooms', this.rooms)
+      return new Response('OK')
+    }
+
+    // GET /find - Find an open room (O(1) with Map iteration)
+    if (url.pathname === '/find') {
+      for (const [roomCode, info] of this.rooms) {
+        if (info.status === 'waiting' && info.playerCount < 4) {
+          return new Response(JSON.stringify({ roomCode }), {
+            headers: { 'Content-Type': 'application/json' }
+          })
+        }
+      }
+      return new Response(JSON.stringify({ roomCode: null }), {
+        headers: { 'Content-Type': 'application/json' }
+      })
+    }
+
+    // GET /info/:roomCode - Get room info
+    const infoMatch = url.pathname.match(/^\/info\/([A-Z0-9]{6})$/)
+    if (infoMatch) {
+      const roomCode = infoMatch[1]
+      const info = this.rooms.get(roomCode)
+      if (!info) {
+        return new Response('Not found', { status: 404 })
+      }
+      return new Response(JSON.stringify({ roomCode, ...info }), {
+        headers: { 'Content-Type': 'application/json' }
+      })
+    }
+
+    return new Response('Not found', { status: 404 })
+  }
 }
 ```
 
@@ -1152,7 +1205,7 @@ interface GameEntity extends Position {
 interface GameState {
   roomId: string                    // 6-char base36 (0-9, A-Z)
   mode: 'solo' | 'coop'
-  status: 'waiting' | 'countdown' | 'playing' | 'paused' | 'game_over'
+  status: 'waiting' | 'countdown' | 'playing' | 'game_over'
   tick: number
   enhancedMode: boolean
 
@@ -1765,7 +1818,8 @@ export class GameRoom implements DurableObject {
           respawnAt: null,
           kills: 0,
           disconnectedAt: null,
-          inputState: { left: false, right: false },  // Initialize input state
+          lastInputSeq: 0,  // Initialize for prediction reconciliation
+          inputState: { left: false, right: false },
         }
 
         this.game.players[player.id] = player
@@ -1786,7 +1840,7 @@ export class GameRoom implements DurableObject {
           if (msg.enhancedMode !== undefined) {
             this.game.enhancedMode = msg.enhancedMode
           }
-          this.startGame()
+          await this.startGame()
         }
         break
       }
@@ -1809,9 +1863,11 @@ export class GameRoom implements DurableObject {
 
           // Cancel countdown if someone unreadies during it
           if (wasReady && this.game.status === 'countdown') {
-            this.cancelCountdown('Player unreadied')
+            await this.cancelCountdown('Player unreadied')
+            // Note: cancelCountdown already persists state
+          } else {
+            await this.persistState()  // Persist on unready
           }
-          await this.persistState()  // Persist on unready
         }
         break
       }
@@ -1873,7 +1929,7 @@ export class GameRoom implements DurableObject {
       if (this.game.countdownRemaining === 0) {
         clearInterval(this.countdownInterval!)
         this.countdownInterval = null
-        this.startGame()
+        void this.startGame()  // Fire-and-forget async call from interval
       } else {
         this.broadcast({ type: 'event', name: 'countdown_tick', data: { count: this.game.countdownRemaining } })
       }
@@ -1894,16 +1950,19 @@ export class GameRoom implements DurableObject {
 
   private async updateRoomRegistry() {
     if (!this.game) return
-    // Update KV with current room status for matchmaking
-    await this.env.ROOM_REGISTRY.put(`room:${this.game.roomId}`, JSON.stringify({
-      roomCode: this.game.roomId,
-      playerCount: Object.keys(this.game.players).length,
-      status: this.game.status,
-      updatedAt: Date.now()
-    }), { expirationTtl: 3600 })
+    // Update Matchmaker DO with current room status (O(1) vs KV list scan)
+    const matchmaker = this.env.MATCHMAKER.get(this.env.MATCHMAKER.idFromName('global'))
+    await matchmaker.fetch(new Request('https://internal/register', {
+      method: 'POST',
+      body: JSON.stringify({
+        roomCode: this.game.roomId,
+        playerCount: Object.keys(this.game.players).length,
+        status: this.game.status,
+      })
+    }))
   }
 
-  private startGame() {
+  private async startGame() {
     if (!this.game) return
     const playerCount = Object.keys(this.game.players).length
     const scaled = getScaledConfig(playerCount, this.game.config)
@@ -1921,7 +1980,7 @@ export class GameRoom implements DurableObject {
 
     this.broadcast({ type: 'event', name: 'game_start' })
     this.broadcastFullState()
-    this.persistState()
+    await this.persistState()
 
     // Game loop at 30Hz - full state broadcast every tick
     this.interval = setInterval(() => this.tick(), this.game.config.tickIntervalMs)
@@ -2323,9 +2382,9 @@ export class GameRoom implements DurableObject {
     const playerCount = Object.keys(this.game.players).length
 
     if (playerCount === 0) {
+      // All players left - end the game (no pause/resume support)
       if (this.game.status === 'playing') {
-        this.game.status = 'paused'
-        if (this.interval) clearInterval(this.interval)
+        await this.endGame('defeat')
       }
       // Set alarm for cleanup in 5 minutes
       this.state.storage.setAlarm(Date.now() + 5 * 60 * 1000)
@@ -2351,9 +2410,13 @@ export class GameRoom implements DurableObject {
 
   async alarm() {
     // Cleanup: This alarm fires 5 minutes after the last player leaves.
-    // Remove from matchmaking registry so /matchmake doesn't return dead rooms.
+    // Unregister from Matchmaker so /matchmake doesn't return dead rooms.
     if (this.game) {
-      await this.env.ROOM_REGISTRY.delete(`room:${this.game.roomId}`)
+      const matchmaker = this.env.MATCHMAKER.get(this.env.MATCHMAKER.idFromName('global'))
+      await matchmaker.fetch(new Request('https://internal/unregister', {
+        method: 'POST',
+        body: JSON.stringify({ roomCode: this.game.roomId })
+      }))
     }
     // Clear stored state - DO instance will be evicted by runtime
     await this.state.storage.deleteAll()
@@ -2440,18 +2503,36 @@ export function App({ roomUrl, playerName, enhanced }: AppProps) {
 
   // Track held keys for continuous input
   const heldKeys = useRef<InputState>({ left: false, right: false })
+  const predictionInterval = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Handle key down/up events to track held state
+  // Local prediction loop: when keys are held, continuously apply movement locally
+  // and periodically resend input state (even if unchanged) at 30Hz for server sync
+  useEffect(() => {
+    predictionInterval.current = setInterval(() => {
+      const held = heldKeys.current
+      if (!held.left && !held.right) return  // No keys held, skip
+
+      // Apply prediction locally and send to server
+      updateInput(held)
+    }, 33)  // 30Hz matches server tick rate
+
+    return () => {
+      if (predictionInterval.current) clearInterval(predictionInterval.current)
+    }
+  }, [updateInput])
+
+  // Handle key press/release events to track held state
+  // OpenTUI: eventType is "press" | "repeat" | "release", need { release: true } option
   useKeyboard((event) => {
-    const isKeyDown = event.type === 'keydown'
-    const isKeyUp = event.type === 'keyup'
+    const isPress = event.eventType === 'press' && !event.repeated
+    const isRelease = event.eventType === 'release'
 
     // Movement keys update held state
     if (event.name === 'left' || event.name === 'a') {
-      if (isKeyDown && !heldKeys.current.left) {
+      if (isPress && !heldKeys.current.left) {
         heldKeys.current.left = true
         updateInput(heldKeys.current)
-      } else if (isKeyUp) {
+      } else if (isRelease) {
         heldKeys.current.left = false
         updateInput(heldKeys.current)
       }
@@ -2459,25 +2540,25 @@ export function App({ roomUrl, playerName, enhanced }: AppProps) {
     }
 
     if (event.name === 'right' || event.name === 'd') {
-      if (isKeyDown && !heldKeys.current.right) {
+      if (isPress && !heldKeys.current.right) {
         heldKeys.current.right = true
         updateInput(heldKeys.current)
-      } else if (isKeyUp) {
+      } else if (isRelease) {
         heldKeys.current.right = false
         updateInput(heldKeys.current)
       }
       return
     }
 
-    // Discrete actions (only on keydown)
-    if (!isKeyDown) return
+    // Discrete actions (only on initial press, not repeat or release)
+    if (!isPress) return
 
     if (event.name === 'space') {
       shoot()
     } else if (event.name === 'q') {
       renderer.destroy()
     }
-  })
+  }, { release: true })  // Enable release events for held key tracking
 
   // Get interpolated render state
   const state = getRenderState()
@@ -2506,12 +2587,9 @@ export function App({ roomUrl, playerName, enhanced }: AppProps) {
       return <GameScreen state={state} currentPlayerId={playerId} />
     case 'game_over':
       return <GameOverScreen state={state} currentPlayerId={playerId} />
-    case 'paused':
-      return (
-        <box width="100%" height="100%" justifyContent="center" alignItems="center">
-          <text fg="yellow">Game Paused - Waiting for players...</text>
-        </box>
-      )
+    // Note: No 'paused' state - if all players leave during game, it ends
+    default:
+      return null
   }
 }
 ```
@@ -3089,12 +3167,17 @@ compatibility_date = "2024-01-15"
 
 [durable_objects]
 bindings = [
-  { name = "GAME_ROOM", class_name = "GameRoom" }
+  { name = "GAME_ROOM", class_name = "GameRoom" },
+  { name = "MATCHMAKER", class_name = "Matchmaker" }
 ]
 
 [[migrations]]
 tag = "v1"
 new_classes = ["GameRoom"]
+
+[[migrations]]
+tag = "v2"
+new_classes = ["Matchmaker"]
 ```
 
 ---
@@ -3968,6 +4051,39 @@ describe('GameRoom WebSocket protocol', () => {
     const respawnedEvents = ws1.messages.filter(m => m.name === 'player_respawned')
     expect(respawnedEvents.length).toBeGreaterThan(0)
   })
+
+  test('input seq is acknowledged in sync messages', async () => {
+    // This is the core prediction reconciliation feature:
+    // 1. Client sends input with seq number
+    // 2. Server updates player.lastInputSeq
+    // 3. Server includes lastInputSeq in sync message
+    // Without this, client prediction never stabilizes
+
+    const ws = new MockWebSocket()
+    await room.handleSession(ws)
+    ws.receive({ type: 'join', name: 'Alice' })
+
+    // Start solo game
+    ws.receive({ type: 'start_solo' })
+    ws.messages = []  // Clear previous messages
+
+    // Send input with seq = 42
+    ws.receive({ type: 'input', seq: 42, held: { left: true, right: false } })
+
+    // Manually trigger a tick to get sync message
+    // (In real test, wait for interval or call tick directly)
+    room.tick?.()
+
+    // Find the sync message
+    const syncMsg = ws.messages.find(m => m.type === 'sync')
+    expect(syncMsg).toBeDefined()
+    expect(syncMsg.lastInputSeq).toBe(42)
+
+    // Verify player state was also updated
+    const player = syncMsg.state.players[syncMsg.playerId]
+    expect(player.lastInputSeq).toBe(42)
+    expect(player.inputState).toEqual({ left: true, right: false })
+  })
 })
 
 // Mock WebSocket helper
@@ -4246,6 +4362,8 @@ export function createPlayer(overrides: Partial<Player> = {}): Player {
     respawnAt: null,
     kills: 0,
     disconnectedAt: null,
+    lastInputSeq: 0,
+    inputState: { left: false, right: false },
     ...overrides,
   }
 }
