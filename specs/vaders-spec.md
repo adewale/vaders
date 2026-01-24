@@ -1772,7 +1772,7 @@ export class GameRoom implements DurableObject {
         this.sessions.set(ws, player.id)
         this.game.mode = Object.keys(this.game.players).length === 1 ? 'solo' : 'coop'
 
-        ws.send(JSON.stringify({ type: 'sync', state: this.game, playerId: player.id }))
+        ws.send(JSON.stringify({ type: 'sync', state: this.game, playerId: player.id, lastInputSeq: 0 }))
         this.broadcast({ type: 'event', name: 'player_joined', data: { player } })
         await this.persistState()  // Persist on player join
         await this.updateRoomRegistry()
@@ -1820,6 +1820,7 @@ export class GameRoom implements DurableObject {
         // Update held key state (processed on each tick)
         if (playerId && this.game.players[playerId] && this.game.status === 'playing') {
           this.game.players[playerId].inputState = msg.held
+          this.game.players[playerId].lastInputSeq = msg.seq  // Track for prediction reconciliation
         }
         break
       }
@@ -1991,9 +1992,11 @@ export class GameRoom implements DurableObject {
   private broadcastFullState() {
     if (!this.game) return
     // Broadcast full game state to all connected clients
+    // Each client gets their own lastInputSeq for prediction reconciliation
     for (const [ws, playerId] of this.sessions) {
       try {
-        ws.send(JSON.stringify({ type: 'sync', state: this.game, playerId }))
+        const lastInputSeq = this.game.players[playerId]?.lastInputSeq ?? 0
+        ws.send(JSON.stringify({ type: 'sync', state: this.game, playerId, lastInputSeq }))
       } catch {
         // WebSocket may be closed
       }
