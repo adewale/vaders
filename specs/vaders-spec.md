@@ -747,9 +747,9 @@ Server (authoritative)                    Client (predictive render)
 │     GameState      │                   │   RenderState      │
 │  ┌──────────────┐  │   sync @30Hz     │  ┌──────────────┐  │
 │  │ players: {}  │  │ ═══════════════► │  │ serverState  │  │ ← Last received
-│  │ aliens: []   │  │   (complete)     │  │ prevState    │  │ ← For lerp
-│  │ bullets: []  │  │                   │  │ localPlayer  │  │ ← Predicted
-│  │ tick: N      │  │                   │  │ lerpT: 0..1  │  │ ← Interpolation
+│  │ entities: [] │  │   (complete)     │  │ prevState    │  │ ← For lerp
+│  │ tick: N      │  │                   │  │ localPlayer  │  │ ← Predicted
+│  │ score, wave  │  │                   │  │ lerpT: 0..1  │  │ ← Interpolation
 │  └──────────────┘  │                   │  └──────────────┘  │
 │         ▲          │                   │         │          │
 │         │          │                   │         ▼          │
@@ -900,17 +900,20 @@ export function useInterpolation(serverState: GameState | null) {
 }
 
 // Usage in render:
-function AlienSprite({ alien, lerpPosition }: { alien: Alien; lerpPosition: Function }) {
+function AlienSprite({ alien, lerpPosition }: { alien: AlienEntity; lerpPosition: Function }) {
+  const findAlien = (state: GameState) =>
+    state.entities.find(e => e.id === alien.id && e.kind === 'alien') as AlienEntity | undefined
+
   const x = lerpPosition(
     alien.id,
-    (state) => state.aliens.find(a => a.id === alien.id)?.x,
-    (state) => state.aliens.find(a => a.id === alien.id)?.x
+    (state: GameState) => findAlien(state)?.x,
+    (state: GameState) => findAlien(state)?.x
   ) ?? alien.x
 
   const y = lerpPosition(
     alien.id,
-    (state) => state.aliens.find(a => a.id === alien.id)?.y,
-    (state) => state.aliens.find(a => a.id === alien.id)?.y
+    (state: GameState) => findAlien(state)?.y,
+    (state: GameState) => findAlien(state)?.y
   ) ?? alien.y
 
   return (
@@ -1105,18 +1108,10 @@ interface GameState {
   players: Record<string, Player>
   readyPlayerIds: string[]          // Array for JSON serialization
 
-  // Unified entity array with discriminated union (see Entity type below)
+  // All game entities in a single array with discriminated union
   entities: Entity[]
 
-  // Legacy arrays for backward compatibility during transition
-  aliens: Alien[]
-  bullets: Bullet[]
-  barriers: Barrier[]
-
-  // Enhanced mode only
-  commanders?: Commander[]
-  diveBombers?: DiveBomber[]
-  transforms?: TransformEnemy[]
+  // Enhanced mode: captured player tracking
   capturedPlayerIds?: Record<string, string>  // playerId → commanderId
 
   wave: number
@@ -1127,14 +1122,97 @@ interface GameState {
   config: GameConfig
 }
 
-// Unified entity type for all game objects
+// Unified entity type for all game objects (discriminated union on 'kind')
 type Entity =
-  | { kind: 'alien'; id: string; x: number; y: number; type: ClassicAlienType; alive: boolean; row: number; col: number }
-  | { kind: 'commander'; id: string; x: number; y: number; health: 1 | 2; tractorBeamActive: boolean; capturedPlayerId: string | null }
-  | { kind: 'divebomber'; id: string; x: number; y: number; diveState: 'formation' | 'diving' | 'returning'; diveProgress: number }
-  | { kind: 'bullet'; id: string; x: number; y: number; ownerId: string | null; dy: -1 | 1 }
-  | { kind: 'barrier'; id: string; x: number; segments: BarrierSegment[] }
-  | { kind: 'transform'; id: string; x: number; y: number; type: TransformType; velocity: Position; lifetime: number }
+  | AlienEntity
+  | CommanderEntity
+  | DiveBomberEntity
+  | BulletEntity
+  | BarrierEntity
+  | TransformEntity
+
+interface AlienEntity {
+  kind: 'alien'
+  id: string
+  x: number
+  y: number
+  type: ClassicAlienType
+  alive: boolean
+  row: number
+  col: number
+  points: number
+}
+
+interface CommanderEntity {
+  kind: 'commander'
+  id: string
+  x: number
+  y: number
+  alive: boolean
+  health: 1 | 2
+  tractorBeamActive: boolean
+  tractorBeamCooldown: number
+  capturedPlayerId: string | null
+  escorts: string[]  // IDs of escorting aliens
+}
+
+interface DiveBomberEntity {
+  kind: 'divebomber'
+  id: string
+  x: number
+  y: number
+  alive: boolean
+  diveState: 'formation' | 'diving' | 'returning'
+  divePathProgress: number
+  formationX: number
+  formationY: number
+}
+
+interface BulletEntity {
+  kind: 'bullet'
+  id: string
+  x: number
+  y: number
+  ownerId: string | null  // null = alien bullet
+  dy: -1 | 1              // -1 = up (player), 1 = down (alien)
+}
+
+interface BarrierEntity {
+  kind: 'barrier'
+  id: string
+  x: number
+  segments: BarrierSegment[]
+}
+
+interface TransformEntity {
+  kind: 'transform'
+  id: string
+  x: number
+  y: number
+  type: TransformType
+  velocity: Position
+  lifetime: number
+}
+
+// Helper functions to filter entities by kind
+function getAliens(entities: Entity[]): AlienEntity[] {
+  return entities.filter((e): e is AlienEntity => e.kind === 'alien')
+}
+function getCommanders(entities: Entity[]): CommanderEntity[] {
+  return entities.filter((e): e is CommanderEntity => e.kind === 'commander')
+}
+function getDiveBombers(entities: Entity[]): DiveBomberEntity[] {
+  return entities.filter((e): e is DiveBomberEntity => e.kind === 'divebomber')
+}
+function getBullets(entities: Entity[]): BulletEntity[] {
+  return entities.filter((e): e is BulletEntity => e.kind === 'bullet')
+}
+function getBarriers(entities: Entity[]): BarrierEntity[] {
+  return entities.filter((e): e is BarrierEntity => e.kind === 'barrier')
+}
+function getTransforms(entities: Entity[]): TransformEntity[] {
+  return entities.filter((e): e is TransformEntity => e.kind === 'transform')
+}
 
 interface GameConfig {
   width: number                     // Default: 80
@@ -1449,10 +1527,7 @@ export class GameRoom implements DurableObject {
       countdownRemaining: null,
       players: {},
       readyPlayerIds: [],
-      entities: [],
-      aliens: [],
-      bullets: [],
-      barriers: [],
+      entities: [],  // All game entities (aliens, bullets, barriers, etc.)
       wave: 1,
       lives: 3,
       score: 0,
@@ -1719,10 +1794,13 @@ export class GameRoom implements DurableObject {
     this.game.status = 'playing'
     this.game.countdownRemaining = null
     this.game.lives = scaled.lives
-    this.game.aliens = this.createAlienFormation(scaled.alienCols, scaled.alienRows)
-    this.game.barriers = this.createBarriers(playerCount)
-    this.game.bullets = []
     this.game.tick = 0
+
+    // Initialize entities: aliens + barriers (bullets added during gameplay)
+    this.game.entities = [
+      ...this.createAlienFormation(scaled.alienCols, scaled.alienRows),
+      ...this.createBarriers(playerCount),
+    ]
 
     this.broadcast({ type: 'event', name: 'game_start' })
     this.broadcastFullState()
@@ -1812,43 +1890,49 @@ export class GameRoom implements DurableObject {
     if (!player || !player.alive) return
 
     if (this.game.tick - player.lastShot >= this.game.config.playerCooldown) {
-      this.game.bullets.push({
+      const bullet: BulletEntity = {
+        kind: 'bullet',
         id: this.generateEntityId(),
         ownerId: playerId,
         x: player.x,
         y: LAYOUT.PLAYER_Y - LAYOUT.BULLET_SPAWN_OFFSET,
         dy: -1,
-      })
+      }
+      this.game.entities.push(bullet)
       player.lastShot = this.game.tick
     }
   }
 
   private moveBullets() {
     if (!this.game) return
+    const bullets = getBullets(this.game.entities)
 
-    for (const bullet of this.game.bullets) {
+    for (const bullet of bullets) {
       bullet.y += bullet.dy * this.game.config.baseBulletSpeed
     }
 
     // Remove out-of-bounds bullets
-    this.game.bullets = this.game.bullets.filter(
-      b => b.y >= 0 && b.y < this.game!.config.height - 1
+    this.game.entities = this.game.entities.filter(e =>
+      e.kind !== 'bullet' || (e.y >= 0 && e.y < this.game!.config.height - 1)
     )
   }
 
   private checkCollisions() {
     if (!this.game) return
     const bulletsToRemove = new Set<string>()
+    const bullets = getBullets(this.game.entities)
+    const aliens = getAliens(this.game.entities)
+    const barriers = getBarriers(this.game.entities)
 
-    for (const bullet of this.game.bullets) {
+    for (const bullet of bullets) {
       // Player bullets hitting aliens
       if (bullet.dy === -1) {
-        for (const alien of this.game.aliens) {
+        for (const alien of aliens) {
           if (!alien.alive) continue
           if (Math.abs(bullet.x - alien.x) < LAYOUT.COLLISION_H && Math.abs(bullet.y - alien.y) < LAYOUT.COLLISION_V) {
             alien.alive = false
             bulletsToRemove.add(bullet.id)
-            this.game.score += ALIEN_REGISTRY[alien.type].points
+            this.game.score += alien.points
 
             if (bullet.ownerId && this.game.players[bullet.ownerId]) {
               this.game.players[bullet.ownerId].kills++
@@ -1876,7 +1960,7 @@ export class GameRoom implements DurableObject {
       // Once a bullet hits something, stop checking other obstacles
       if (!bulletsToRemove.has(bullet.id)) {
         barrierLoop:
-        for (const barrier of this.game.barriers) {
+        for (const barrier of barriers) {
           for (const seg of barrier.segments) {
             if (seg.health <= 0) continue
             const segX = barrier.x + seg.offsetX
@@ -1892,14 +1976,18 @@ export class GameRoom implements DurableObject {
       }
     }
 
-    this.game.bullets = this.game.bullets.filter(b => !bulletsToRemove.has(b.id))
+    // Remove destroyed bullets
+    this.game.entities = this.game.entities.filter(e =>
+      e.kind !== 'bullet' || !bulletsToRemove.has(e.id)
+    )
   }
 
   private moveAliens() {
     if (!this.game) return
+    const aliens = getAliens(this.game.entities)
     let hitEdge = false
 
-    for (const alien of this.game.aliens) {
+    for (const alien of aliens) {
       if (!alien.alive) continue
       alien.x += this.game.alienDirection * 2
       if (alien.x <= LAYOUT.PLAYER_MIN_X || alien.x >= LAYOUT.PLAYER_MAX_X) hitEdge = true
@@ -1907,7 +1995,7 @@ export class GameRoom implements DurableObject {
 
     if (hitEdge) {
       this.game.alienDirection *= -1
-      for (const alien of this.game.aliens) {
+      for (const alien of aliens) {
         if (alien.alive) alien.y += 1
       }
     }
@@ -1915,10 +2003,11 @@ export class GameRoom implements DurableObject {
 
   private alienShoot() {
     if (!this.game) return
-    const aliveAliens = this.game.aliens.filter(a => a.alive)
+    const aliens = getAliens(this.game.entities)
+    const aliveAliens = aliens.filter(a => a.alive)
     if (aliveAliens.length === 0) return
 
-    const bottomAliens = new Map<number, Alien>()
+    const bottomAliens = new Map<number, AlienEntity>()
     for (const alien of aliveAliens) {
       const existing = bottomAliens.get(alien.col)
       if (!existing || alien.row > existing.row) {
@@ -1929,7 +2018,8 @@ export class GameRoom implements DurableObject {
     const shooters = Array.from(bottomAliens.values())
     const shooter = shooters[Math.floor(Math.random() * shooters.length)]
 
-    const bullet: Bullet = {
+    const bullet: BulletEntity = {
+      kind: 'bullet',
       id: this.generateEntityId(),
       ownerId: null,
       x: shooter.x,
@@ -1937,7 +2027,7 @@ export class GameRoom implements DurableObject {
       dy: 1,
     }
 
-    this.game.bullets.push(bullet)
+    this.game.entities.push(bullet)
     // Full state sync will include new bullet on next broadcast
   }
 
@@ -1962,12 +2052,15 @@ export class GameRoom implements DurableObject {
 
   private checkEndConditions() {
     if (!this.game) return
-    if (this.game.aliens.every(a => !a.alive)) {
+    const aliens = getAliens(this.game.entities)
+    const aliveAliens = aliens.filter(a => a.alive)
+
+    if (aliveAliens.length === 0) {
       this.nextWave()
       return
     }
 
-    const lowestAlien = Math.max(...this.game.aliens.filter(a => a.alive).map(a => a.y))
+    const lowestAlien = Math.max(...aliveAliens.map(a => a.y))
     if (lowestAlien >= LAYOUT.GAME_OVER_Y) {
       this.endGame('defeat')
     }
@@ -1979,8 +2072,12 @@ export class GameRoom implements DurableObject {
     const playerCount = Object.keys(this.game.players).length
     const scaled = getScaledConfig(playerCount, this.game.config)
 
-    this.game.aliens = this.createAlienFormation(scaled.alienCols, scaled.alienRows)
-    this.game.bullets = []
+    // Remove bullets, keep barriers, replace aliens with new formation
+    const barriers = getBarriers(this.game.entities)
+    this.game.entities = [
+      ...this.createAlienFormation(scaled.alienCols, scaled.alienRows),
+      ...barriers,
+    ]
     this.game.alienDirection = 1
 
     this.broadcast({ type: 'event', name: 'wave_complete', data: { wave: this.game.wave } })
@@ -2000,9 +2097,12 @@ export class GameRoom implements DurableObject {
 
   private tickEnhancedMode() {
     if (!this.game) return
+    const commanders = getCommanders(this.game.entities)
+    const diveBombers = getDiveBombers(this.game.entities)
+    const transforms = getTransforms(this.game.entities)
 
     // Process commanders (Galaga Boss behavior)
-    for (const cmd of this.game.commanders ?? []) {
+    for (const cmd of commanders) {
       if (!cmd.alive) continue
       // Tractor beam cooldown
       if (cmd.tractorBeamCooldown > 0) cmd.tractorBeamCooldown--
@@ -2010,7 +2110,7 @@ export class GameRoom implements DurableObject {
     }
 
     // Process dive bombers (Galaxian purple dive)
-    for (const db of this.game.diveBombers ?? []) {
+    for (const db of diveBombers) {
       if (!db.alive) continue
       if (db.diveState === 'diving') {
         db.divePathProgress += 0.02
@@ -2022,23 +2122,24 @@ export class GameRoom implements DurableObject {
     }
 
     // Process transform enemies (spawned from destroyed dive bombers)
-    const expiredTransforms: string[] = []
-    for (const te of this.game.transforms ?? []) {
+    const expiredTransforms = new Set<string>()
+    for (const te of transforms) {
       te.x += te.velocity.x
       te.y += te.velocity.y
       te.lifetime--
       if (te.lifetime <= 0 || te.y > this.game.config.height) {
-        expiredTransforms.push(te.id)
+        expiredTransforms.add(te.id)
       }
     }
-    if (this.game.transforms) {
-      this.game.transforms = this.game.transforms.filter(t => !expiredTransforms.includes(t.id))
-    }
+    // Remove expired transforms
+    this.game.entities = this.game.entities.filter(e =>
+      e.kind !== 'transform' || !expiredTransforms.has(e.id)
+    )
   }
 
-  private createAlienFormation(cols: number, rows: number): Alien[] {
+  private createAlienFormation(cols: number, rows: number): AlienEntity[] {
     if (!this.game) return []
-    const aliens: Alien[] = []
+    const aliens: AlienEntity[] = []
     // Center the alien grid: (screenWidth - gridWidth) / 2
     const startX = Math.floor((this.game.config.width - cols * LAYOUT.ALIEN_COL_SPACING) / 2)
 
@@ -2046,6 +2147,7 @@ export class GameRoom implements DurableObject {
       const type = FORMATION_ROWS[row] || 'octopus'
       for (let col = 0; col < cols; col++) {
         aliens.push({
+          kind: 'alien',
           id: this.generateEntityId(),  // String ID from monotonic counter
           type,
           row,
@@ -2060,9 +2162,10 @@ export class GameRoom implements DurableObject {
     return aliens
   }
 
-  private createBarriers(playerCount: number): Barrier[] {
+  private createBarriers(playerCount: number): BarrierEntity[] {
+    if (!this.game) return []
     const barrierCount = Math.min(4, playerCount + 2)
-    const barriers: Barrier[] = []
+    const barriers: BarrierEntity[] = []
     const spacing = this.game.config.width / (barrierCount + 1)
 
     // Barrier shape: 5-wide top row, 4-segment bottom row with center gap
@@ -2083,7 +2186,12 @@ export class GameRoom implements DurableObject {
           }
         }
       }
-      barriers.push({ x, segments })
+      barriers.push({
+        kind: 'barrier',
+        id: this.generateEntityId(),
+        x,
+        segments,
+      })
     }
     return barriers
   }
@@ -2335,8 +2443,16 @@ export function LobbyScreen({ state, currentPlayerId, onReady, onUnready, onStar
 
 ```tsx
 // client/src/components/GameScreen.tsx
-import type { GameState, Player, Barrier as BarrierType } from '../../../shared/types'
+import type { GameState, Player, Entity, AlienEntity, BulletEntity, BarrierEntity } from '../../../shared/types'
 import { SPRITES, COLORS } from '../sprites'
+
+// Helper functions to filter entities by kind
+const getAliens = (entities: Entity[]): AlienEntity[] =>
+  entities.filter((e): e is AlienEntity => e.kind === 'alien')
+const getBullets = (entities: Entity[]): BulletEntity[] =>
+  entities.filter((e): e is BulletEntity => e.kind === 'bullet')
+const getBarriers = (entities: Entity[]): BarrierEntity[] =>
+  entities.filter((e): e is BarrierEntity => e.kind === 'barrier')
 
 interface GameScreenProps {
   state: GameState
@@ -2344,7 +2460,10 @@ interface GameScreenProps {
 }
 
 export function GameScreen({ state, currentPlayerId }: GameScreenProps) {
-  const { aliens, bullets, players, barriers, score, wave, lives, mode, status } = state
+  const { entities, players, score, wave, lives, mode, status } = state
+  const aliens = getAliens(entities)
+  const bullets = getBullets(entities)
+  const barriers = getBarriers(entities)
   const playerCount = Object.keys(players).length
   
   return (
@@ -2389,8 +2508,8 @@ export function GameScreen({ state, currentPlayerId }: GameScreenProps) {
         ))}
         
         {/* Barriers */}
-        {barriers.map((barrier, i) => (
-          <Barrier key={\`barrier-\${i}\`} barrier={barrier} />
+        {barriers.map(barrier => (
+          <Barrier key={barrier.id} barrier={barrier} />
         ))}
         
         {/* Players */}
@@ -2457,7 +2576,7 @@ function Barrier({ barrier }: { barrier: BarrierType }) {
 ```tsx
 // client/src/components/GameOverScreen.tsx
 import { useKeyboard, useRenderer } from '@opentui/react'
-import type { GameState } from '../../../shared/types'
+import type { GameState, AlienEntity } from '../../../shared/types'
 
 interface GameOverScreenProps {
   state: GameState
@@ -2467,7 +2586,8 @@ interface GameOverScreenProps {
 export function GameOverScreen({ state, currentPlayerId }: GameOverScreenProps) {
   const renderer = useRenderer()
   const players = Object.values(state.players).sort((a, b) => b.kills - a.kills)
-  const victory = state.aliens.every(a => !a.alive)
+  const aliens = state.entities.filter((e): e is AlienEntity => e.kind === 'alien')
+  const victory = aliens.every(a => !a.alive)
 
   useKeyboard((event) => {
     if (event.name === 'q' || event.name === 'escape') renderer.destroy()
@@ -2704,20 +2824,17 @@ export function useGameConnection(url: string, playerName: string, enhanced: boo
       }
     }
 
-    // Interpolate aliens
-    for (const alien of renderState.aliens) {
-      const prevAlien = prevState.current?.aliens.find(a => a.id === alien.id)
-      if (prevAlien) {
-        alien.x = lerpPosition(prevAlien.x, alien.x) ?? alien.x
-        alien.y = lerpPosition(prevAlien.y, alien.y) ?? alien.y
-      }
-    }
+    // Interpolate entities (aliens, bullets, etc.)
+    for (const entity of renderState.entities) {
+      const prevEntity = prevState.current?.entities.find(e => e.id === entity.id)
+      if (!prevEntity) continue
 
-    // Interpolate bullets
-    for (const bullet of renderState.bullets) {
-      const prevBullet = prevState.current?.bullets.find(b => b.id === bullet.id)
-      if (prevBullet) {
-        bullet.y = lerpPosition(prevBullet.y, bullet.y) ?? bullet.y
+      // Interpolate position for movable entities
+      if ('x' in entity && 'x' in prevEntity) {
+        entity.x = lerpPosition(prevEntity.x, entity.x) ?? entity.x
+      }
+      if ('y' in entity && 'y' in prevEntity) {
+        entity.y = lerpPosition(prevEntity.y, entity.y) ?? entity.y
       }
     }
 
@@ -3286,11 +3403,17 @@ interface SfxParams {
 
 ```tsx
 // client/src/hooks/useGameAudio.ts
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { audio } from '../audio/engine'
-import type { GameState } from '../../../shared/types'
+import type { GameState, AlienEntity } from '../../../shared/types'
 
 export function useGameAudio(state: GameState | null, enhanced: boolean) {
+  // Extract aliens from entities
+  const aliens = useMemo(() =>
+    state?.entities.filter((e): e is AlienEntity => e.kind === 'alien') ?? [],
+    [state?.entities]
+  )
+
   // Start music when game starts
   useEffect(() => {
     if (state?.status === 'playing') {
@@ -3300,9 +3423,9 @@ export function useGameAudio(state: GameState | null, enhanced: boolean) {
 
   // Adjust tempo based on aliens remaining
   useEffect(() => {
-    if (!state || state.status !== 'playing') return
-    const alive = state.aliens.filter(a => a.alive).length
-    const total = state.aliens.length
+    if (!state || state.status !== 'playing' || aliens.length === 0) return
+    const alive = aliens.filter(a => a.alive).length
+    const total = aliens.length
     const ratio = alive / total
 
     let tempo = 1.0
@@ -3312,7 +3435,7 @@ export function useGameAudio(state: GameState | null, enhanced: boolean) {
     else if (ratio < 0.75) tempo = 1.15
 
     audio.setMusicTempo(tempo)
-  }, [state?.aliens])
+  }, [state?.status, aliens])
 }
 
 // GameEvent → SoundEffect mapping (some events map to different sound names)
@@ -3705,8 +3828,8 @@ describe('Game Connection', () => {
   // Note: We use full state sync (no deltas), so tests focus on message handling
 
   test('sync message replaces entire game state', () => {
-    const initialState = { score: 0, aliens: [] }
-    const newState = { score: 100, aliens: [{ id: 'e_1', alive: true }] }
+    const initialState = { score: 0, entities: [] }
+    const newState = { score: 100, entities: [{ kind: 'alien', id: 'e_1', alive: true }] }
 
     // Simulate receiving sync message
     const setState = mock((state: any) => state)
@@ -3915,11 +4038,10 @@ export function createGameState(overrides: Partial<GameState> = {}): GameState {
     status: 'playing',
     tick: 0,
     enhancedMode: false,
+    countdownRemaining: null,
     players: {},
     readyPlayerIds: [],
-    aliens: [],
-    bullets: [],
-    barriers: [],
+    entities: [],  // All game entities (aliens, bullets, barriers)
     wave: 1,
     lives: 3,
     score: 0,
