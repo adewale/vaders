@@ -2439,7 +2439,7 @@ Audio is **client-side only** and **on by default**. Press `M` to toggle mute. A
 
 ### Sound Effects
 
-All sound effects are synthesized using Web Audio API for minimal bundle size.
+Sound effects use terminal bell for basic feedback, or optional native audio via Bun FFI for richer sound.
 
 | Event | Sound | Style |
 |-------|-------|-------|
