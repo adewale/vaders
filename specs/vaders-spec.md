@@ -731,29 +731,240 @@ SERVER (Cloudflare)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                      STATE SYNC: FULL STATE @ 30Hz                          │
+│               SERVER @ 30Hz  ←→  CLIENT @ 60fps                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 
-Why full state sync (not delta):
-• Simplicity: No client-side prediction or reconciliation
-• Reliability: Clients always converge to server truth
-• Bandwidth: ~2-4KB/tick for 4 players is acceptable at 30Hz
+The server runs at 30Hz (33ms ticks) to stay within Cloudflare DO CPU limits.
+The client renders at 60fps (16ms frames) for smooth visuals.
 
-Server (authoritative)                    Client (render-only)
+To bridge the gap:
+• Client-Side Prediction: Local player moves instantly on input
+• Interpolation (Lerp): Other entities smoothly animate between server states
+• Reconciliation: Server state corrects prediction errors
+
+Server (authoritative)                    Client (predictive render)
 ┌────────────────────┐                   ┌────────────────────┐
-│     GameState      │                   │     GameState      │
+│     GameState      │                   │   RenderState      │
 │  ┌──────────────┐  │   sync @30Hz     │  ┌──────────────┐  │
-│  │ players: {}  │  │ ═══════════════► │  │ players: {}  │  │
-│  │ aliens: []   │  │   (complete)     │  │ aliens: []   │  │
-│  │ bullets: []  │  │                   │  │ bullets: []  │  │
-│  │ score: N     │  │                   │  │ score: N     │  │
-│  │ tick: N      │  │                   │  │ tick: N      │  │
+│  │ players: {}  │  │ ═══════════════► │  │ serverState  │  │ ← Last received
+│  │ aliens: []   │  │   (complete)     │  │ prevState    │  │ ← For lerp
+│  │ bullets: []  │  │                   │  │ localPlayer  │  │ ← Predicted
+│  │ tick: N      │  │                   │  │ lerpT: 0..1  │  │ ← Interpolation
 │  └──────────────┘  │                   │  └──────────────┘  │
 │         ▲          │                   │         │          │
 │         │          │                   │         ▼          │
-│    tick() loop     │                   │    render(state)   │
-│    (mutations)     │                   │    (read-only)     │
+│    tick() @30Hz    │                   │   render() @60fps  │
+│    (authoritative) │                   │   (predictive)     │
 └────────────────────┘                   └────────────────────┘
+```
+
+### Client-Side Prediction
+
+The local player's ship responds instantly to input. The client predicts movement locally, then reconciles when server state arrives.
+
+```typescript
+// client/src/hooks/useClientPrediction.ts
+
+interface PredictedState {
+  localPlayerX: number           // Predicted position
+  pendingInputs: InputSnapshot[] // Inputs not yet acknowledged by server
+  lastServerTick: number         // Last tick received from server
+}
+
+interface InputSnapshot {
+  tick: number
+  held: InputState
+}
+
+const PLAYER_SPEED = 4  // Must match server CONFIG.playerSpeed
+
+export function useClientPrediction(
+  serverState: GameState | null,
+  playerId: string | null,
+  currentInput: InputState
+) {
+  const predicted = useRef<PredictedState>({
+    localPlayerX: 0,
+    pendingInputs: [],
+    lastServerTick: 0,
+  })
+
+  // When server state arrives, reconcile
+  useEffect(() => {
+    if (!serverState || !playerId) return
+    const serverPlayer = serverState.players[playerId]
+    if (!serverPlayer) return
+
+    // Server has processed up to this tick
+    const serverTick = serverState.tick
+
+    // Discard inputs the server has already processed
+    predicted.current.pendingInputs = predicted.current.pendingInputs.filter(
+      input => input.tick > serverTick
+    )
+
+    // Start from server position and replay pending inputs
+    let x = serverPlayer.x
+    for (const input of predicted.current.pendingInputs) {
+      if (input.held.left) x -= PLAYER_SPEED
+      if (input.held.right) x += PLAYER_SPEED
+      x = Math.max(1, Math.min(serverState.config.width - 2, x))
+    }
+
+    predicted.current.localPlayerX = x
+    predicted.current.lastServerTick = serverTick
+  }, [serverState, playerId])
+
+  // Apply local input immediately (called every frame)
+  const applyLocalInput = useCallback((tick: number) => {
+    // Record this input for replay during reconciliation
+    predicted.current.pendingInputs.push({ tick, held: { ...currentInput } })
+
+    // Apply immediately to predicted position
+    let x = predicted.current.localPlayerX
+    if (currentInput.left) x -= PLAYER_SPEED
+    if (currentInput.right) x += PLAYER_SPEED
+
+    const width = serverState?.config.width ?? 80
+    predicted.current.localPlayerX = Math.max(1, Math.min(width - 2, x))
+
+    return predicted.current.localPlayerX
+  }, [currentInput, serverState])
+
+  return {
+    predictedX: predicted.current.localPlayerX,
+    applyLocalInput,
+  }
+}
+```
+
+### Entity Interpolation (Lerp)
+
+Other players, aliens, and bullets interpolate between the previous and current server positions for smooth 60fps rendering.
+
+```typescript
+// client/src/hooks/useInterpolation.ts
+
+interface InterpolationState {
+  prevState: GameState | null
+  currState: GameState | null
+  lastSyncTime: number
+}
+
+const SYNC_INTERVAL = 33  // 30Hz = 33ms between syncs
+
+export function useInterpolation(serverState: GameState | null) {
+  const interp = useRef<InterpolationState>({
+    prevState: null,
+    currState: null,
+    lastSyncTime: 0,
+  })
+
+  // When new server state arrives, shift states
+  useEffect(() => {
+    if (!serverState) return
+    interp.current.prevState = interp.current.currState
+    interp.current.currState = serverState
+    interp.current.lastSyncTime = performance.now()
+  }, [serverState])
+
+  // Calculate lerp factor (0 to 1) based on time since last sync
+  const getLerpT = useCallback(() => {
+    const elapsed = performance.now() - interp.current.lastSyncTime
+    return Math.min(1, elapsed / SYNC_INTERVAL)
+  }, [])
+
+  // Interpolate a position
+  const lerpPosition = useCallback((
+    entityId: string,
+    getPrev: (state: GameState) => number | undefined,
+    getCurr: (state: GameState) => number | undefined
+  ): number | undefined => {
+    const { prevState, currState } = interp.current
+    if (!currState) return undefined
+
+    const curr = getCurr(currState)
+    if (curr === undefined) return undefined
+
+    // No previous state or entity didn't exist before - snap to current
+    if (!prevState) return curr
+    const prev = getPrev(prevState)
+    if (prev === undefined) return curr
+
+    // Linear interpolation: prev + (curr - prev) * t
+    const t = getLerpT()
+    return prev + (curr - prev) * t
+  }, [getLerpT])
+
+  return { lerpPosition, getLerpT }
+}
+
+// Usage in render:
+function AlienSprite({ alien, lerpPosition }: { alien: Alien; lerpPosition: Function }) {
+  const x = lerpPosition(
+    alien.id,
+    (state) => state.aliens.find(a => a.id === alien.id)?.x,
+    (state) => state.aliens.find(a => a.id === alien.id)?.x
+  ) ?? alien.x
+
+  const y = lerpPosition(
+    alien.id,
+    (state) => state.aliens.find(a => a.id === alien.id)?.y,
+    (state) => state.aliens.find(a => a.id === alien.id)?.y
+  ) ?? alien.y
+
+  return (
+    <text position="absolute" marginLeft={x} marginTop={y} color={ALIEN_REGISTRY[alien.type].color}>
+      {ALIEN_REGISTRY[alien.type].sprite}
+    </text>
+  )
+}
+```
+
+### Render Loop (60fps)
+
+The client runs a 60fps render loop independent of server sync rate.
+
+```typescript
+// client/src/hooks/useRenderLoop.ts
+
+export function useRenderLoop(callback: (dt: number) => void) {
+  const lastFrame = useRef(performance.now())
+  const frameId = useRef<number>()
+
+  useEffect(() => {
+    const loop = () => {
+      const now = performance.now()
+      const dt = now - lastFrame.current
+      lastFrame.current = now
+
+      callback(dt)
+
+      frameId.current = requestAnimationFrame(loop)
+    }
+
+    frameId.current = requestAnimationFrame(loop)
+    return () => {
+      if (frameId.current) cancelAnimationFrame(frameId.current)
+    }
+  }, [callback])
+}
+
+// In terminal environment (no requestAnimationFrame), use setInterval:
+export function useTerminalRenderLoop(callback: (dt: number) => void) {
+  const lastFrame = useRef(Date.now())
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Date.now()
+      const dt = now - lastFrame.current
+      lastFrame.current = now
+      callback(dt)
+    }, 16)  // ~60fps
+
+    return () => clearInterval(interval)
+  }, [callback])
+}
 ```
 
 ---
@@ -2290,10 +2501,21 @@ const RECONNECT_DELAY = 1000
 const MAX_RECONNECT_ATTEMPTS = 5
 
 export function useGameConnection(url: string, playerName: string, enhanced: boolean) {
-  const [state, setState] = useState<GameState | null>(null)
+  // Server state (received at 30Hz)
+  const [serverState, setServerState] = useState<GameState | null>(null)
   const [playerId, setPlayerId] = useState<string | null>(null)
   const [connected, setConnected] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Interpolation state (for smooth 60fps rendering)
+  const prevState = useRef<GameState | null>(null)
+  const lastSyncTime = useRef(0)
+
+  // Client-side prediction state
+  const localPlayerX = useRef(0)
+  const pendingInputs = useRef<Array<{ tick: number; held: InputState }>>([])
+  const localTick = useRef(0)
+
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectAttempts = useRef(0)
   const pingInterval = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -2326,8 +2548,29 @@ export function useGameConnection(url: string, playerName: string, enhanced: boo
       const msg: ServerMessage = JSON.parse(event.data)
       switch (msg.type) {
         case 'sync':
-          // Full state sync - simply replace state (30Hz from server)
-          setState(msg.state)
+          // Shift states for interpolation
+          prevState.current = serverState
+          lastSyncTime.current = Date.now()
+
+          // Reconcile prediction: discard acknowledged inputs, replay pending
+          if (playerId && msg.state.players[playerId]) {
+            const serverPlayer = msg.state.players[playerId]
+            const serverTick = msg.state.tick
+
+            // Discard inputs server has processed
+            pendingInputs.current = pendingInputs.current.filter(i => i.tick > serverTick)
+
+            // Replay pending inputs from server position
+            let x = serverPlayer.x
+            for (const input of pendingInputs.current) {
+              if (input.held.left) x -= CONFIG.playerSpeed
+              if (input.held.right) x += CONFIG.playerSpeed
+              x = Math.max(1, Math.min(msg.state.config.width - 2, x))
+            }
+            localPlayerX.current = x
+          }
+
+          setServerState(msg.state)
           if (msg.playerId) setPlayerId(msg.playerId)
           break
         case 'event':
@@ -2356,7 +2599,7 @@ export function useGameConnection(url: string, playerName: string, enhanced: boo
     ws.onerror = () => {
       setError('Connection error')
     }
-  }, [url, playerName, enhanced])
+  }, [url, playerName, enhanced, serverState, playerId])
 
   useEffect(() => {
     connect()
@@ -2366,11 +2609,22 @@ export function useGameConnection(url: string, playerName: string, enhanced: boo
     }
   }, [connect])
 
-  // Send input state when it changes
+  // Send input state and apply prediction immediately
   const updateInput = useCallback((held: InputState) => {
     inputState.current = held
     wsRef.current?.send(JSON.stringify({ type: 'input', held }))
-  }, [])
+
+    // Record for reconciliation and apply immediately
+    localTick.current++
+    pendingInputs.current.push({ tick: localTick.current, held: { ...held } })
+
+    // Predict movement locally
+    let x = localPlayerX.current
+    if (held.left) x -= CONFIG.playerSpeed
+    if (held.right) x += CONFIG.playerSpeed
+    const width = serverState?.config.width ?? 80
+    localPlayerX.current = Math.max(1, Math.min(width - 2, x))
+  }, [serverState])
 
   const shoot = useCallback(() => {
     wsRef.current?.send(JSON.stringify({ type: 'shoot' }))
@@ -2380,7 +2634,73 @@ export function useGameConnection(url: string, playerName: string, enhanced: boo
     wsRef.current?.send(JSON.stringify(msg))
   }, [])
 
-  return { state, playerId, send, connected, error, updateInput, shoot }
+  // Interpolation helper: lerp between prev and current state
+  const getLerpT = useCallback(() => {
+    const elapsed = Date.now() - lastSyncTime.current
+    return Math.min(1, elapsed / 33)  // 33ms = 30Hz
+  }, [])
+
+  const lerpPosition = useCallback((
+    prevPos: number | undefined,
+    currPos: number | undefined
+  ): number | undefined => {
+    if (currPos === undefined) return undefined
+    if (prevPos === undefined) return currPos
+    const t = getLerpT()
+    return prevPos + (currPos - prevPos) * t
+  }, [getLerpT])
+
+  // Build render state with prediction + interpolation
+  const getRenderState = useCallback((): GameState | null => {
+    if (!serverState) return null
+
+    // Clone state for rendering
+    const renderState = JSON.parse(JSON.stringify(serverState)) as GameState
+
+    // Apply local player prediction
+    if (playerId && renderState.players[playerId]) {
+      renderState.players[playerId].x = localPlayerX.current
+    }
+
+    // Interpolate other players
+    for (const [id, player] of Object.entries(renderState.players)) {
+      if (id === playerId) continue  // Local player uses prediction
+      const prevPlayer = prevState.current?.players[id]
+      if (prevPlayer) {
+        player.x = lerpPosition(prevPlayer.x, player.x) ?? player.x
+      }
+    }
+
+    // Interpolate aliens
+    for (const alien of renderState.aliens) {
+      const prevAlien = prevState.current?.aliens.find(a => a.id === alien.id)
+      if (prevAlien) {
+        alien.x = lerpPosition(prevAlien.x, alien.x) ?? alien.x
+        alien.y = lerpPosition(prevAlien.y, alien.y) ?? alien.y
+      }
+    }
+
+    // Interpolate bullets
+    for (const bullet of renderState.bullets) {
+      const prevBullet = prevState.current?.bullets.find(b => b.id === bullet.id)
+      if (prevBullet) {
+        bullet.y = lerpPosition(prevBullet.y, bullet.y) ?? bullet.y
+      }
+    }
+
+    return renderState
+  }, [serverState, playerId, lerpPosition])
+
+  return {
+    serverState,       // Raw server state (for debugging)
+    getRenderState,    // Interpolated + predicted state for rendering
+    playerId,
+    send,
+    connected,
+    error,
+    updateInput,
+    shoot,
+  }
 }
 
 // Play sound effects for game events
