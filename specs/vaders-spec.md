@@ -685,7 +685,7 @@ function plasmaColor(value: number): [number, number, number] {
 │   └─────────┘     │                                   │          ▼           │
 └───────────────────┘                                   │  ┌────────────────┐  │
                                                         │  │  Matchmaker DO │  │
-                                                        │  │  • O(1) lookup │  │
+                                                        │  │  • In-memory   │  │
                                                         │  │  • room registry│ │
                                                         │  └────────────────┘  │
                                                         └──────────────────────┘
@@ -763,7 +763,7 @@ SERVER (Cloudflare) - Functional Core / Imperative Shell
 ├── Worker Router
 │   ├── POST /room ──────── Create room (via Matchmaker DO)
 │   ├── GET /room/:code/ws  Route to GameRoom DO
-│   └── GET /matchmake ──── O(1) lookup via Matchmaker DO
+│   └── GET /matchmake ──── In-memory lookup via Matchmaker DO
 │
 ├── Durable Object: GameRoom (Imperative Shell - I/O only)
 │   ├── inputQueue[] ────── Queued actions, processed at tick start
@@ -781,7 +781,7 @@ SERVER (Cloudflare) - Functional Core / Imperative Shell
     ├── rooms Map ───────── In-memory room registry
     ├── /register ────────── Rooms register on create/update
     ├── /unregister ──────── Rooms unregister on cleanup
-    └── /find ────────────── O(1) open room lookup
+    └── /find ────────────── In-memory open room lookup
 ```
 
 ### State Synchronization Model
@@ -898,6 +898,8 @@ export function useClientPrediction(
 ### Entity Interpolation (Lerp)
 
 Other players, aliens, and bullets interpolate between the previous and current server positions for smooth 60fps rendering.
+
+> **Note:** Interpolation is **required** for decent visuals. Aliens move 2 cells every ~8-15 ticks (jumping visually), and bullets move 1 cell per tick. Without interpolation, movement appears jerky.
 
 ```typescript
 // client/src/hooks/useInterpolation.ts
@@ -1030,6 +1032,8 @@ export function useTerminalRenderLoop(callback: (dt: number) => void) {
 ---
 
 ## Game Engine Architecture
+
+> **Implementation Note:** This section describes the **reference architecture** using a pure reducer pattern. The **GameRoom implementation** below uses a simpler imperative approach for clarity. Both are valid - the reducer pattern is more testable; the imperative pattern is easier to follow. Choose based on project needs.
 
 The game engine uses a **Functional Core, Imperative Shell** architecture with ECS-inspired systems. This separates pure game logic from I/O concerns, making the engine deterministic and fully testable without a network.
 
@@ -1741,7 +1745,7 @@ The Worker handles HTTP routing and room management. Each room code maps determi
 
 export interface Env {
   GAME_ROOM: DurableObjectNamespace
-  MATCHMAKER: DurableObjectNamespace  // Single instance for O(1) matchmaking
+  MATCHMAKER: DurableObjectNamespace  // Single instance for in-memory matchmaking
 }
 
 export default {
@@ -1778,7 +1782,6 @@ export default {
         method: 'POST',
         body: JSON.stringify({ roomCode })
       }))
-      const matchmaker = env.MATCHMAKER.get(env.MATCHMAKER.idFromName('global'))
       await matchmaker.fetch(new Request('https://internal/register', {
         method: 'POST',
         body: JSON.stringify({ roomCode, playerCount: 0, status: 'waiting' })
@@ -1798,18 +1801,31 @@ export default {
       return stub.fetch(request)
     }
 
-    // GET /matchmake - Find or create an open room (via Matchmaker DO - O(1) lookup)
+    // GET /matchmake - Find or create an open room (in-memory lookup via Matchmaker DO)
     if (url.pathname === '/matchmake') {
       const matchmaker = env.MATCHMAKER.get(env.MATCHMAKER.idFromName('global'))
       const result = await matchmaker.fetch(new Request('https://internal/find'))
-      const { roomCode } = await result.json() as { roomCode: string | null }
-      if (roomCode) {
-        return new Response(JSON.stringify({ roomCode }), {
+      const { roomCode: existingRoom } = await result.json() as { roomCode: string | null }
+      if (existingRoom) {
+        return new Response(JSON.stringify({ roomCode: existingRoom }), {
           headers: { 'Content-Type': 'application/json' }
         })
       }
-      // No open rooms, create one (recursive call to POST /room)
-      return fetch(new Request(url.origin + '/room', { method: 'POST' }))
+      // No open rooms - create one (inline to avoid recursive fetch)
+      const newRoomCode = generateRoomCode()
+      const id = env.GAME_ROOM.idFromName(newRoomCode)
+      const stub = env.GAME_ROOM.get(id)
+      await stub.fetch(new Request('https://internal/init', {
+        method: 'POST',
+        body: JSON.stringify({ roomCode: newRoomCode })
+      }))
+      await matchmaker.fetch(new Request('https://internal/register', {
+        method: 'POST',
+        body: JSON.stringify({ roomCode: newRoomCode, playerCount: 0, status: 'waiting' })
+      }))
+      return new Response(JSON.stringify({ roomCode: newRoomCode }), {
+        headers: { 'Content-Type': 'application/json' }
+      })
     }
 
     // GET /room/:code - Room info (via Matchmaker DO)
@@ -1838,15 +1854,29 @@ function generateRoomCode(): string {
   return code
 }
 
-// Matchmaker Durable Object - O(1) room lookup instead of KV list scan
+// Matchmaker Durable Object - in-memory room lookup (no KV roundtrip)
+// Uses Record for JSON serialization (Map doesn't survive structured clone reliably)
+type RoomInfo = { playerCount: number; status: string; updatedAt: number }
+
 export class Matchmaker implements DurableObject {
-  private rooms: Map<string, { playerCount: number; status: string; updatedAt: number }> = new Map()
+  // Record serializes properly via structured clone (Map doesn't)
+  private rooms: Record<string, RoomInfo> = {}
+  // Separate set for O(1) average open room lookup
+  private openRooms: Set<string> = new Set()
 
   constructor(private state: DurableObjectState) {
     // Restore from storage on cold start
     this.state.blockConcurrencyWhile(async () => {
-      const stored = await this.state.storage.get<Map<string, any>>('rooms')
-      if (stored) this.rooms = stored
+      const stored = await this.state.storage.get<Record<string, RoomInfo>>('rooms')
+      if (stored) {
+        this.rooms = stored
+        // Rebuild openRooms set from stored data
+        for (const [roomCode, info] of Object.entries(stored)) {
+          if (info.status === 'waiting' && info.playerCount < 4) {
+            this.openRooms.add(roomCode)
+          }
+        }
+      }
     })
   }
 
@@ -1858,7 +1888,15 @@ export class Matchmaker implements DurableObject {
       const { roomCode, playerCount, status } = await request.json() as {
         roomCode: string; playerCount: number; status: string
       }
-      this.rooms.set(roomCode, { playerCount, status, updatedAt: Date.now() })
+      this.rooms[roomCode] = { playerCount, status, updatedAt: Date.now() }
+
+      // Update openRooms set for O(1) find
+      if (status === 'waiting' && playerCount < 4) {
+        this.openRooms.add(roomCode)
+      } else {
+        this.openRooms.delete(roomCode)
+      }
+
       await this.state.storage.put('rooms', this.rooms)
       return new Response('OK')
     }
@@ -1866,30 +1904,31 @@ export class Matchmaker implements DurableObject {
     // POST /unregister - Room removes itself (on cleanup/alarm)
     if (url.pathname === '/unregister' && request.method === 'POST') {
       const { roomCode } = await request.json() as { roomCode: string }
-      this.rooms.delete(roomCode)
+      delete this.rooms[roomCode]
+      this.openRooms.delete(roomCode)
       await this.state.storage.put('rooms', this.rooms)
       return new Response('OK')
     }
 
-    // GET /find - Find an open room (O(1) with Map iteration)
+    // GET /find - Find an open room (O(1) average via Set)
     if (url.pathname === '/find') {
-      for (const [roomCode, info] of this.rooms) {
-        if (info.status === 'waiting' && info.playerCount < 4) {
-          return new Response(JSON.stringify({ roomCode }), {
-            headers: { 'Content-Type': 'application/json' }
-          })
-        }
+      // Get first open room from set (O(1) average)
+      const roomCode = this.openRooms.values().next().value
+      if (roomCode) {
+        return new Response(JSON.stringify({ roomCode }), {
+          headers: { 'Content-Type': 'application/json' }
+        })
       }
       return new Response(JSON.stringify({ roomCode: null }), {
         headers: { 'Content-Type': 'application/json' }
       })
     }
 
-    // GET /info/:roomCode - Get room info
+    // GET /info/:roomCode - Get room info (O(1) via Record lookup)
     const infoMatch = url.pathname.match(/^\/info\/([A-Z0-9]{6})$/)
     if (infoMatch) {
       const roomCode = infoMatch[1]
-      const info = this.rooms.get(roomCode)
+      const info = this.rooms[roomCode]
       if (!info) {
         return new Response('Not found', { status: 404 })
       }
@@ -2060,7 +2099,7 @@ interface GameConfig {
   disconnectGracePeriod: number     // Ticks (300 = 10 seconds at 30Hz)
 }
 
-const DEFAULT_CONFIG: GameConfig = {
+export const DEFAULT_CONFIG: GameConfig = {
   width: 80,
   height: 24,
   maxPlayers: 4,
@@ -2646,13 +2685,17 @@ export class GameRoom implements DurableObject {
     this.broadcast({ type: 'event', name: 'countdown_tick', data: { count: 3 } })
 
     this.countdownInterval = setInterval(() => {
-      if (!this.game || this.game.status !== 'countdown') return
+      // Guard: interval can fire after cancellation due to timing
+      if (!this.game || this.game.status !== 'countdown' || !this.countdownInterval) return
 
       this.game.countdownRemaining!--
       if (this.game.countdownRemaining === 0) {
-        clearInterval(this.countdownInterval!)
+        clearInterval(this.countdownInterval)
         this.countdownInterval = null
-        void this.startGame()  // Fire-and-forget async call from interval
+        // Catch to prevent unhandled rejection if startGame throws
+        void this.startGame().catch((err) => {
+          console.error('[GameRoom] startGame failed:', err)
+        })
       } else {
         this.broadcast({ type: 'event', name: 'countdown_tick', data: { count: this.game.countdownRemaining } })
       }
@@ -2673,7 +2716,7 @@ export class GameRoom implements DurableObject {
 
   private async updateRoomRegistry() {
     if (!this.game) return
-    // Update Matchmaker DO with current room status (O(1) vs KV list scan)
+    // Update Matchmaker DO with current room status (in-memory vs KV list scan)
     const matchmaker = this.env.MATCHMAKER.get(this.env.MATCHMAKER.idFromName('global'))
     await matchmaker.fetch(new Request('https://internal/register', {
       method: 'POST',
@@ -2726,12 +2769,13 @@ export class GameRoom implements DurableObject {
       }
     }
 
-    // Handle disconnect grace period timeouts
+    // Collect players to remove (async removal deferred to end of tick)
+    const toRemove: string[] = []
     for (const player of Object.values(this.game.players)) {
       if (player.disconnectedAt !== null) {
         const elapsed = this.game.tick - player.disconnectedAt
         if (elapsed >= this.game.config.disconnectGracePeriod) {
-          this.removePlayer(player.id)
+          toRemove.push(player.id)
         }
       }
     }
@@ -2769,6 +2813,12 @@ export class GameRoom implements DurableObject {
 
     // Full state sync every tick (30Hz)
     this.broadcastFullState()
+
+    // Deferred async cleanup: remove disconnected players after tick completes
+    // Using void to indicate fire-and-forget (persistence is best-effort)
+    if (toRemove.length > 0) {
+      void Promise.all(toRemove.map(id => this.removePlayer(id)))
+    }
   }
 
   private broadcastFullState() {
@@ -2985,7 +3035,8 @@ export class GameRoom implements DurableObject {
     await this.persistState()  // Persist on wave complete
   }
 
-  private async endGame(result: 'victory' | 'defeat') {
+  // Synchronous state change + teardown; async persistence is fire-and-forget
+  private endGame(result: 'victory' | 'defeat') {
     if (!this.game) return
     this.game.status = 'game_over'
     if (this.interval) {
@@ -2993,7 +3044,8 @@ export class GameRoom implements DurableObject {
       this.interval = null
     }
     this.broadcast({ type: 'event', name: 'game_over', data: { result } })
-    await this.persistState()  // Persist on game end
+    // Fire-and-forget persistence (no await - endGame must be synchronous)
+    void this.persistState()
   }
 
   private tickEnhancedMode() {
@@ -3107,7 +3159,7 @@ export class GameRoom implements DurableObject {
     if (playerCount === 0) {
       // All players left - end the game (no pause/resume support)
       if (this.game.status === 'playing') {
-        await this.endGame('defeat')
+        this.endGame('defeat')  // Synchronous - no await needed
       }
       // Set alarm for cleanup in 5 minutes
       this.state.storage.setAlarm(Date.now() + 5 * 60 * 1000)
@@ -3141,6 +3193,8 @@ export class GameRoom implements DurableObject {
         body: JSON.stringify({ roomCode: this.game.roomId })
       }))
     }
+    // Clear alarms first per Durable Objects best practices
+    await this.state.storage.deleteAlarm()
     // Clear stored state - DO instance will be evicted by runtime
     await this.state.storage.deleteAll()
   }
@@ -3230,7 +3284,16 @@ export function App({ roomUrl, playerName, enhanced }: AppProps) {
 
   // Local prediction loop: when keys are held, continuously apply movement locally
   // and periodically resend input state (even if unchanged) at 30Hz for server sync
+  // IMPORTANT: Only run when game is playing to avoid drift during lobby/countdown
+  const gameStatus = getRenderState()?.status
   useEffect(() => {
+    // Don't start prediction loop unless actively playing
+    if (gameStatus !== 'playing') {
+      if (predictionInterval.current) clearInterval(predictionInterval.current)
+      predictionInterval.current = null
+      return
+    }
+
     predictionInterval.current = setInterval(() => {
       const held = heldKeys.current
       if (!held.left && !held.right) return  // No keys held, skip
@@ -3242,10 +3305,11 @@ export function App({ roomUrl, playerName, enhanced }: AppProps) {
     return () => {
       if (predictionInterval.current) clearInterval(predictionInterval.current)
     }
-  }, [updateInput])
+  }, [gameStatus, updateInput])
 
   // Handle key press/release events to track held state
-  // OpenTUI: eventType is "press" | "repeat" | "release", need { release: true } option
+  // OpenTUI keyboard API: eventType is "press" | "repeat" | "release"
+  // See: https://github.com/anthropics/opentui/blob/main/docs/keyboard.md
   useKeyboard((event) => {
     const isPress = event.eventType === 'press' && !event.repeated
     const isRelease = event.eventType === 'release'
@@ -3341,7 +3405,7 @@ export function LobbyScreen({ state, currentPlayerId, onReady, onUnready, onStar
   useKeyboard((event) => {
     switch (event.name) {
       case 'space':
-      case 'enter':
+      case 'return':  // OpenTUI uses 'return', not 'enter'
         if (isReady) onUnready()
         else onReady()
         break
@@ -3663,6 +3727,14 @@ export function useGameConnection(url: string, playerName: string, enhanced: boo
           // Shift states for interpolation
           prevState.current = serverState
           lastSyncTime.current = Date.now()
+
+          // Clear prediction state on game start to prevent lobby/countdown drift
+          const wasPlaying = serverState?.status === 'playing'
+          const nowPlaying = msg.state.status === 'playing'
+          if (nowPlaying && !wasPlaying) {
+            pendingInputs.current = []
+            inputSeq.current = 0
+          }
 
           // Reconcile prediction using input sequence numbers
           if (playerId && msg.state.players[playerId]) {
@@ -4020,7 +4092,7 @@ See `getScaledConfig()` in Scaling Logic section for canonical values. Summary:
 | All players leave | End game, destroy room after 5min via Durable Object alarm |
 | Room full (4 players) | Return HTTP 429 with `room_full` error |
 | Terminal too small | Show "resize terminal to 80×24" message |
-| Simultaneous kills | Both players credited (last bullet processed wins tie) |
+| Simultaneous kills | First bullet processed wins (no shared credit) |
 | Player rejoins within grace | Clear `disconnectedAt`, resume play |
 | Player rejoins after removal | Rejoin as new player if game in progress and room not full |
 
@@ -4567,11 +4639,11 @@ import { describe, expect, test } from 'bun:test'
 import { getScaledConfig, getPlayerSpawnX } from '../scaling'
 
 describe('getScaledConfig', () => {
+  // Must include tickIntervalMs for shoot probability calculation
   const baseConfig = {
     baseAlienMoveInterval: 30,
-    baseBulletSpeed: 2,
-    baseAlienShootRate: 0.5,
-  }
+    tickIntervalMs: 33,  // 30Hz tick rate
+  } as GameConfig
 
   test('solo player gets base difficulty', () => {
     const config = getScaledConfig(1, baseConfig)
@@ -4579,6 +4651,7 @@ describe('getScaledConfig', () => {
     expect(config.alienCols).toBe(11)
     expect(config.alienRows).toBe(5)
     expect(config.alienMoveInterval).toBe(30)
+    expect(config.alienShootProbability).toBeCloseTo(0.5 / 30, 3)  // 0.5 shots/s at 30Hz
   })
 
   test('4 players get max difficulty', () => {
@@ -4587,11 +4660,13 @@ describe('getScaledConfig', () => {
     expect(config.alienCols).toBe(15)
     expect(config.alienRows).toBe(6)
     expect(config.alienMoveInterval).toBe(17)  // 30 / 1.75 ≈ 17
+    expect(config.alienShootProbability).toBeCloseTo(1.25 / 30, 3)  // 1.25 shots/s at 30Hz
   })
 
   test('invalid player count falls back to solo', () => {
     const config = getScaledConfig(0, baseConfig)
     expect(config.lives).toBe(3)
+    expect(config.alienCols).toBe(11)
   })
 })
 
@@ -5132,10 +5207,10 @@ export function createGameState(overrides: Partial<GameState> = {}): GameState {
 // worker/src/game/__tests__/properties.test.ts
 import { describe, test } from 'bun:test'
 import fc from 'fast-check'
-import { getScaledConfig } from '../scaling'
+import { getScaledConfig, DEFAULT_CONFIG } from '../scaling'
 
 describe('scaling properties', () => {
-  test('more players = faster aliens', () => {
+  test('more players = faster aliens (lower moveInterval)', () => {
     fc.assert(
       fc.property(
         fc.integer({ min: 1, max: 4 }),
@@ -5144,6 +5219,7 @@ describe('scaling properties', () => {
           if (p1 < p2) {
             const c1 = getScaledConfig(p1, DEFAULT_CONFIG)
             const c2 = getScaledConfig(p2, DEFAULT_CONFIG)
+            // More players = lower interval = faster aliens
             return c1.alienMoveInterval >= c2.alienMoveInterval
           }
           return true
@@ -5152,7 +5228,7 @@ describe('scaling properties', () => {
     )
   })
 
-  test('alien grid size increases with players', () => {
+  test('alien grid size increases monotonically with players', () => {
     fc.assert(
       fc.property(
         fc.integer({ min: 1, max: 4 }),
