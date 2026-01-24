@@ -2077,6 +2077,7 @@ interface BulletEntity {
   id: string
   x: number
   y: number
+  alive: boolean          // Set to false when bullet hits something
   ownerId: string | null  // null = alien bullet
   dy: -1 | 1              // -1 = up (player), 1 = down (alien)
 }
@@ -2085,6 +2086,7 @@ interface BarrierEntity {
   kind: 'barrier'
   id: string
   x: number
+  y: number               // Always LAYOUT.BARRIER_Y
   segments: BarrierSegment[]
 }
 
@@ -2148,6 +2150,42 @@ export const DEFAULT_CONFIG: GameConfig = {
   disconnectGracePeriod: 10000,     // 10 seconds in ms
 }
 
+/** Return type of getScaledConfig() - player-count-scaled game parameters */
+interface ScaledConfig {
+  alienMoveInterval: number         // Ticks between alien moves (scaled from base)
+  alienShootProbability: number     // Probability per tick (~0.017 to 0.042)
+  alienCols: number                 // Grid columns (11-15 based on player count)
+  alienRows: number                 // Grid rows (5-6 based on player count)
+  lives: number                     // Shared lives (3 solo, 5 coop)
+}
+
+/** Wave configuration for Enhanced mode progression */
+interface WaveConfig {
+  alienCols: number
+  alienRows: number
+  speedMult: number
+  hasCommanders: boolean
+  hasDiveBombers: boolean
+  hasTransforms: boolean
+  isChallenging: boolean            // Bonus wave with no shooting
+}
+
+/** Event names that can be emitted during gameplay (matches ServerEvent.name) */
+type GameEvent =
+  | 'player_joined'
+  | 'player_left'
+  | 'player_ready'
+  | 'player_unready'
+  | 'player_died'
+  | 'player_respawned'
+  | 'countdown_tick'
+  | 'countdown_cancelled'
+  | 'game_start'
+  | 'alien_killed'
+  | 'wave_complete'
+  | 'game_over'
+  | 'ufo_spawn'
+
 // ─── Layout Constants ─────────────────────────────────────────────────────────
 
 /** Layout constants for the 80×24 game grid */
@@ -2160,6 +2198,8 @@ const LAYOUT = {
   BARRIER_Y: 16,             // Y position for barrier row
   ALIEN_START_Y: 2,          // Initial Y position for top alien row
   ALIEN_COL_SPACING: 5,      // Horizontal spacing between alien columns
+  ALIEN_MIN_X: 2,            // Left boundary for alien movement
+  ALIEN_MAX_X: 77,           // Right boundary for alien movement
   GAME_OVER_Y: 18,           // If aliens reach this Y, game over
   COLLISION_H: 2,            // Horizontal collision threshold
   COLLISION_V: 1,            // Vertical collision threshold
@@ -2200,12 +2240,6 @@ interface Player {
 
 type ClassicAlienType = 'squid' | 'crab' | 'octopus'
 
-// Type aliases for Entity types (used in documentation and behavior sections)
-type Alien = AlienEntity
-type Commander = CommanderEntity
-type DiveBomber = DiveBomberEntity
-type Bullet = BulletEntity
-
 // ─── Alien Registry ──────────────────────────────────────────────────────────
 
 const ALIEN_REGISTRY = {
@@ -2234,12 +2268,6 @@ interface BarrierSegment {
 
 type TransformType = 'scorpion' | 'stingray' | 'mini_commander'
 
-interface TransformEnemy extends GameEntity {
-  type: TransformType
-  velocity: Position
-  lifetime: number                  // Ticks until auto-despawn
-}
-
 // ─── Exports ─────────────────────────────────────────────────────────────────
 
 // Re-export protocol types for convenience (single import source)
@@ -2251,6 +2279,9 @@ export type {
   GameEntity,
   GameState,
   GameConfig,
+  ScaledConfig,
+  WaveConfig,
+  GameEvent,
   Entity,
   AlienEntity,
   CommanderEntity,
@@ -2262,14 +2293,9 @@ export type {
   PlayerSlot,
   PlayerColor,
   ClassicAlienType,
-  Alien,
-  Commander,
-  DiveBomber,
-  Bullet,
+  TransformType,
   Barrier,
   BarrierSegment,
-  TransformType,
-  TransformEnemy,
 }
 
 // Export constants and helpers
@@ -2412,7 +2438,7 @@ type ServerEvent =
   | { type: 'event'; name: 'player_respawned'; data: { playerId: string } }
   | { type: 'event'; name: 'countdown_tick'; data: { count: number } }
   | { type: 'event'; name: 'countdown_cancelled'; data: { reason: string } }
-  | { type: 'event'; name: 'game_start'; data: void }
+  | { type: 'event'; name: 'game_start' }
   | { type: 'event'; name: 'alien_killed'; data: { alienId: string; playerId: string | null; points: number } }
   | { type: 'event'; name: 'wave_complete'; data: { wave: number } }
   | { type: 'event'; name: 'game_over'; data: { result: 'victory' | 'defeat' } }
@@ -5341,7 +5367,7 @@ Pin all `@opentui/*` packages to the same version to avoid reconciler mismatches
 ### Cloudflare Workers
 
 - Wrangler v3.0+
-- Durable Objects available on [Workers Paid plan ($5/mo)](https://developers.cloudflare.com/workers/platform/pricing/)
+- Durable Objects requires Workers Paid plan
 - SQLite storage (beta) recommended for new projects
 
 ---
