@@ -2135,7 +2135,7 @@ interface GameConfig {
   playerCooldown: number            // Ticks between shots
   playerMoveSpeed: number           // Cells per tick when holding move key
   respawnDelay: number              // Ticks (90 = 3 seconds at 30Hz)
-  disconnectGracePeriod: number     // Ticks (300 = 10 seconds at 30Hz)
+  disconnectGracePeriod: number     // Milliseconds (10000 = 10 seconds)
 }
 
 export const DEFAULT_CONFIG: GameConfig = {
@@ -2149,7 +2149,7 @@ export const DEFAULT_CONFIG: GameConfig = {
   playerCooldown: 6,                // ~200ms between shots
   playerMoveSpeed: 1,               // 1 cell per tick when holding key
   respawnDelay: 90,                 // 3 seconds at 30Hz
-  disconnectGracePeriod: 300,       // 10 seconds at 30Hz
+  disconnectGracePeriod: 10000,     // 10 seconds in ms
 }
 
 // ─── Layout Constants ─────────────────────────────────────────────────────────
@@ -2191,7 +2191,7 @@ interface Player {
   alive: boolean
   respawnAt: number | null          // Tick to respawn (co-op only)
   kills: number
-  disconnectedAt: number | null     // Tick when disconnected (for grace period)
+  disconnectedAt: number | null     // Timestamp (ms) when disconnected (for grace period)
   lastInputSeq: number              // Last processed input sequence (for client prediction)
 
   // Input state (server-authoritative, updated from client input messages)
@@ -2363,10 +2363,9 @@ export function getPlayerSpawnX(slot: number, playerCount: number, screenWidth: 
   return positions[playerCount]?.[slot - 1] ?? Math.floor(screenWidth / 2)
 }
 
-// Pure tick function for testing (no side effects, no broadcasts)
-// Returns updated state and events that would be emitted
-export function tickGame(state: GameState, config: GameConfig): { state: GameState; events: GameEvent[] } {
-  const events: GameEvent[] = []
+// Pure movement-only tick for testing (no collisions, shooting, waves, etc.)
+// Does NOT validate full game loop - only tests basic movement physics
+export function tickMovementOnly(state: GameState, config: GameConfig): GameState {
   const playerCount = Object.keys(state.players).length
   const scaled = getScaledConfig(playerCount, config)
 
@@ -2374,7 +2373,7 @@ export function tickGame(state: GameState, config: GameConfig): { state: GameSta
   const next = structuredClone(state)
   next.tick++
 
-  // Process player input
+  // Process player input (uses LAYOUT constants)
   for (const player of Object.values(next.players)) {
     if (!player.alive) continue
     if (player.inputState.left) {
@@ -2391,19 +2390,19 @@ export function tickGame(state: GameState, config: GameConfig): { state: GameSta
     bullet.y += bullet.dy * config.baseBulletSpeed
   }
 
-  // Remove off-screen bullets
+  // Remove off-screen bullets (y <= 0 is top, y >= height is bottom)
   next.entities = next.entities.filter(e =>
     e.kind !== 'bullet' || (e.y > 0 && e.y < config.height)
   )
 
-  // Move aliens (if on move interval)
+  // Move aliens (if on move interval, uses LAYOUT constants)
   if (next.tick % scaled.alienMoveInterval === 0) {
     const aliens = next.entities.filter((e): e is AlienEntity => e.kind === 'alien' && e.alive)
     for (const alien of aliens) {
       alien.x += next.alienDirection * 2
     }
-    // Check for wall collision and reverse
-    const hitWall = aliens.some(a => a.x <= 2 || a.x >= config.width - 3)
+    // Check for wall collision and reverse (uses LAYOUT.ALIEN_MIN_X/MAX_X)
+    const hitWall = aliens.some(a => a.x <= LAYOUT.ALIEN_MIN_X || a.x >= LAYOUT.ALIEN_MAX_X)
     if (hitWall) {
       next.alienDirection *= -1
       for (const alien of aliens) {
@@ -2412,7 +2411,7 @@ export function tickGame(state: GameState, config: GameConfig): { state: GameSta
     }
   }
 
-  return { state: next, events }
+  return next
 }
 ```
 
@@ -2624,7 +2623,8 @@ export class GameRoom implements DurableObject {
       const playerId = this.sessions.get(ws)
       if (playerId && this.game?.players[playerId]) {
         // Mark as disconnected, don't remove immediately (grace period)
-        this.game.players[playerId].disconnectedAt = this.game.tick
+        // Use timestamp so grace works in lobby/countdown too (tick only increments during playing)
+        this.game.players[playerId].disconnectedAt = Date.now()
         this.sessions.delete(ws)
         this.broadcast({ type: 'event', name: 'player_left', data: { playerId, reason: 'disconnect' } })
 
@@ -2774,6 +2774,7 @@ export class GameRoom implements DurableObject {
     this.game.countdownRemaining = 3
 
     await this.persistState()  // Persist on countdown start
+    await this.updateRoomRegistry()  // Update matchmaker so room not returned as 'waiting'
     this.broadcast({ type: 'event', name: 'countdown_tick', data: { count: 3 } })
 
     this.countdownInterval = setInterval(() => {
@@ -2844,6 +2845,7 @@ export class GameRoom implements DurableObject {
     this.broadcast({ type: 'event', name: 'game_start' })
     this.broadcastFullState()
     await this.persistState()
+    await this.updateRoomRegistry()  // Update matchmaker: status → playing
 
     // Game loop at 30Hz - full state broadcast every tick
     this.interval = setInterval(() => this.tick(), this.game.config.tickIntervalMs)
@@ -2867,10 +2869,12 @@ export class GameRoom implements DurableObject {
     }
 
     // Collect players to remove (async removal deferred to end of tick)
+    // Uses timestamp-based grace period (works in lobby/countdown too)
     const toRemove: string[] = []
+    const now = Date.now()
     for (const player of Object.values(this.game.players)) {
       if (player.disconnectedAt !== null) {
-        const elapsed = this.game.tick - player.disconnectedAt
+        const elapsed = now - player.disconnectedAt
         if (elapsed >= this.game.config.disconnectGracePeriod) {
           toRemove.push(player.id)
         }
@@ -3143,8 +3147,9 @@ export class GameRoom implements DurableObject {
       this.interval = null
     }
     this.broadcast({ type: 'event', name: 'game_over', data: { result } })
-    // Fire-and-forget persistence (no await - endGame must be synchronous)
+    // Fire-and-forget persistence and registry update (no await - endGame must be synchronous)
     void this.persistState()
+    void this.updateRoomRegistry()  // Update matchmaker: status → game_over
   }
 
   private tickEnhancedMode() {
@@ -3791,10 +3796,9 @@ export function useGameConnection(url: string, playerName: string, enhanced: boo
   const prevState = useRef<GameState | null>(null)
   const lastSyncTime = useRef(0)
 
-  // Client-side prediction state
+  // Client-side prediction state (simple model: no replay queue)
+  // Server is authoritative; client predicts locally; sync snaps back
   const localPlayerX = useRef(0)
-  const pendingInputs = useRef<Array<{ seq: number; held: InputState }>>([])
-  const inputSeq = useRef(0)  // Monotonic input sequence number
 
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectAttempts = useRef(0)
@@ -3832,30 +3836,18 @@ export function useGameConnection(url: string, playerName: string, enhanced: boo
           prevState.current = serverState
           lastSyncTime.current = Date.now()
 
-          // Clear prediction state on game start to prevent lobby/countdown drift
-          const wasPlaying = serverState?.status === 'playing'
-          const nowPlaying = msg.state.status === 'playing'
-          if (nowPlaying && !wasPlaying) {
-            pendingInputs.current = []
-            inputSeq.current = 0
-          }
-
-          // Reconcile prediction using input sequence numbers
+          // Simple prediction model: snap to server, apply current held input
           if (playerId && msg.state.players[playerId]) {
             const serverPlayer = msg.state.players[playerId]
-            const lastAckedSeq = msg.lastInputSeq
-
-            // Discard inputs server has processed (by seq, not tick)
-            pendingInputs.current = pendingInputs.current.filter(i => i.seq > lastAckedSeq)
-
-            // Replay unacknowledged inputs from server position
             let x = serverPlayer.x
+
+            // Apply current held input for smooth local movement
+            const held = inputState.current
             const moveSpeed = msg.state.config.playerMoveSpeed
-            for (const input of pendingInputs.current) {
-              if (input.held.left) x -= moveSpeed
-              if (input.held.right) x += moveSpeed
-              x = Math.max(1, Math.min(msg.state.config.width - 2, x))
-            }
+            if (held.left) x -= moveSpeed
+            if (held.right) x += moveSpeed
+            x = Math.max(1, Math.min(msg.state.config.width - 2, x))
+
             localPlayerX.current = x
           }
 
@@ -3898,15 +3890,11 @@ export function useGameConnection(url: string, playerName: string, enhanced: boo
     }
   }, [connect])
 
-  // Send input state with sequence number for prediction reconciliation
+  // Send input state to server and apply locally for prediction
+  // Simple model: no sequence numbers or replay queue needed for held-state networking
   const updateInput = useCallback((held: InputState) => {
     inputState.current = held
-    inputSeq.current++
-    const seq = inputSeq.current
-    wsRef.current?.send(JSON.stringify({ type: 'input', seq, held }))
-
-    // Record for reconciliation and apply immediately
-    pendingInputs.current.push({ seq, held: { ...held } })
+    wsRef.current?.send(JSON.stringify({ type: 'input', held }))
 
     // Predict movement locally (use server config or default)
     const moveSpeed = serverState?.config.playerMoveSpeed ?? 1
@@ -4192,13 +4180,12 @@ See `getScaledConfig()` in Scaling Logic section for canonical values. Summary:
 
 | Scenario | Handling |
 |----------|----------|
-| Player disconnect | Mark `disconnectedAt`, keep in game for `disconnectGracePeriod` (10s), then remove |
+| Player disconnect | Mark `disconnectedAt` (timestamp), keep in game for 10s grace period, then remove |
 | All players leave | End game, destroy room after 5min via Durable Object alarm |
 | Room full (4 players) | Return HTTP 429 with `room_full` error |
 | Terminal too small | Show "resize terminal to 80×24" message |
 | Simultaneous kills | First bullet processed wins (no shared credit) |
-| Player rejoins within grace | Reconnect WebSocket, clear `disconnectedAt`, resume play |
-| Player rejoins after removal | Not supported — game blocks new connections during `playing` status |
+| Reconnect during game | Not supported — no rejoin protocol implemented |
 
 ---
 
