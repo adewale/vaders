@@ -5,7 +5,10 @@ import { DurableObject } from 'cloudflare:workers'
 import type {
   GameState,
   Player,
+  Entity,
   AlienEntity,
+  CommanderEntity,
+  DiveBomberEntity,
   BarrierEntity,
   BarrierSegment,
   ServerMessage,
@@ -21,6 +24,7 @@ import {
 } from '../../shared/types'
 import { getScaledConfig, getPlayerSpawnX } from './game/scaling'
 import { gameReducer, type GameAction } from './game/reducer'
+import { getEnhancedWaveParams, isChallengingStage } from './game/modes'
 
 export interface Env {
   GAME_ROOM: DurableObjectNamespace
@@ -401,11 +405,18 @@ export class GameRoom extends DurableObject<Env> {
     this.game.lives = scaled.lives
     this.game.tick = 0
 
-    // Initialize entities
-    this.game.entities = [
-      ...this.createAlienFormation(scaled.alienCols, scaled.alienRows),
-      ...this.createBarriers(playerCount),
-    ]
+    // Initialize entities based on game mode
+    if (this.game.enhancedMode) {
+      this.game.entities = [
+        ...this.createEnhancedFormation(this.game.wave, playerCount),
+        ...this.createBarriers(playerCount),
+      ]
+    } else {
+      this.game.entities = [
+        ...this.createAlienFormation(scaled.alienCols, scaled.alienRows),
+        ...this.createBarriers(playerCount),
+      ]
+    }
 
     this.broadcast({ type: 'event', name: 'game_start', data: undefined })
     this.broadcastFullState()
@@ -517,12 +528,23 @@ export class GameRoom extends DurableObject<Env> {
     const playerCount = Object.keys(this.game.players).length
     const scaled = getScaledConfig(playerCount, this.game.config)
 
-    // Remove bullets, keep barriers, replace aliens
+    // Remove bullets, keep barriers (unless challenging stage), replace aliens
     const barriers = this.game.entities.filter((e): e is BarrierEntity => e.kind === 'barrier')
-    this.game.entities = [
-      ...this.createAlienFormation(scaled.alienCols, scaled.alienRows),
-      ...barriers,
-    ]
+
+    // Enhanced mode uses different formation
+    if (this.game.enhancedMode) {
+      // Challenging stages have no barriers
+      const isChallenging = isChallengingStage(this.game.wave)
+      this.game.entities = [
+        ...this.createEnhancedFormation(this.game.wave, playerCount),
+        ...(isChallenging ? [] : barriers),
+      ]
+    } else {
+      this.game.entities = [
+        ...this.createAlienFormation(scaled.alienCols, scaled.alienRows),
+        ...barriers,
+      ]
+    }
     this.game.alienDirection = 1
 
     this.persistState()
@@ -565,6 +587,126 @@ export class GameRoom extends DurableObject<Env> {
       }
     }
     return aliens
+  }
+
+  /**
+   * Create Enhanced Mode formation with Commanders, Dive Bombers, and Classic aliens
+   * Formation layout:
+   * Row 0: Commanders (1-2)
+   * Row 1: Dive Bombers (4-8)
+   * Row 2+: Classic aliens (squid, crab, octopus)
+   */
+  private createEnhancedFormation(wave: number, playerCount: number): Entity[] {
+    if (!this.game) return []
+
+    const entities: Entity[] = []
+    const waveParams = getEnhancedWaveParams(wave)
+
+    // Challenging stages are special - 40 enemies in fly-through formations
+    if (isChallengingStage(wave)) {
+      return this.createChallengingFormation()
+    }
+
+    // Calculate grid dimensions
+    const baseCols = playerCount === 1 ? 11 : playerCount === 2 ? 11 : playerCount === 3 ? 13 : 15
+    const gridWidth = (baseCols - 1) * LAYOUT.ALIEN_COL_SPACING + LAYOUT.ALIEN_WIDTH
+    const startX = Math.floor((this.game.config.width - gridWidth) / 2)
+
+    // Row 0: Commanders (centered)
+    const commanderSpacing = Math.floor(baseCols / (waveParams.commanderCount + 1))
+    for (let i = 0; i < waveParams.commanderCount; i++) {
+      const col = commanderSpacing * (i + 1) - 1
+      const commander: CommanderEntity = {
+        kind: 'commander',
+        id: this.generateEntityId(),
+        x: startX + col * LAYOUT.ALIEN_COL_SPACING,
+        y: LAYOUT.ALIEN_START_Y,
+        alive: true,
+        health: 2,
+        tractorBeamActive: false,
+        tractorBeamCooldown: 0,
+        capturedPlayerId: null,
+        escorts: [],
+      }
+      entities.push(commander)
+    }
+
+    // Row 1: Dive Bombers (spread across)
+    const bomberSpacing = Math.floor(baseCols / (waveParams.diveBomberCount + 1))
+    for (let i = 0; i < waveParams.diveBomberCount; i++) {
+      const col = bomberSpacing * (i + 1) - 1
+      const bomber: DiveBomberEntity = {
+        kind: 'dive_bomber',
+        id: this.generateEntityId(),
+        x: startX + col * LAYOUT.ALIEN_COL_SPACING,
+        y: LAYOUT.ALIEN_START_Y + LAYOUT.ALIEN_ROW_SPACING,
+        alive: true,
+        diveState: 'formation',
+        divePathProgress: 0,
+        diveDirection: 1,
+        row: 1,
+        col: col,
+      }
+      entities.push(bomber)
+    }
+
+    // Rows 2+: Classic aliens
+    const classicFormationRows = FORMATION_ROWS.slice(0, waveParams.classicRows)
+    for (let row = 0; row < classicFormationRows.length; row++) {
+      const type = classicFormationRows[row]
+      for (let col = 0; col < baseCols; col++) {
+        const alien: AlienEntity = {
+          kind: 'alien',
+          id: this.generateEntityId(),
+          type,
+          row: row + 2,  // Offset by commander and bomber rows
+          col,
+          x: startX + col * LAYOUT.ALIEN_COL_SPACING,
+          y: LAYOUT.ALIEN_START_Y + (row + 2) * LAYOUT.ALIEN_ROW_SPACING,
+          alive: true,
+          points: ALIEN_REGISTRY[type].points,
+        }
+        entities.push(alien)
+      }
+    }
+
+    return entities
+  }
+
+  /**
+   * Create Challenging Stage formation (bonus round)
+   * 40 enemies fly in preset patterns - no shooting, no barriers
+   */
+  private createChallengingFormation(): Entity[] {
+    if (!this.game) return []
+
+    const entities: Entity[] = []
+    const gridWidth = 9 * LAYOUT.ALIEN_COL_SPACING + LAYOUT.ALIEN_WIDTH
+    const startX = Math.floor((this.game.config.width - gridWidth) / 2)
+
+    // 40 enemies in 4 rows of 10
+    const types: ('squid' | 'crab' | 'octopus')[] = ['squid', 'crab', 'crab', 'octopus']
+
+    for (let row = 0; row < 4; row++) {
+      const type = types[row]
+      for (let col = 0; col < 10; col++) {
+        const alien: AlienEntity = {
+          kind: 'alien',
+          id: this.generateEntityId(),
+          type,
+          row,
+          col,
+          x: startX + col * LAYOUT.ALIEN_COL_SPACING,
+          y: LAYOUT.ALIEN_START_Y + row * LAYOUT.ALIEN_ROW_SPACING,
+          alive: true,
+          // Challenging stage: 100 points per kill, 10000 bonus for all 40
+          points: 100,
+        }
+        entities.push(alien)
+      }
+    }
+
+    return entities
   }
 
   private createBarriers(playerCount: number): BarrierEntity[] {

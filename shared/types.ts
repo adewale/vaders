@@ -217,8 +217,8 @@ export function getUFOs(entities: Entity[]): UFOEntity[] {
 // ─── Game Config ──────────────────────────────────────────────────────────────
 
 export interface GameConfig {
-  width: number                        // Default: 80
-  height: number                       // Default: 24
+  width: number                        // Default: 120
+  height: number                       // Default: 36
   maxPlayers: number                   // Default: 4
   tickIntervalMs: number               // Default: 33 (~30Hz tick rate)
 
@@ -242,7 +242,7 @@ export const DEFAULT_CONFIG: GameConfig = {
   baseBulletSpeed: 1,                  // 1 cell per tick (player bullets)
   baseAlienShootRate: 0.016,           // 20% slower shooting (was 0.02)
   playerCooldownTicks: 6,              // ~200ms between shots
-  playerMoveSpeed: 1,                  // 1 cell per tick when holding key
+  playerMoveSpeed: 1,                  // 1 cell per tick when holding key (Space Invaders style)
   respawnDelayTicks: 90,               // 3 seconds at 30Hz
 }
 
