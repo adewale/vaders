@@ -43,7 +43,7 @@ vaders --room ABC123 --name "Alice"
 | `←` / `A` | Move left |
 | `→` / `D` | Move right |
 | `SPACE` | Shoot |
-| `ENTER` | Ready up (lobby) |
+| `ENTER` | Ready up (lobby) — *OpenTUI reports as 'return'* |
 | `S` | Start solo (when alone in lobby) |
 | `M` | Toggle audio mute |
 | `Q` | Quit |
@@ -1932,13 +1932,31 @@ export class Matchmaker implements DurableObject {
 
     // GET /find - Find an open room (O(1) average via Set)
     if (url.pathname === '/find') {
-      // Get first open room from set (O(1) average)
-      const roomCode = this.openRooms.values().next().value
-      if (roomCode) {
+      const STALE_THRESHOLD = 5 * 60 * 1000  // 5 minutes without update = stale
+      const now = Date.now()
+
+      // Find first non-stale open room
+      for (const roomCode of this.openRooms) {
+        const info = this.rooms[roomCode]
+        if (!info) {
+          // Orphaned entry in openRooms, clean it up
+          this.openRooms.delete(roomCode)
+          continue
+        }
+        if (now - info.updatedAt > STALE_THRESHOLD) {
+          // Stale room (crashed or never unregistered), evict it
+          delete this.rooms[roomCode]
+          this.openRooms.delete(roomCode)
+          continue
+        }
         return new Response(JSON.stringify({ roomCode }), {
           headers: { 'Content-Type': 'application/json' }
         })
       }
+
+      // Persist cleanup if we modified anything
+      await this.state.storage.put('rooms', this.rooms)
+
       return new Response(JSON.stringify({ roomCode: null }), {
         headers: { 'Content-Type': 'application/json' }
       })
@@ -2345,6 +2363,57 @@ export function getPlayerSpawnX(slot: number, playerCount: number, screenWidth: 
   return positions[playerCount]?.[slot - 1] ?? Math.floor(screenWidth / 2)
 }
 
+// Pure tick function for testing (no side effects, no broadcasts)
+// Returns updated state and events that would be emitted
+export function tickGame(state: GameState, config: GameConfig): { state: GameState; events: GameEvent[] } {
+  const events: GameEvent[] = []
+  const playerCount = Object.keys(state.players).length
+  const scaled = getScaledConfig(playerCount, config)
+
+  // Clone state to avoid mutation
+  const next = structuredClone(state)
+  next.tick++
+
+  // Process player input
+  for (const player of Object.values(next.players)) {
+    if (!player.alive) continue
+    if (player.inputState.left) {
+      player.x = Math.max(LAYOUT.PLAYER_MIN_X, player.x - config.playerMoveSpeed)
+    }
+    if (player.inputState.right) {
+      player.x = Math.min(LAYOUT.PLAYER_MAX_X, player.x + config.playerMoveSpeed)
+    }
+  }
+
+  // Move bullets
+  const bullets = next.entities.filter((e): e is BulletEntity => e.kind === 'bullet')
+  for (const bullet of bullets) {
+    bullet.y += bullet.dy * config.baseBulletSpeed
+  }
+
+  // Remove off-screen bullets
+  next.entities = next.entities.filter(e =>
+    e.kind !== 'bullet' || (e.y > 0 && e.y < config.height)
+  )
+
+  // Move aliens (if on move interval)
+  if (next.tick % scaled.alienMoveInterval === 0) {
+    const aliens = next.entities.filter((e): e is AlienEntity => e.kind === 'alien' && e.alive)
+    for (const alien of aliens) {
+      alien.x += next.alienDirection * 2
+    }
+    // Check for wall collision and reverse
+    const hitWall = aliens.some(a => a.x <= 2 || a.x >= config.width - 3)
+    if (hitWall) {
+      next.alienDirection *= -1
+      for (const alien of aliens) {
+        alien.y += 1
+      }
+    }
+  }
+
+  return { state: next, events }
+}
 ```
 
 ### WebSocket Protocol
@@ -3244,11 +3313,11 @@ export class GameRoom implements DurableObject {
     "build": "bun build src/index.tsx --outdir dist --target bun"
   },
   "dependencies": {
-    "@opentui/core": "^0.1.72",
-    "@opentui/react": "^0.1.72"
+    "@opentui/core": "0.1.72",
+    "@opentui/react": "0.1.72"
   },
   "devDependencies": {
-    "@types/bun": "latest",
+    "@types/bun": "^1.0.0",
     "typescript": "^5.3.0"
   }
 }
@@ -3284,7 +3353,7 @@ main()
 
 ```tsx
 // client/src/App.tsx
-import { useRef, useCallback } from 'react'
+import { useRef, useCallback, useEffect } from 'react'
 import { useKeyboard, useRenderer } from '@opentui/react'
 import { useGameConnection } from './hooks/useGameConnection'
 import { GameScreen } from './components/GameScreen'
@@ -3308,14 +3377,14 @@ export function App({ roomUrl, playerName, enhanced }: AppProps) {
 
   // Track held keys for continuous input
   const heldKeys = useRef<InputState>({ left: false, right: false })
+  const lastSentInput = useRef<InputState>({ left: false, right: false })
   const predictionInterval = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Get interpolated render state ONCE per render (expensive: clones, interpolates)
   const state = getRenderState()
   const gameStatus = state?.status
 
-  // Local prediction loop: when keys are held, continuously apply movement locally
-  // and periodically resend input state (even if unchanged) at 30Hz for server sync
+  // Local prediction loop: resend held state at 30Hz for server sync
   // IMPORTANT: Only run when game is playing to avoid drift during lobby/countdown
   useEffect(() => {
     // Don't start prediction loop unless actively playing
@@ -3327,9 +3396,11 @@ export function App({ roomUrl, playerName, enhanced }: AppProps) {
 
     predictionInterval.current = setInterval(() => {
       const held = heldKeys.current
-      if (!held.left && !held.right) return  // No keys held, skip
+      // Skip if no keys held or state unchanged since last send
+      if (!held.left && !held.right) return
+      if (held.left === lastSentInput.current.left && held.right === lastSentInput.current.right) return
 
-      // Apply prediction locally and send to server
+      lastSentInput.current = { ...held }
       updateInput(held)
     }, 33)  // 30Hz matches server tick rate
 
@@ -4121,8 +4192,8 @@ See `getScaledConfig()` in Scaling Logic section for canonical values. Summary:
 | Room full (4 players) | Return HTTP 429 with `room_full` error |
 | Terminal too small | Show "resize terminal to 80×24" message |
 | Simultaneous kills | First bullet processed wins (no shared credit) |
-| Player rejoins within grace | Clear `disconnectedAt`, resume play |
-| Player rejoins after removal | Rejoin as new player if game in progress and room not full |
+| Player rejoins within grace | Reconnect WebSocket, clear `disconnectedAt`, resume play |
+| Player rejoins after removal | Not supported — game blocks new connections during `playing` status |
 
 ---
 
@@ -5278,4 +5349,88 @@ describe('scaling properties', () => {
     )
   })
 })
+```
+
+---
+
+## Compatibility
+
+### OpenTUI Version Requirements
+
+Pin all `@opentui/*` packages to the same version to avoid reconciler mismatches:
+
+```json
+{
+  "dependencies": {
+    "@opentui/core": "0.1.72",
+    "@opentui/react": "0.1.72"
+  }
+}
+```
+
+**Build Requirements:**
+- **Zig**: OpenTUI requires Zig for native builds. Install via `brew install zig` or see [ziglang.org](https://ziglang.org/download/)
+- **Bun**: v1.0+ required for client runtime
+- **Node.js**: v18+ for Wrangler/Cloudflare Workers
+
+### Cloudflare Workers
+
+- Wrangler v3.0+
+- Durable Objects requires paid Workers plan
+- SQLite storage (beta) recommended for new projects
+
+---
+
+## References
+
+- **OpenTUI**: https://github.com/anomalyco/opentui
+- **Cloudflare Durable Objects**: https://developers.cloudflare.com/durable-objects/
+- **Durable Objects Best Practices**: https://developers.cloudflare.com/durable-objects/best-practices/
+- **Bun Runtime**: https://bun.sh/
+- **Space Invaders (1978)**: https://en.wikipedia.org/wiki/Space_Invaders
+- **Galaga (1981)**: https://en.wikipedia.org/wiki/Galaga
+- **Galaxian (1979)**: https://en.wikipedia.org/wiki/Galaxian
+
+---
+
+## Dependencies
+
+### Client (Bun)
+
+```json
+{
+  "dependencies": {
+    "@opentui/core": "0.1.72",
+    "@opentui/react": "0.1.72",
+    "react": "^18.2.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "@types/react": "^18.2.0"
+  }
+}
+```
+
+### Worker (Cloudflare)
+
+```json
+{
+  "dependencies": {},
+  "devDependencies": {
+    "wrangler": "^3.0.0",
+    "typescript": "^5.0.0",
+    "@cloudflare/workers-types": "^4.0.0"
+  }
+}
+```
+
+### Testing
+
+```json
+{
+  "devDependencies": {
+    "fast-check": "^3.0.0",
+    "node-pty": "^1.0.0"
+  }
+}
 ```
