@@ -2289,40 +2289,71 @@ main()
 
 ```tsx
 // client/src/App.tsx
+import { useRef, useCallback } from 'react'
 import { useKeyboard, useRenderer } from '@opentui/react'
 import { useGameConnection } from './hooks/useGameConnection'
 import { GameScreen } from './components/GameScreen'
 import { LobbyScreen } from './components/LobbyScreen'
 import { GameOverScreen } from './components/GameOverScreen'
+import type { InputState } from '../../../shared/types'
 
 interface AppProps {
   roomUrl: string
   playerName: string
+  enhanced: boolean
 }
 
-export function App({ roomUrl, playerName }: AppProps) {
+export function App({ roomUrl, playerName, enhanced }: AppProps) {
   const renderer = useRenderer()
-  const { state, playerId, send, connected } = useGameConnection(roomUrl, playerName)
+  const { getRenderState, playerId, send, connected, updateInput, shoot } = useGameConnection(
+    roomUrl,
+    playerName,
+    enhanced
+  )
 
+  // Track held keys for continuous input
+  const heldKeys = useRef<InputState>({ left: false, right: false })
+
+  // Handle key down/up events to track held state
   useKeyboard((event) => {
-    if (state?.status !== 'playing') return
+    const isKeyDown = event.type === 'keydown'
+    const isKeyUp = event.type === 'keyup'
 
-    switch (event.name) {
-      case 'left':
-      case 'a':
-        send({ type: 'input', action: 'left' })
-        break
-      case 'right':
-      case 'd':
-        send({ type: 'input', action: 'right' })
-        break
-      case 'space':
-        send({ type: 'input', action: 'shoot' })
-        break
-      case 'q':
-        renderer.destroy()
+    // Movement keys update held state
+    if (event.name === 'left' || event.name === 'a') {
+      if (isKeyDown && !heldKeys.current.left) {
+        heldKeys.current.left = true
+        updateInput(heldKeys.current)
+      } else if (isKeyUp) {
+        heldKeys.current.left = false
+        updateInput(heldKeys.current)
+      }
+      return
+    }
+
+    if (event.name === 'right' || event.name === 'd') {
+      if (isKeyDown && !heldKeys.current.right) {
+        heldKeys.current.right = true
+        updateInput(heldKeys.current)
+      } else if (isKeyUp) {
+        heldKeys.current.right = false
+        updateInput(heldKeys.current)
+      }
+      return
+    }
+
+    // Discrete actions (only on keydown)
+    if (!isKeyDown) return
+
+    if (event.name === 'space') {
+      shoot()
+    } else if (event.name === 'q') {
+      renderer.destroy()
     }
   })
+
+  // Get interpolated render state
+  const state = getRenderState()
 
   if (!connected || !state || !playerId) {
     return (
