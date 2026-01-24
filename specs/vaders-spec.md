@@ -987,193 +987,25 @@ Server (authoritative)                    Client (predictive render)
 └────────────────────┘                   └────────────────────┘
 ```
 
-### Local Player Smoothing (Held-State Model)
+### Client-Side Smoothing
 
-The local player's ship responds instantly to input. This uses a simple held-state model:
-- Client tracks which keys are currently held
-- On each frame, apply held input to local predicted position
-- On server sync, snap to server position + re-apply held input
+The client implements three techniques for smooth 60fps rendering despite 30Hz server updates:
 
-No replay queue, no sequence numbers, no acknowledgment needed.
+1. **Local Player Smoothing** (`useLocalSmoothing`)
+   - Instantly responds to local input
+   - On server sync: snap to server position, then re-apply held input
+   - No replay queue or sequence numbers needed
 
-```typescript
-// client/src/hooks/useLocalSmoothing.ts
+2. **Entity Interpolation** (`useInterpolation`)
+   - Other players, aliens, and bullets lerp between previous and current server positions
+   - Calculates lerp factor: `t = min(1, elapsed / 33ms)`
+   - Linear interpolation: `prev + (curr - prev) * t`
+   - Required for smooth visuals (aliens jump 2 cells every ~8-15 ticks)
 
-const PLAYER_SPEED = 1  // Must match server DEFAULT_CONFIG.playerMoveSpeed
-
-export function useLocalSmoothing(
-  serverState: GameState | null,
-  playerId: string | null,
-  heldInput: InputState
-) {
-  const localX = useRef(0)
-
-  // On server sync: snap to server position, then apply held input
-  useEffect(() => {
-    if (!serverState || !playerId) return
-    const serverPlayer = serverState.players[playerId]
-    if (!serverPlayer) return
-
-    // Start from server's authoritative position
-    let x = serverPlayer.x
-
-    // Apply currently held input for smoothing
-    if (heldInput.left) x -= PLAYER_SPEED
-    if (heldInput.right) x += PLAYER_SPEED
-
-    // Clamp to bounds
-    x = Math.max(1, Math.min(serverState.config.width - 2, x))
-    localX.current = x
-  }, [serverState, playerId, heldInput])
-
-  // Apply local input each frame (called at 60fps)
-  const applyLocalInput = useCallback(() => {
-    let x = localX.current
-    if (heldInput.left) x -= PLAYER_SPEED
-    if (heldInput.right) x += PLAYER_SPEED
-
-    const width = serverState?.config.width ?? 80
-    localX.current = Math.max(1, Math.min(width - 2, x))
-    return localX.current
-  }, [heldInput, serverState])
-
-  return { localX: localX.current, applyLocalInput }
-}
-```
-
-### Entity Interpolation (Lerp)
-
-Other players, aliens, and bullets interpolate between the previous and current server positions for smooth 60fps rendering.
-
-> **Note:** Interpolation is **required** for decent visuals. Aliens move 2 cells every ~8-15 ticks (jumping visually), and bullets move 1 cell per tick. Without interpolation, movement appears jerky.
-
-```typescript
-// client/src/hooks/useInterpolation.ts
-
-interface InterpolationState {
-  prevState: GameState | null
-  currState: GameState | null
-  lastSyncTime: number
-}
-
-const SYNC_INTERVAL = 33  // 30Hz = 33ms between syncs
-
-export function useInterpolation(serverState: GameState | null) {
-  const interp = useRef<InterpolationState>({
-    prevState: null,
-    currState: null,
-    lastSyncTime: 0,
-  })
-
-  // When new server state arrives, shift states
-  useEffect(() => {
-    if (!serverState) return
-    interp.current.prevState = interp.current.currState
-    interp.current.currState = serverState
-    interp.current.lastSyncTime = performance.now()
-  }, [serverState])
-
-  // Calculate lerp factor (0 to 1) based on time since last sync
-  const getLerpT = useCallback(() => {
-    const elapsed = performance.now() - interp.current.lastSyncTime
-    return Math.min(1, elapsed / SYNC_INTERVAL)
-  }, [])
-
-  // Interpolate a position
-  const lerpPosition = useCallback((
-    entityId: string,
-    getPrev: (state: GameState) => number | undefined,
-    getCurr: (state: GameState) => number | undefined
-  ): number | undefined => {
-    const { prevState, currState } = interp.current
-    if (!currState) return undefined
-
-    const curr = getCurr(currState)
-    if (curr === undefined) return undefined
-
-    // No previous state or entity didn't exist before - snap to current
-    if (!prevState) return curr
-    const prev = getPrev(prevState)
-    if (prev === undefined) return curr
-
-    // Linear interpolation: prev + (curr - prev) * t
-    const t = getLerpT()
-    return prev + (curr - prev) * t
-  }, [getLerpT])
-
-  return { lerpPosition, getLerpT }
-}
-
-// Usage in render:
-function AlienSprite({ alien, lerpPosition }: { alien: AlienEntity; lerpPosition: Function }) {
-  const findAlien = (state: GameState) =>
-    state.entities.find(e => e.id === alien.id && e.kind === 'alien') as AlienEntity | undefined
-
-  const x = lerpPosition(
-    alien.id,
-    (state: GameState) => findAlien(state)?.x,
-    (state: GameState) => findAlien(state)?.x
-  ) ?? alien.x
-
-  const y = lerpPosition(
-    alien.id,
-    (state: GameState) => findAlien(state)?.y,
-    (state: GameState) => findAlien(state)?.y
-  ) ?? alien.y
-
-  return (
-    <text position="absolute" marginLeft={x} marginTop={y} color={ALIEN_REGISTRY[alien.type].color}>
-      {ALIEN_REGISTRY[alien.type].sprite}
-    </text>
-  )
-}
-```
-
-### Render Loop (60fps)
-
-The client runs a 60fps render loop independent of server sync rate.
-
-```typescript
-// client/src/hooks/useRenderLoop.ts
-
-export function useRenderLoop(callback: (dt: number) => void) {
-  const lastFrame = useRef(performance.now())
-  const frameId = useRef<number>()
-
-  useEffect(() => {
-    const loop = () => {
-      const now = performance.now()
-      const dt = now - lastFrame.current
-      lastFrame.current = now
-
-      callback(dt)
-
-      frameId.current = requestAnimationFrame(loop)
-    }
-
-    frameId.current = requestAnimationFrame(loop)
-    return () => {
-      if (frameId.current) cancelAnimationFrame(frameId.current)
-    }
-  }, [callback])
-}
-
-// In terminal environment (no requestAnimationFrame), use setInterval:
-export function useTerminalRenderLoop(callback: (dt: number) => void) {
-  const lastFrame = useRef(Date.now())
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const now = Date.now()
-      const dt = now - lastFrame.current
-      lastFrame.current = now
-      callback(dt)
-    }, 16)  // ~60fps
-
-    return () => clearInterval(interval)
-  }, [callback])
-}
-```
+3. **Render Loop** (`useTerminalRenderLoop`)
+   - 60fps loop via `setInterval(callback, 16)`
+   - Independent of server sync rate
+   - Applies local smoothing and interpolation each frame
 
 ---
 
@@ -3349,232 +3181,29 @@ export const COLORS = {
 
 ### WebSocket Hook
 
+The `useGameConnection` hook manages the WebSocket lifecycle and provides:
+
 ```typescript
-// client/src/hooks/useGameConnection.ts
-import { useState, useEffect, useRef, useCallback } from 'react'
-import type { GameState, ClientMessage, ServerMessage, InputState } from '../../../shared/types'
-import { audio } from '../audio/engine'
-
-const PING_INTERVAL = 30000
-const RECONNECT_DELAY = 1000
-const MAX_RECONNECT_ATTEMPTS = 5
-
-export function useGameConnection(url: string, playerName: string, enhanced: boolean) {
-  // Server state (received at 30Hz)
-  const [serverState, setServerState] = useState<GameState | null>(null)
-  const [playerId, setPlayerId] = useState<string | null>(null)
-  const [connected, setConnected] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  // Interpolation state (for smooth 60fps rendering)
-  const prevState = useRef<GameState | null>(null)
-  const lastSyncTime = useRef(0)
-
-  // Client-side prediction state (simple model: no replay queue)
-  // Server is authoritative; client predicts locally; sync snaps back
-  const localPlayerX = useRef(0)
-
-  const wsRef = useRef<WebSocket | null>(null)
-  const reconnectAttempts = useRef(0)
-  const pingInterval = useRef<ReturnType<typeof setInterval> | null>(null)
-  const lastPong = useRef(Date.now())
-
-  // Track held input keys
-  const inputState = useRef<InputState>({ left: false, right: false })
-
-  const connect = useCallback(() => {
-    const ws = new WebSocket(url)
-    wsRef.current = ws
-
-    ws.onopen = () => {
-      setConnected(true)
-      setError(null)
-      reconnectAttempts.current = 0
-      ws.send(JSON.stringify({ type: 'join', name: playerName, enhancedMode: enhanced }))
-
-      // Start keep-alive pings
-      pingInterval.current = setInterval(() => {
-        if (Date.now() - lastPong.current > PING_INTERVAL + 5000) {
-          ws.close()  // Trigger reconnect
-          return
-        }
-        ws.send(JSON.stringify({ type: 'ping' }))
-      }, PING_INTERVAL)
-    }
-
-    ws.onmessage = (event) => {
-      const msg: ServerMessage = JSON.parse(event.data)
-      switch (msg.type) {
-        case 'sync':
-          // Shift states for interpolation
-          prevState.current = serverState
-          lastSyncTime.current = Date.now()
-
-          // Simple prediction model: snap to server, apply current held input
-          if (playerId && msg.state.players[playerId]) {
-            const serverPlayer = msg.state.players[playerId]
-            let x = serverPlayer.x
-
-            // Apply current held input for smooth local movement
-            const held = inputState.current
-            const moveSpeed = msg.state.config.playerMoveSpeed
-            if (held.left) x -= moveSpeed
-            if (held.right) x += moveSpeed
-            x = Math.max(1, Math.min(msg.state.config.width - 2, x))
-
-            localPlayerX.current = x
-          }
-
-          setServerState(msg.state)
-          if (msg.playerId) setPlayerId(msg.playerId)
-          break
-        case 'event':
-          handleGameEvent(msg.name, msg.data)
-          break
-        case 'pong':
-          lastPong.current = Date.now()
-          break
-        case 'error':
-          setError(msg.message)
-          break
-      }
-    }
-
-    ws.onclose = () => {
-      setConnected(false)
-      if (pingInterval.current) clearInterval(pingInterval.current)
-
-      // Attempt reconnect
-      if (reconnectAttempts.current < MAX_RECONNECT_ATTEMPTS) {
-        reconnectAttempts.current++
-        setTimeout(connect, RECONNECT_DELAY * reconnectAttempts.current)
-      }
-    }
-
-    ws.onerror = () => {
-      setError('Connection error')
-    }
-  }, [url, playerName, enhanced, serverState, playerId])
-
-  useEffect(() => {
-    connect()
-    return () => {
-      if (pingInterval.current) clearInterval(pingInterval.current)
-      wsRef.current?.close()
-    }
-  }, [connect])
-
-  // Send input state to server and apply locally for prediction
-  // Simple model: no sequence numbers or replay queue needed for held-state networking
-  const updateInput = useCallback((held: InputState) => {
-    inputState.current = held
-    wsRef.current?.send(JSON.stringify({ type: 'input', held }))
-
-    // Predict movement locally (use server config or default)
-    const moveSpeed = serverState?.config.playerMoveSpeed ?? 1
-    let x = localPlayerX.current
-    if (held.left) x -= moveSpeed
-    if (held.right) x += moveSpeed
-    const width = serverState?.config.width ?? 80
-    localPlayerX.current = Math.max(1, Math.min(width - 2, x))
-  }, [serverState])
-
-  const shoot = useCallback(() => {
-    wsRef.current?.send(JSON.stringify({ type: 'shoot' }))
-  }, [])
-
-  const send = useCallback((msg: ClientMessage) => {
-    wsRef.current?.send(JSON.stringify(msg))
-  }, [])
-
-  // Interpolation helper: lerp between prev and current state
-  const getLerpT = useCallback(() => {
-    const elapsed = Date.now() - lastSyncTime.current
-    return Math.min(1, elapsed / 33)  // 33ms = 30Hz
-  }, [])
-
-  const lerpPosition = useCallback((
-    prevPos: number | undefined,
-    currPos: number | undefined
-  ): number | undefined => {
-    if (currPos === undefined) return undefined
-    if (prevPos === undefined) return currPos
-    const t = getLerpT()
-    return prevPos + (currPos - prevPos) * t
-  }, [getLerpT])
-
-  // Build render state with prediction + interpolation
-  // Uses shallow clones to avoid expensive JSON.parse(JSON.stringify())
-  const getRenderState = useCallback((): GameState | null => {
-    if (!serverState) return null
-
-    // Shallow clone players with interpolated/predicted positions
-    const players: Record<string, Player> = {}
-    for (const [id, player] of Object.entries(serverState.players)) {
-      if (id === playerId) {
-        // Local player: use predicted position
-        players[id] = { ...player, x: localPlayerX.current }
-      } else {
-        // Other players: interpolate position
-        const prevPlayer = prevState.current?.players[id]
-        const x = prevPlayer ? (lerpPosition(prevPlayer.x, player.x) ?? player.x) : player.x
-        players[id] = { ...player, x }
-      }
-    }
-
-    // Shallow clone entities with interpolated positions
-    // Build a map for O(1) lookup of previous entities
-    const prevEntityMap = new Map(prevState.current?.entities.map(e => [e.id, e]) ?? [])
-    const entities = serverState.entities.map(entity => {
-      const prevEntity = prevEntityMap.get(entity.id)
-      if (!prevEntity) return entity  // No interpolation for new entities
-
-      // Only interpolate entities with x/y positions
-      if ('x' in entity && 'x' in prevEntity && 'y' in entity && 'y' in prevEntity) {
-        return {
-          ...entity,
-          x: lerpPosition(prevEntity.x as number, entity.x as number) ?? entity.x,
-          y: lerpPosition(prevEntity.y as number, entity.y as number) ?? entity.y,
-        }
-      }
-      return entity
-    })
-
-    // Return shallow-cloned state with interpolated data
-    return { ...serverState, players, entities }
-  }, [serverState, playerId, lerpPosition])
-
-  return {
-    serverState,       // Raw server state (for debugging)
-    getRenderState,    // Interpolated + predicted state for rendering
-    playerId,
-    send,
-    connected,
-    error,
-    updateInput,
-    shoot,
-  }
-}
-
-// Play sound effects for game events
-function handleGameEvent(name: string, data: unknown) {
-  const eventSounds: Record<string, string> = {
-    player_joined: 'player_joined',
-    player_left: 'player_left',
-    player_died: 'player_died',
-    player_respawned: 'player_respawned',
-    countdown_tick: 'countdown_tick',
-    game_start: 'game_start',
-    alien_killed: 'alien_killed',
-    wave_complete: 'wave_complete',
-    game_over: 'game_over',
-  }
-  const sound = eventSounds[name]
-  if (sound) {
-    audio.playSfx(sound as any)
-  }
+function useGameConnection(url: string, playerName: string, enhanced: boolean): {
+  serverState: GameState | null    // Raw server state
+  getRenderState: () => GameState  // Interpolated + predicted state for rendering
+  playerId: string | null
+  connected: boolean
+  error: string | null
+  send: (msg: ClientMessage) => void
+  updateInput: (held: InputState) => void
+  shoot: () => void
 }
 ```
+
+**Responsibilities:**
+- Connect to WebSocket, send `join` message with player name
+- Handle `sync`, `event`, `pong`, `error` messages
+- Keep-alive pings every 30 seconds
+- Auto-reconnect with exponential backoff (max 5 attempts)
+- Local prediction: apply held input immediately, snap on server sync
+- Interpolation: lerp other players/entities between server updates
+- Trigger audio on game events
 
 ---
 
@@ -3917,259 +3546,32 @@ const ENHANCED_MODE_TRACKS: AmigaTrack[] = [
 - **Arpeggiated chords**: Fast note cycling for polyphony illusion
 - **Portamento leads**: Pitch slides between notes
 
+
 ### Audio Engine
 
-**Note:** This is a terminal application. We use terminal-appropriate audio:
-- Terminal bell (`\x07`) for simple beeps
-- Optional native audio via Bun FFI for richer sound
-- User config stored in `~/.config/vaders/config.json`
+Terminal-appropriate audio with optional native FFI support:
 
-```typescript
-// client/src/audio/engine.ts
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
-import { homedir } from 'os'
-import { join } from 'path'
+- **Terminal bell** (`\x07`) for basic feedback
+- **Optional native audio** via Bun FFI for richer sound
+- **Config** stored in `~/.config/vaders/config.json`
 
-const CONFIG_DIR = join(homedir(), '.config', 'vaders')
-const CONFIG_FILE = join(CONFIG_DIR, 'config.json')
+**Sound Effects:**
 
-interface AudioConfig {
-  muted: boolean
-  useNativeAudio: boolean  // Use FFI for richer sound (optional)
-}
+| Sound | Description |
+|-------|-------------|
+| `shoot` | Square wave sweep 880→1760Hz |
+| `alien_killed` | Square + noise burst |
+| `player_died` | Low noise explosion |
+| `wave_complete` | C-E-G arpeggio |
+| `game_over` | G-E-C descending |
+| `countdown_tick` | A4 beep |
 
-function loadConfig(): AudioConfig {
-  try {
-    if (existsSync(CONFIG_FILE)) {
-      return JSON.parse(readFileSync(CONFIG_FILE, 'utf-8'))
-    }
-  } catch { /* ignore */ }
-  return { muted: false, useNativeAudio: false }
-}
+**Music Tempo** scales with alien count (1.0× → 1.75× as aliens decrease).
 
-function saveConfig(config: AudioConfig) {
-  try {
-    if (!existsSync(CONFIG_DIR)) {
-      mkdirSync(CONFIG_DIR, { recursive: true })
-    }
-    writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2))
-  } catch { /* ignore */ }
-}
+### Mute Indicator
 
-class AudioEngine {
-  private config: AudioConfig
-  private nativeAudio: NativeAudio | null = null
+When muted, show 🔇 in status bar.
 
-  constructor() {
-    this.config = loadConfig()
-    if (this.config.useNativeAudio) {
-      this.initNativeAudio()
-    }
-  }
-
-  private async initNativeAudio() {
-    // Optional: Load native audio library via Bun FFI
-    // This would use a library like miniaudio or SDL_audio
-    try {
-      // const lib = dlopen('./audio.dylib', { ... })
-      // this.nativeAudio = new NativeAudio(lib)
-    } catch {
-      // Client-side: no roomId context needed
-      console.warn('[AudioEngine] Native audio not available, using terminal bell')
-    }
-  }
-
-  toggleMute() {
-    this.config.muted = !this.config.muted
-    saveConfig(this.config)
-  }
-
-  get isMuted(): boolean {
-    return this.config.muted
-  }
-
-  playSfx(name: SoundEffect) {
-    if (this.config.muted) return
-
-    if (this.nativeAudio) {
-      this.nativeAudio.play(name)
-    } else {
-      // Terminal bell for basic audio feedback
-      if (BEEP_SOUNDS.has(name)) {
-        process.stdout.write('\x07')
-      }
-    }
-  }
-
-  playMusic(mode: 'normal' | 'enhanced') {
-    // Music only available with native audio
-    this.nativeAudio?.playMusic(mode)
-  }
-
-  setMusicTempo(multiplier: number) {
-    this.nativeAudio?.setTempo(multiplier)
-  }
-}
-
-// Sound effects that trigger terminal bell in basic mode
-const BEEP_SOUNDS = new Set<SoundEffect>([
-  'shoot', 'alien_killed', 'player_died', 'wave_complete', 'game_over', 'countdown_tick'
-])
-
-export const audio = new AudioEngine()
-```
-
-### Native Audio (Optional)
-
-For richer audio, users can install the native audio library:
-
-```bash
-# Build native audio module (requires system audio libraries)
-cd client/native
-bun run build  # Compiles audio.c using zig cc
-
-# Enable in config
-echo '{"muted": false, "useNativeAudio": true}' > ~/.config/vaders/config.json
-```
-
-```typescript
-// client/src/audio/native.ts (optional)
-
-interface NativeAudio {
-  play(name: SoundEffect): void
-  playMusic(mode: 'normal' | 'enhanced'): void
-  setTempo(multiplier: number): void
-  stop(): void
-}
-
-// FFI bindings would go here using Bun.dlopen()
-```
-
-### Sound Effect Types
-
-```typescript
-// client/src/audio/sfx.ts
-
-type SoundEffect =
-  | 'shoot'
-  | 'alien_killed'
-  | 'player_joined'
-  | 'player_left'
-  | 'player_died'
-  | 'player_respawned'
-  | 'wave_complete'
-  | 'game_over'
-  | 'commander_hit'
-  | 'tractor_beam'
-  | 'transform_spawn'
-  | 'capture'
-  | 'menu_select'
-  | 'menu_navigate'
-  | 'ready_up'
-  | 'countdown_tick'
-  | 'game_start'
-  | 'ufo_spawn'
-
-/**
- * Sound effect descriptions for native audio implementation.
- * When using terminal bell mode, only BEEP_SOUNDS are triggered.
- * When using native audio, these parameters are used for synthesis.
- */
-const SFX_PARAMS: Record<SoundEffect, SfxParams> = {
-  shoot:           { freq: 880, dur: 50, type: 'square', sweep: 1760 },
-  alien_killed:    { freq: 600, dur: 100, type: 'square', sweep: 100, noise: true },
-  player_joined:   { freq: 523, dur: 100, type: 'sine' },      // C5
-  player_left:     { freq: 330, dur: 150, type: 'triangle' },  // E4
-  player_died:     { freq: 100, dur: 300, type: 'noise' },     // Explosion
-  player_respawned:{ freq: 880, dur: 100, type: 'sine' },      // A5
-  wave_complete:   { notes: [523, 659, 784], dur: 500 },       // C-E-G arpeggio
-  game_over:       { notes: [392, 330, 262], dur: 1000 },      // G-E-C descending
-  countdown_tick:  { freq: 440, dur: 100, type: 'square' },    // A4 beep
-  game_start:      { notes: [262, 330, 392, 523], dur: 800 },  // C-E-G-C fanfare
-  ready_up:        { freq: 660, dur: 150, type: 'sine' },      // E5
-  menu_select:     { freq: 440, dur: 30, type: 'square' },
-  menu_navigate:   { freq: 220, dur: 20, type: 'square' },
-  // Enhanced mode
-  commander_hit:   { freq: 150, dur: 150, type: 'sawtooth' },
-  tractor_beam:    { freq: 300, dur: 2000, type: 'warble' },
-  transform_spawn: { freq: 1500, dur: 200, type: 'sparkle' },
-  capture:         { freq: 400, dur: 400, type: 'siren' },
-}
-
-interface SfxParams {
-  freq?: number
-  dur: number
-  type?: 'sine' | 'square' | 'sawtooth' | 'triangle' | 'noise' | 'warble' | 'sparkle' | 'siren'
-  sweep?: number      // End frequency for sweep
-  noise?: boolean     // Add noise burst
-  notes?: number[]    // For arpeggios
-}
-```
-
-### Integration with Game Events
-
-```tsx
-// client/src/hooks/useGameAudio.ts
-import { useEffect, useMemo } from 'react'
-import { audio } from '../audio/engine'
-import type { GameState, AlienEntity } from '../../../shared/types'
-
-export function useGameAudio(state: GameState | null, enhanced: boolean) {
-  // Extract aliens from entities
-  const aliens = useMemo(() =>
-    state?.entities.filter((e): e is AlienEntity => e.kind === 'alien') ?? [],
-    [state?.entities]
-  )
-
-  // Start music when game starts
-  useEffect(() => {
-    if (state?.status === 'playing') {
-      audio.playMusic(enhanced ? 'enhanced' : 'normal')
-    }
-  }, [state?.status, enhanced])
-
-  // Adjust tempo based on aliens remaining
-  useEffect(() => {
-    if (!state || state.status !== 'playing' || aliens.length === 0) return
-    const alive = aliens.filter(a => a.alive).length
-    const total = aliens.length
-    const ratio = alive / total
-
-    let tempo = 1.0
-    if (ratio < 0.1) tempo = 1.75
-    else if (ratio < 0.25) tempo = 1.5
-    else if (ratio < 0.5) tempo = 1.3
-    else if (ratio < 0.75) tempo = 1.15
-
-    audio.setMusicTempo(tempo)
-  }, [state?.status, aliens])
-}
-
-// GameEvent → SoundEffect mapping (some events map to different sound names)
-const EVENT_SOUND_MAP: Record<GameEvent, SoundEffect | null> = {
-  player_joined: 'player_joined',
-  player_left: 'player_left',
-  player_ready: 'ready_up',        // UI feedback sound
-  player_unready: 'menu_select',   // UI feedback sound
-  player_died: 'player_died',
-  player_respawned: 'player_respawned',
-  countdown_tick: 'countdown_tick',
-  countdown_cancelled: null,       // No sound for cancelled countdown
-  game_start: 'game_start',
-  alien_killed: 'alien_killed',
-  wave_complete: 'wave_complete',
-  game_over: 'game_over',
-  ufo_spawn: 'ufo_spawn',
-}
-
-// In useGameConnection.ts, handle events:
-function handleEvent(name: GameEvent, data: unknown) {
-  const sound = EVENT_SOUND_MAP[name]
-  if (sound) {
-    audio.playSfx(sound)
-  }
-}
-```
 
 ### Mute Indicator
 
@@ -4286,633 +3688,55 @@ export const logger = new Logger()
 
 ---
 
+
 ## Testing
 
 ### Test Strategy
-
-Testing is organized into three layers:
 
 | Layer | Scope | Tools | Speed |
 |-------|-------|-------|-------|
 | **Unit** | Pure functions, game logic | Bun test | <1s |
 | **Integration** | WebSocket protocol, state sync | Bun test + mock WS | <5s |
-| **E2E** | Full client-server flow | Bun test + node-pty + wrangler dev | <30s |
+| **E2E** | Full client-server flow | Bun test + node-pty | <30s |
 
 ### Unit Tests
 
-```typescript
-// worker/src/game/__tests__/scaling.test.ts
-import { describe, expect, test } from 'bun:test'
-import { getScaledConfig, getPlayerSpawnX } from '../scaling'
+Test pure functions in isolation:
 
-describe('getScaledConfig', () => {
-  // Must include tickIntervalMs for shoot probability calculation
-  const baseConfig = {
-    baseAlienMoveIntervalTicks: 30,
-    tickIntervalMs: 33,  // 30Hz tick rate
-  } as GameConfig
-
-  test('solo player gets base difficulty', () => {
-    const config = getScaledConfig(1, baseConfig)
-    expect(config.lives).toBe(3)
-    expect(config.alienCols).toBe(11)
-    expect(config.alienRows).toBe(5)
-    expect(config.alienMoveIntervalTicks).toBe(30)
-    expect(config.alienShootProbability).toBeCloseTo(0.5 / 30, 3)  // 0.5 shots/s at 30Hz
-  })
-
-  test('4 players get max difficulty', () => {
-    const config = getScaledConfig(4, baseConfig)
-    expect(config.lives).toBe(5)
-    expect(config.alienCols).toBe(15)
-    expect(config.alienRows).toBe(6)
-    expect(config.alienMoveIntervalTicks).toBe(17)  // 30 / 1.75 ≈ 17
-    expect(config.alienShootProbability).toBeCloseTo(1.25 / 30, 3)  // 1.25 shots/s at 30Hz
-  })
-
-  test('invalid player count falls back to solo', () => {
-    const config = getScaledConfig(0, baseConfig)
-    expect(config.lives).toBe(3)
-    expect(config.alienCols).toBe(11)
-  })
-})
-
-describe('getPlayerSpawnX', () => {
-  test('solo player spawns at center', () => {
-    expect(getPlayerSpawnX(1, 1, 80)).toBe(40)
-  })
-
-  test('2 players spawn at thirds positions', () => {
-    expect(getPlayerSpawnX(1, 2, 80)).toBe(26)  // Math.floor(80/3)
-    expect(getPlayerSpawnX(2, 2, 80)).toBe(53)  // Math.floor(2*80/3)
-  })
-})
-```
-
-```typescript
-// worker/src/game/__tests__/collision.test.ts
-import { describe, expect, test } from 'bun:test'
-import { checkBulletAlienCollision, checkBulletPlayerCollision } from '../collision'
-
-describe('collision detection', () => {
-  test('bullet hits alien within COLLISION_H threshold', () => {
-    const bullet = { x: 10, y: 5, dy: -1 }
-    const alien = { x: 11, y: 5, alive: true }
-    expect(checkBulletAlienCollision(bullet, alien)).toBe(true)
-  })
-
-  test('bullet misses alien outside threshold', () => {
-    const bullet = { x: 10, y: 5, dy: -1 }
-    const alien = { x: 15, y: 5, alive: true }
-    expect(checkBulletAlienCollision(bullet, alien)).toBe(false)
-  })
-
-  test('bullet ignores dead aliens', () => {
-    const bullet = { x: 10, y: 5, dy: -1 }
-    const alien = { x: 10, y: 5, alive: false }
-    expect(checkBulletAlienCollision(bullet, alien)).toBe(false)
-  })
-})
-```
-
-```typescript
-// worker/src/game/__tests__/barriers.test.ts
-// Note: Tests use standalone createBarriers function, GameRoom.createBarriers wraps it
-import { describe, expect, test } from 'bun:test'
-import { createBarriers } from '../barriers'
-
-describe('createBarriers', () => {
-  // Helper to generate IDs for testing
-  let idCounter = 0
-  const generateId = () => `b_${++idCounter}`
-
-  test('solo player gets 3 barriers', () => {
-    const barriers = createBarriers(1, 80, generateId)
-    expect(barriers.length).toBe(3)  // playerCount + 2 = 3
-  })
-
-  test('4 players get 4 barriers (max)', () => {
-    const barriers = createBarriers(4, 80, generateId)
-    expect(barriers.length).toBe(4)  // min(4, 4+2) = 4
-  })
-
-  test('each barrier has 9 segments (5 top + 4 bottom with gap)', () => {
-    const barriers = createBarriers(1, 80, generateId)
-    barriers.forEach(b => expect(b.segments.length).toBe(9))
-  })
-
-  test('barriers are evenly spaced', () => {
-    const barriers = createBarriers(4, 80, generateId)
-    const spacing = barriers[1].x - barriers[0].x
-    expect(barriers[2].x - barriers[1].x).toBe(spacing)
-    expect(barriers[3].x - barriers[2].x).toBe(spacing)
-  })
-})
-```
+- **Scaling**: `getScaledConfig(playerCount)` returns correct lives, alien grid, speed
+- **Collision**: bullet-alien, bullet-player, bullet-barrier hit detection
+- **Barriers**: correct count and spacing for player count
+- **Spawn positions**: `getPlayerSpawnX(slot, playerCount, width)` distributes evenly
 
 ### Integration Tests
 
-```typescript
-// worker/src/__tests__/gameroom.test.ts
-import { describe, expect, test, beforeEach, afterEach } from 'bun:test'
-import { GameRoom } from '../GameRoom'
+Test WebSocket protocol with mock connections:
 
-describe('GameRoom WebSocket protocol', () => {
-  let room: GameRoom
-  let mockWs: MockWebSocket
-
-  beforeEach(() => {
-    room = new GameRoom(mockState, mockEnv)
-    mockWs = new MockWebSocket()
-  })
-
-  test('join message adds player and returns sync', async () => {
-    await room.handleSession(mockWs)
-    mockWs.receive({ type: 'join', name: 'Alice' })
-
-    const response = mockWs.lastSent()
-    expect(response.type).toBe('sync')
-    expect(response.playerId).toBeDefined()
-    expect(response.state.players[response.playerId].name).toBe('Alice')
-  })
-
-  test('room full returns error after 4 players', async () => {
-    // Add 4 players
-    for (let i = 0; i < 4; i++) {
-      const ws = new MockWebSocket()
-      await room.handleSession(ws)
-      ws.receive({ type: 'join', name: `Player${i}` })
-    }
-
-    // 5th player should get error
-    const ws5 = new MockWebSocket()
-    await room.handleSession(ws5)
-    ws5.receive({ type: 'join', name: 'Player5' })
-
-    expect(ws5.lastSent()).toEqual({
-      type: 'error',
-      code: 'room_full',
-      message: 'Room is full'
-    })
-  })
-
-  test('ready state triggers countdown when all ready', async () => {
-    // Add 2 players
-    const ws1 = new MockWebSocket()
-    const ws2 = new MockWebSocket()
-    await room.handleSession(ws1)
-    await room.handleSession(ws2)
-    ws1.receive({ type: 'join', name: 'Alice' })
-    ws2.receive({ type: 'join', name: 'Bob' })
-
-    // Both ready
-    ws1.receive({ type: 'ready' })
-    ws2.receive({ type: 'ready' })
-
-    // Should broadcast countdown_tick
-    expect(ws1.messages.some(m => m.name === 'countdown_tick')).toBe(true)
-  })
-
-  test('ping returns pong with server time', async () => {
-    await room.handleSession(mockWs)
-    mockWs.receive({ type: 'join', name: 'Alice' })
-    mockWs.receive({ type: 'ping' })
-
-    const pong = mockWs.lastSent()
-    expect(pong.type).toBe('pong')
-    expect(pong.serverTime).toBeGreaterThan(0)
-  })
-
-  test('countdown ticks from 3 to 1 then starts game', async () => {
-    // Setup 2 players, both ready
-    const ws1 = new MockWebSocket()
-    const ws2 = new MockWebSocket()
-    await room.handleSession(ws1)
-    await room.handleSession(ws2)
-    ws1.receive({ type: 'join', name: 'Alice' })
-    ws2.receive({ type: 'join', name: 'Bob' })
-    ws1.receive({ type: 'ready' })
-    ws2.receive({ type: 'ready' })
-
-    // Expect countdown_tick events with counts 3, 2, 1
-    const countdownEvents = ws1.messages.filter(m => m.name === 'countdown_tick')
-    expect(countdownEvents.map(e => e.data.count)).toEqual([3, 2, 1])
-
-    // Expect game_start after countdown
-    expect(ws1.messages.some(m => m.name === 'game_start')).toBe(true)
-  })
-
-  test('player respawns after respawnDelay ticks in coop', async () => {
-    // Setup coop game with 2 players
-    const ws1 = new MockWebSocket()
-    const ws2 = new MockWebSocket()
-    await room.handleSession(ws1)
-    await room.handleSession(ws2)
-    ws1.receive({ type: 'join', name: 'Alice' })
-    ws2.receive({ type: 'join', name: 'Bob' })
-    ws1.receive({ type: 'ready' })
-    ws2.receive({ type: 'ready' })
-
-    // Wait for game to start and kill player
-    // ... simulate player death
-    // Wait respawnDelay ticks
-    // Expect player_respawned event
-    // Expect player.alive = true, correct x position
-    const respawnedEvents = ws1.messages.filter(m => m.name === 'player_respawned')
-    expect(respawnedEvents.length).toBeGreaterThan(0)
-  })
-
-  test('input held state is applied on next tick', async () => {
-    // Held-state networking: client sends held input, server applies on each tick
-    const ws = new MockWebSocket()
-    await room.handleSession(ws)
-    ws.receive({ type: 'join', name: 'Alice' })
-
-    // Start solo game
-    ws.receive({ type: 'start_solo' })
-    ws.messages = []  // Clear previous messages
-
-    // Send held input (left key down)
-    ws.receive({ type: 'input', held: { left: true, right: false } })
-
-    // Trigger a tick to process input and get sync message
-    room.tick?.()
-
-    // Find the sync message
-    const syncMsg = ws.messages.find(m => m.type === 'sync')
-    expect(syncMsg).toBeDefined()
-
-    // Verify player inputState was updated
-    const player = syncMsg.state.players[syncMsg.playerId]
-    expect(player.inputState).toEqual({ left: true, right: false })
-  })
-})
-
-// Mock WebSocket helper
-class MockWebSocket {
-  messages: any[] = []
-  accept() {}
-  send(data: string) { this.messages.push(JSON.parse(data)) }
-  receive(msg: any) { this.onmessage?.({ data: JSON.stringify(msg) }) }
-  lastSent() { return this.messages[this.messages.length - 1] }
-  onmessage?: (event: { data: string }) => void
-  onclose?: () => void
-}
-```
-
-### State Synchronization Tests
-
-```typescript
-// client/src/__tests__/gameConnection.test.ts
-import { describe, expect, test, mock } from 'bun:test'
-
-describe('Game Connection', () => {
-  // Note: We use full state sync (no deltas), so tests focus on message handling
-
-  test('sync message replaces entire game state', () => {
-    const initialState = { score: 0, entities: [] }
-    const newState = { score: 100, entities: [{ kind: 'alien', id: 'e_1', alive: true }] }
-
-    // Simulate receiving sync message
-    const setState = mock((state: any) => state)
-    // On sync, state is completely replaced
-    setState(newState)
-
-    expect(setState).toHaveBeenCalledWith(newState)
-  })
-
-  test('connection sends join message on open', async () => {
-    const sentMessages: any[] = []
-    const mockWs = {
-      send: (data: string) => sentMessages.push(JSON.parse(data)),
-      close: () => {},
-    }
-
-    // Simulate connection open
-    mockWs.send(JSON.stringify({ type: 'join', name: 'Alice', enhancedMode: false }))
-
-    expect(sentMessages[0]).toEqual({ type: 'join', name: 'Alice', enhancedMode: false })
-  })
-
-  test('input state message includes held keys', () => {
-    const sentMessages: any[] = []
-    const mockWs = {
-      send: (data: string) => sentMessages.push(JSON.parse(data)),
-    }
-
-    // Simulate updating held input state
-    mockWs.send(JSON.stringify({ type: 'input', held: { left: true, right: false } }))
-
-    expect(sentMessages[0]).toEqual({ type: 'input', held: { left: true, right: false } })
-  })
-})
-```
+- `join` → returns `sync` with playerId and initial state
+- `ready` when all ready → triggers `countdown_tick` events
+- 5th player join → returns `error` with `room_full`
+- `ping` → returns `pong` with serverTime
+- Player disconnect during countdown → cancels countdown
+- Input during gameplay → updates player position in next tick
 
 ### E2E Tests
 
-E2E tests for terminal apps use `node-pty` to spawn real terminal processes and capture/verify output. This avoids browser-based testing tools like Playwright which don't apply to TUI apps.
+Test full client-server flow:
 
-```typescript
-// e2e/game.spec.ts
-import { describe, test, expect, beforeAll, afterAll } from 'bun:test'
-import * as pty from 'node-pty'
-import { spawn } from 'child_process'
+- Solo game: start → shoot aliens → wave complete → victory/defeat
+- 2-player co-op: both join → ready → countdown → game starts
+- Reconnection: disconnect → reconnect within grace period → resume
+- Enhanced mode: commanders, dive bombers, UFOs spawn correctly
 
-// Helper to wait for specific output in PTY buffer
-function waitForOutput(buffer: string[], pattern: RegExp | string, timeout = 5000): Promise<void> {
-  const start = Date.now()
-  return new Promise((resolve, reject) => {
-    const check = () => {
-      const fullOutput = buffer.join('')
-      const found = typeof pattern === 'string'
-        ? fullOutput.includes(pattern)
-        : pattern.test(fullOutput)
-      if (found) return resolve()
-      if (Date.now() - start > timeout) {
-        return reject(new Error(`Timeout waiting for: ${pattern}\nGot: ${fullOutput.slice(-500)}`))
-      }
-      setTimeout(check, 100)
-    }
-    check()
-  })
-}
+### Coverage Targets
 
-describe('Vaders E2E', () => {
-  let workerProcess: ReturnType<typeof spawn>
-
-  beforeAll(async () => {
-    // Start local worker
-    workerProcess = spawn('bunx', ['wrangler', 'dev'], { cwd: './worker', stdio: 'pipe' })
-    await new Promise(r => setTimeout(r, 3000))  // Wait for startup
-  })
-
-  afterAll(() => {
-    workerProcess?.kill()
-  })
-
-  test('solo game flow', async () => {
-    const output: string[] = []
-
-    // Spawn client in a PTY for realistic terminal behavior
-    const ptyProcess = pty.spawn('bun', ['run', 'dev'], {
-      name: 'xterm-256color',
-      cols: 80,
-      rows: 24,
-      cwd: './client',
-      env: { ...process.env, VADERS_ASCII: '1' },  // Use ASCII mode for reliable matching
-    })
-
-    ptyProcess.onData((data) => output.push(data))
-
-    try {
-      // Wait for connection and menu
-      await waitForOutput(output, /VADERS|Press.*to.*start/i, 10000)
-
-      // Start solo game
-      ptyProcess.write('s')
-
-      // Verify game started
-      await waitForOutput(output, 'WAVE:1', 5000)
-
-      // Shoot
-      ptyProcess.write(' ')
-
-      // Verify score increased (alien hit)
-      await waitForOutput(output, /SCORE:000[1-9]|SCORE:0001/, 3000)
-    } finally {
-      ptyProcess.kill()
-    }
-  })
-
-  test('multiplayer lobby ready flow', async () => {
-    const output1: string[] = []
-    const output2: string[] = []
-
-    // Create room with first player
-    const player1 = pty.spawn('bun', ['run', 'dev'], {
-      name: 'xterm-256color',
-      cols: 80,
-      rows: 24,
-      cwd: './client',
-      env: { ...process.env, VADERS_ASCII: '1' },
-    })
-    player1.onData((data) => output1.push(data))
-
-    try {
-      // Wait for menu, create new room
-      await waitForOutput(output1, /VADERS|Press.*to.*start/i, 10000)
-      player1.write('2')  // Create room
-
-      // Wait for room code to appear
-      await waitForOutput(output1, /Room.*[A-Z0-9]{6}/i, 5000)
-
-      // Extract room code from output
-      const roomCodeMatch = output1.join('').match(/Room[:\s]+([A-Z0-9]{6})/i)
-      expect(roomCodeMatch).toBeTruthy()
-      const roomCode = roomCodeMatch![1]
-
-      // Second player joins
-      const player2 = pty.spawn('bun', ['run', 'dev', '--room', roomCode], {
-        name: 'xterm-256color',
-        cols: 80,
-        rows: 24,
-        cwd: './client',
-        env: { ...process.env, VADERS_ASCII: '1' },
-      })
-      player2.onData((data) => output2.push(data))
-
-      try {
-        // Wait for player 2 to join
-        await waitForOutput(output2, /Lobby|waiting/i, 10000)
-
-        // Player 1 readies
-        player1.write('\r')  // Enter key
-        await waitForOutput(output1, /READY/i, 3000)
-
-        // Player 2 readies - should trigger countdown
-        player2.write('\r')
-        await waitForOutput(output1, /GET READY|3|countdown/i, 3000)
-        await waitForOutput(output2, /GET READY|3|countdown/i, 3000)
-      } finally {
-        player2.kill()
-      }
-    } finally {
-      player1.kill()
-    }
-  })
-})
-```
-
-### Test Commands
-
-```bash
-# Run all tests
-bun test
-
-# Run specific test file
-bun test worker/src/game/__tests__/scaling.test.ts
-
-# Run with coverage
-bun test --coverage
-
-# Watch mode
-bun test --watch
-
-# E2E tests (requires wrangler dev running)
-bun test e2e/
-```
-
-### Test Coverage Requirements
-
-| Module | Minimum Coverage |
-|--------|------------------|
+| Component | Target |
+|-----------|--------|
 | `game/scaling.ts` | 100% |
 | `game/collision.ts` | 100% |
-| `game/barriers.ts` | 90% |
 | `GameRoom.ts` | 80% |
 | `hooks/useGameConnection.ts` | 80% |
-| `audio/*` | 50% (hard to test audio) |
 
-### CI Pipeline
-
-```yaml
-# .github/workflows/test.yml
-name: Test
-on: [push, pull_request]
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v1
-
-      - name: Install dependencies
-        run: |
-          cd worker && bun install
-          cd ../client && bun install
-
-      - name: Run unit tests
-        run: bun test
-
-      - name: Run integration tests
-        run: bun test --filter integration
-
-      - name: Start worker for E2E
-        run: cd worker && bunx wrangler dev &
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_TOKEN }}
-
-      - name: Run E2E tests
-        run: bun test e2e/
-```
-
-### Test Data Factories
-
-```typescript
-// test/factories.ts
-
-export function createPlayer(overrides: Partial<Player> = {}): Player {
-  return {
-    id: crypto.randomUUID(),
-    name: 'TestPlayer',
-    x: 40,
-    slot: 1,
-    color: 'green',
-    lastShotTick: 0,
-    alive: true,
-    respawnAtTick: null,
-    kills: 0,
-    disconnectedAtMs: null,
-    inputState: { left: false, right: false },
-    ...overrides,
-  }
-}
-
-export function createAlien(overrides: Partial<AlienEntity> = {}): AlienEntity {
-  return {
-    kind: 'alien',
-    id: 'a_1',
-    type: 'octopus',
-    row: 0,
-    col: 0,
-    x: 10,
-    y: 2,
-    alive: true,
-    points: 10,
-    ...overrides,
-  }
-}
-
-export function createGameState(overrides: Partial<GameState> = {}): GameState {
-  return {
-    roomId: 'TEST01',
-    mode: 'solo',
-    status: 'playing',
-    tick: 0,
-    rngSeed: 12345,  // Fixed seed for deterministic tests
-    enhancedMode: false,
-    countdownRemaining: null,
-    players: {},
-    readyPlayerIds: [],
-    entities: [],  // All game entities (aliens, bullets, barriers)
-    wave: 1,
-    lives: 3,
-    score: 0,
-    alienDirection: 1,
-    config: DEFAULT_CONFIG,
-    ...overrides,
-  }
-}
-```
-
-### Property-Based Testing
-
-```typescript
-// worker/src/game/__tests__/properties.test.ts
-import { describe, test } from 'bun:test'
-import fc from 'fast-check'
-import { getScaledConfig, DEFAULT_CONFIG } from '../scaling'
-
-describe('scaling properties', () => {
-  test('more players = faster aliens (lower moveInterval)', () => {
-    fc.assert(
-      fc.property(
-        fc.integer({ min: 1, max: 4 }),
-        fc.integer({ min: 1, max: 4 }),
-        (p1, p2) => {
-          if (p1 < p2) {
-            const c1 = getScaledConfig(p1, DEFAULT_CONFIG)
-            const c2 = getScaledConfig(p2, DEFAULT_CONFIG)
-            // More players = lower interval = faster aliens
-            return c1.alienMoveIntervalTicks >= c2.alienMoveIntervalTicks
-          }
-          return true
-        }
-      )
-    )
-  })
-
-  test('alien grid size increases monotonically with players', () => {
-    fc.assert(
-      fc.property(
-        fc.integer({ min: 1, max: 4 }),
-        fc.integer({ min: 1, max: 4 }),
-        (p1, p2) => {
-          if (p1 < p2) {
-            const c1 = getScaledConfig(p1, DEFAULT_CONFIG)
-            const c2 = getScaledConfig(p2, DEFAULT_CONFIG)
-            return c1.alienCols * c1.alienRows <= c2.alienCols * c2.alienRows
-          }
-          return true
-        }
-      )
-    )
-  })
-})
-```
-
----
 
 ## Compatibility
 
