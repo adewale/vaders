@@ -776,7 +776,7 @@ interface InputSnapshot {
   held: InputState
 }
 
-const PLAYER_SPEED = 4  // Must match server CONFIG.playerSpeed
+const PLAYER_SPEED = 1  // Must match server DEFAULT_CONFIG.playerMoveSpeed
 
 export function useClientPrediction(
   serverState: GameState | null,
@@ -2593,9 +2593,10 @@ export function useGameConnection(url: string, playerName: string, enhanced: boo
 
             // Replay pending inputs from server position
             let x = serverPlayer.x
+            const moveSpeed = msg.state.config.playerMoveSpeed
             for (const input of pendingInputs.current) {
-              if (input.held.left) x -= CONFIG.playerSpeed
-              if (input.held.right) x += CONFIG.playerSpeed
+              if (input.held.left) x -= moveSpeed
+              if (input.held.right) x += moveSpeed
               x = Math.max(1, Math.min(msg.state.config.width - 2, x))
             }
             localPlayerX.current = x
@@ -2649,10 +2650,11 @@ export function useGameConnection(url: string, playerName: string, enhanced: boo
     localTick.current++
     pendingInputs.current.push({ tick: localTick.current, held: { ...held } })
 
-    // Predict movement locally
+    // Predict movement locally (use server config or default)
+    const moveSpeed = serverState?.config.playerMoveSpeed ?? 1
     let x = localPlayerX.current
-    if (held.left) x -= CONFIG.playerSpeed
-    if (held.right) x += CONFIG.playerSpeed
+    if (held.left) x -= moveSpeed
+    if (held.right) x += moveSpeed
     const width = serverState?.config.width ?? 80
     localPlayerX.current = Math.max(1, Math.min(width - 2, x))
   }, [serverState])
