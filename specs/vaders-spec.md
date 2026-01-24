@@ -1009,6 +1009,709 @@ export function useTerminalRenderLoop(callback: (dt: number) => void) {
 
 ---
 
+## Game Engine Architecture
+
+The game engine uses a **Functional Core, Imperative Shell** architecture with ECS-inspired systems. This separates pure game logic from I/O concerns, making the engine deterministic and fully testable without a network.
+
+### Functional Core, Imperative Shell
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    FUNCTIONAL CORE / IMPERATIVE SHELL                        │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+                     IMPERATIVE SHELL (I/O)
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  GameRoom (Durable Object)                                                   │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐             │
+│  │ WebSocket I/O   │  │  Timer/Interval │  │  Storage I/O    │             │
+│  │ • onMessage()   │  │  • setInterval  │  │  • storage.get  │             │
+│  │ • broadcast()   │  │  • setAlarm     │  │  • storage.put  │             │
+│  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘             │
+│           │                    │                    │                       │
+│           └────────────────────┼────────────────────┘                       │
+│                                ▼                                            │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                        INPUT COMMAND QUEUE                           │   │
+│  │    [action, action, action, ...]  ← Queued until next tick          │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+└────────────────────────────────────────────────────────────────────────┬────┘
+                                                                         │
+                     ════════════════════════════════════════════════════╪════
+                     FUNCTIONAL CORE (Pure Functions)                    │
+┌────────────────────────────────────────────────────────────────────────┼────┐
+│                                                                        ▼    │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │  gameReducer(state: GameState, action: GameAction): GameState       │   │
+│  │                                                                      │   │
+│  │  • Pure function - NO side effects                                  │   │
+│  │  • Deterministic - same input → same output                         │   │
+│  │  • Testable without mocks or network                                │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│           │                                                                 │
+│           ▼                                                                 │
+│  ┌──────────────────────┐  ┌──────────────────────┐                        │
+│  │   State Machine      │  │   ECS Systems        │                        │
+│  │   (status guards)    │  │   (entity updates)   │                        │
+│  └──────────────────────┘  └──────────────────────┘                        │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### State Reducer Pattern
+
+All game logic flows through a single pure reducer function. This makes the game deterministic and replay-able.
+
+```typescript
+// worker/src/game/reducer.ts
+
+// Actions represent everything that can happen in the game
+type GameAction =
+  | { type: 'TICK'; deltaTime: number }
+  | { type: 'PLAYER_JOIN'; player: Player }
+  | { type: 'PLAYER_LEAVE'; playerId: string }
+  | { type: 'PLAYER_INPUT'; playerId: string; input: InputState; seq: number }
+  | { type: 'PLAYER_SHOOT'; playerId: string }
+  | { type: 'PLAYER_READY'; playerId: string }
+  | { type: 'PLAYER_UNREADY'; playerId: string }
+  | { type: 'START_SOLO'; enhancedMode: boolean }
+  | { type: 'START_COUNTDOWN' }
+  | { type: 'COUNTDOWN_TICK' }
+  | { type: 'COUNTDOWN_CANCEL'; reason: string }
+
+// Result includes new state plus any side effects to execute
+interface ReducerResult {
+  state: GameState
+  events: GameEvent[]        // Events to broadcast to clients
+  persist: boolean           // Whether to persist state
+  scheduleAlarm?: number     // Schedule DO alarm (ms from now)
+}
+
+// Pure reducer - no side effects, fully deterministic
+export function gameReducer(state: GameState, action: GameAction): ReducerResult {
+  // Guard transitions with state machine
+  if (!canTransition(state.status, action.type)) {
+    return { state, events: [], persist: false }
+  }
+
+  switch (action.type) {
+    case 'TICK':
+      return tickReducer(state, action.deltaTime)
+    case 'PLAYER_JOIN':
+      return playerJoinReducer(state, action.player)
+    case 'PLAYER_INPUT':
+      return inputReducer(state, action.playerId, action.input, action.seq)
+    // ... other actions
+    default:
+      return { state, events: [], persist: false }
+  }
+}
+
+// Tick reducer runs all ECS systems
+function tickReducer(state: GameState, deltaTime: number): ReducerResult {
+  let entities = state.entities
+  let events: GameEvent[] = []
+
+  // Run systems in order
+  entities = inputSystem(entities, state.players)
+  entities = physicsSystem(entities, deltaTime)
+  const collisionResult = collisionSystem(entities, state)
+  entities = collisionResult.entities
+  events = [...events, ...collisionResult.events]
+  entities = behaviorSystem(entities, state)
+
+  // Check end conditions
+  const endResult = checkEndConditions({ ...state, entities })
+
+  return {
+    state: {
+      ...state,
+      entities,
+      tick: state.tick + 1,
+      status: endResult.status ?? state.status,
+    },
+    events: [...events, ...endResult.events],
+    persist: endResult.persist ?? false,
+  }
+}
+```
+
+### Formal State Machine
+
+Status transitions are guarded by an explicit state machine. This prevents race conditions when players join/leave during transitions.
+
+```typescript
+// worker/src/game/stateMachine.ts
+
+type GameStatus = 'waiting' | 'countdown' | 'playing' | 'game_over'
+
+// Define valid transitions
+const TRANSITIONS: Record<GameStatus, Partial<Record<GameAction['type'], GameStatus>>> = {
+  waiting: {
+    PLAYER_READY: 'waiting',       // Stay waiting, but check if all ready
+    PLAYER_UNREADY: 'waiting',
+    START_SOLO: 'playing',
+    START_COUNTDOWN: 'countdown',
+    PLAYER_LEAVE: 'waiting',
+  },
+  countdown: {
+    COUNTDOWN_TICK: 'countdown',
+    COUNTDOWN_CANCEL: 'waiting',
+    PLAYER_LEAVE: 'waiting',       // Cancel countdown if player leaves
+    // Note: TICK, PLAYER_INPUT, PLAYER_SHOOT are BLOCKED during countdown
+  },
+  playing: {
+    TICK: 'playing',
+    PLAYER_INPUT: 'playing',
+    PLAYER_SHOOT: 'playing',
+    PLAYER_LEAVE: 'playing',       // Continue playing (or end if last player)
+    // Transitions to game_over handled by tick reducer
+  },
+  game_over: {
+    // Terminal state - no transitions out (room cleans up via alarm)
+  },
+}
+
+export function canTransition(currentStatus: GameStatus, actionType: GameAction['type']): boolean {
+  const allowed = TRANSITIONS[currentStatus]
+  return actionType in allowed
+}
+
+export function getNextStatus(currentStatus: GameStatus, actionType: GameAction['type']): GameStatus {
+  return TRANSITIONS[currentStatus][actionType] ?? currentStatus
+}
+
+// Additional guards for specific conditions
+export function canStartCountdown(state: GameState): boolean {
+  const playerCount = Object.keys(state.players).length
+  const readyCount = state.readyPlayerIds.length
+  return playerCount >= 2 && readyCount === playerCount
+}
+
+export function canStartSolo(state: GameState): boolean {
+  return Object.keys(state.players).length === 1
+}
+```
+
+### Input Command Queue
+
+Messages are queued when they arrive and processed at the start of each tick. This prevents race conditions from out-of-order or mid-tick arrivals.
+
+```typescript
+// worker/src/GameRoom.ts (Imperative Shell)
+
+export class GameRoom implements DurableObject {
+  private state: DurableObjectState
+  private env: Env
+  private game: GameState | null = null
+  private inputQueue: GameAction[] = []  // Queue for deterministic processing
+  private sessions: Map<WebSocket, string> = new Map()
+
+  // Messages are queued, not processed immediately
+  private handleMessage(ws: WebSocket, msg: ClientMessage) {
+    const playerId = this.sessions.get(ws)
+    if (!playerId) return
+
+    // Convert client message to game action and queue it
+    const action = this.messageToAction(msg, playerId)
+    if (action) {
+      this.inputQueue.push(action)
+    }
+  }
+
+  private messageToAction(msg: ClientMessage, playerId: string): GameAction | null {
+    switch (msg.type) {
+      case 'input':
+        return { type: 'PLAYER_INPUT', playerId, input: msg.held, seq: msg.seq }
+      case 'shoot':
+        return { type: 'PLAYER_SHOOT', playerId }
+      case 'ready':
+        return { type: 'PLAYER_READY', playerId }
+      case 'unready':
+        return { type: 'PLAYER_UNREADY', playerId }
+      case 'start_solo':
+        return { type: 'START_SOLO', enhancedMode: msg.enhancedMode ?? false }
+      default:
+        return null
+    }
+  }
+
+  // Tick processes all queued actions, then advances the game
+  private tick() {
+    if (!this.game) return
+
+    // 1. Process all queued actions in order
+    for (const action of this.inputQueue) {
+      const result = gameReducer(this.game, action)
+      this.game = result.state
+      this.broadcastEvents(result.events)
+      if (result.persist) void this.persistState()
+    }
+    this.inputQueue = []
+
+    // 2. Run the tick action
+    const result = gameReducer(this.game, { type: 'TICK', deltaTime: 33 })
+    this.game = result.state
+    this.broadcastEvents(result.events)
+    if (result.persist) void this.persistState()
+
+    // 3. Broadcast full state
+    this.broadcastFullState()
+  }
+}
+```
+
+### Strategy Pattern for Game Modes
+
+Instead of `if (enhancedMode)` checks scattered throughout, behaviors are injected via strategy objects.
+
+```typescript
+// worker/src/game/modes.ts
+
+interface GameMode {
+  name: 'classic' | 'enhanced'
+
+  // Formation creation
+  createAlienFormation(config: ScaledConfig): Entity[]
+
+  // Entity spawning
+  spawnSpecialEntities(state: GameState, tick: number): Entity[]
+
+  // AI behaviors (returns systems to run)
+  getAISystems(): System[]
+
+  // Scoring rules
+  getPoints(entityType: string): number
+
+  // Wave progression
+  getWaveConfig(wave: number): WaveConfig
+}
+
+const classicMode: GameMode = {
+  name: 'classic',
+
+  createAlienFormation(config) {
+    // Standard 11x5 grid of squid/crab/octopus
+    return createStandardFormation(config.alienCols, config.alienRows)
+  },
+
+  spawnSpecialEntities(state, tick) {
+    // Classic mode: no special entities
+    return []
+  },
+
+  getAISystems() {
+    // Just basic alien movement
+    return [alienMarchSystem]
+  },
+
+  getPoints(entityType) {
+    const points: Record<string, number> = { squid: 30, crab: 20, octopus: 10 }
+    return points[entityType] ?? 0
+  },
+
+  getWaveConfig(wave) {
+    return { speedMultiplier: 1 + (wave - 1) * 0.1 }
+  },
+}
+
+const enhancedMode: GameMode = {
+  name: 'enhanced',
+
+  createAlienFormation(config) {
+    // Enhanced mode: add commanders to top row
+    const formation = createStandardFormation(config.alienCols, config.alienRows)
+    const commanders = createCommanderRow(config.alienCols)
+    return [...commanders, ...formation]
+  },
+
+  spawnSpecialEntities(state, tick) {
+    const entities: Entity[] = []
+    // Spawn dive bombers periodically
+    if (tick % 300 === 0 && state.wave >= 2) {
+      entities.push(createDiveBomber(state))
+    }
+    // Spawn UFO randomly
+    if (Math.random() < 0.001) {
+      entities.push(createUFO())
+    }
+    return entities
+  },
+
+  getAISystems() {
+    // Enhanced mode: additional AI systems
+    return [alienMarchSystem, commanderDiveSystem, diveBomberArcSystem]
+  },
+
+  getPoints(entityType) {
+    const points: Record<string, number> = {
+      squid: 30, crab: 20, octopus: 10,
+      commander: 100, diveBomber: 150, ufo: 300,
+    }
+    return points[entityType] ?? 0
+  },
+
+  getWaveConfig(wave) {
+    // Challenging stages every 4 waves
+    if (wave % 4 === 0) {
+      return { speedMultiplier: 1.5, challengingStage: true }
+    }
+    return { speedMultiplier: 1 + (wave - 1) * 0.15 }
+  },
+}
+
+// Factory to get mode
+export function getGameMode(enhanced: boolean): GameMode {
+  return enhanced ? enhancedMode : classicMode
+}
+```
+
+### Entity Component System (ECS)
+
+Entities are bags of components. Systems operate on any entity with the required components.
+
+```typescript
+// worker/src/game/ecs/components.ts
+
+// Components are plain data objects
+interface PositionComponent {
+  x: number
+  y: number
+}
+
+interface VelocityComponent {
+  dx: number  // Cells per tick
+  dy: number
+}
+
+interface HitboxComponent {
+  width: number
+  height: number
+}
+
+interface HealthComponent {
+  health: number
+  maxHealth: number
+}
+
+interface AIComponent {
+  aiType: 'alien_march' | 'commander_dive' | 'dive_bomber_arc' | 'ufo_linear'
+  state: 'idle' | 'diving' | 'returning'
+  targetX?: number
+  targetY?: number
+  arcPhase?: number
+}
+
+interface PlayerControlComponent {
+  playerId: string
+  inputState: InputState
+  lastInputSeq: number
+}
+
+interface RenderComponent {
+  sprite: string
+  color: string
+}
+
+interface ScoreComponent {
+  points: number
+}
+
+// Entity is a composition of components
+interface Entity {
+  id: string
+  kind: string  // For quick filtering: 'alien', 'bullet', 'player', 'barrier'
+  alive: boolean
+
+  // Optional components - entity has component if property exists
+  position?: PositionComponent
+  velocity?: VelocityComponent
+  hitbox?: HitboxComponent
+  health?: HealthComponent
+  ai?: AIComponent
+  playerControl?: PlayerControlComponent
+  render?: RenderComponent
+  score?: ScoreComponent
+}
+```
+
+```typescript
+// worker/src/game/ecs/systems.ts
+
+// System interface
+interface System {
+  // Components this system requires
+  requiredComponents: (keyof Entity)[]
+
+  // Pure update function
+  update(entities: Entity[], context: SystemContext): Entity[]
+}
+
+interface SystemContext {
+  tick: number
+  deltaTime: number
+  players: Record<string, Player>
+  config: ScaledConfig
+  mode: GameMode
+}
+
+// Helper to filter entities with required components
+function query(entities: Entity[], required: (keyof Entity)[]): Entity[] {
+  return entities.filter(e =>
+    e.alive && required.every(comp => e[comp] !== undefined)
+  )
+}
+
+// Physics System: Updates positions based on velocity
+const physicsSystem: System = {
+  requiredComponents: ['position', 'velocity'],
+
+  update(entities, ctx) {
+    return entities.map(entity => {
+      if (!entity.position || !entity.velocity) return entity
+
+      return {
+        ...entity,
+        position: {
+          x: entity.position.x + entity.velocity.dx,
+          y: entity.position.y + entity.velocity.dy,
+        },
+      }
+    })
+  },
+}
+
+// Input System: Translates player input to velocity
+const inputSystem: System = {
+  requiredComponents: ['playerControl', 'velocity', 'position'],
+
+  update(entities, ctx) {
+    return entities.map(entity => {
+      if (!entity.playerControl || !entity.velocity) return entity
+
+      const input = entity.playerControl.inputState
+      const speed = ctx.config.playerMoveSpeed
+
+      let dx = 0
+      if (input.left) dx -= speed
+      if (input.right) dx += speed
+
+      // Clamp to screen bounds
+      const newX = Math.max(1, Math.min(ctx.config.width - 2,
+        entity.position!.x + dx
+      ))
+
+      return {
+        ...entity,
+        position: { ...entity.position!, x: newX },
+      }
+    })
+  },
+}
+
+// Collision System: Detects overlaps and handles damage
+const collisionSystem = {
+  requiredComponents: ['position', 'hitbox'],
+
+  update(entities: Entity[], ctx: SystemContext): { entities: Entity[]; events: GameEvent[] } {
+    const events: GameEvent[] = []
+    const bullets = entities.filter(e => e.kind === 'bullet' && e.alive)
+
+    const updated = entities.map(entity => {
+      if (!entity.alive || !entity.position || !entity.hitbox) return entity
+
+      // Check bullet collisions
+      for (const bullet of bullets) {
+        if (!bullet.alive || !bullet.position) continue
+
+        if (overlaps(entity, bullet)) {
+          // Mark bullet as dead
+          bullet.alive = false
+
+          // Damage entity
+          if (entity.health) {
+            entity.health.health--
+            if (entity.health.health <= 0) {
+              entity.alive = false
+              if (entity.score) {
+                events.push({
+                  type: 'event',
+                  name: 'entity_killed',
+                  data: { entityId: entity.id, points: entity.score.points },
+                })
+              }
+            }
+          } else {
+            // No health component = instant death
+            entity.alive = false
+          }
+        }
+      }
+
+      return entity
+    })
+
+    return { entities: updated, events }
+  },
+}
+
+// Behavior System: Complex AI behaviors (commander dive, dive bomber arcs)
+const behaviorSystem: System = {
+  requiredComponents: ['ai', 'position', 'velocity'],
+
+  update(entities, ctx) {
+    return entities.map(entity => {
+      if (!entity.ai || !entity.position || !entity.velocity) return entity
+
+      switch (entity.ai.aiType) {
+        case 'commander_dive':
+          return updateCommanderDive(entity, ctx)
+        case 'dive_bomber_arc':
+          return updateDiveBomberArc(entity, ctx)
+        case 'ufo_linear':
+          return updateUFOLinear(entity, ctx)
+        default:
+          return entity
+      }
+    })
+  },
+}
+
+function overlaps(a: Entity, b: Entity): boolean {
+  if (!a.position || !b.position || !a.hitbox || !b.hitbox) return false
+  return (
+    a.position.x < b.position.x + b.hitbox.width &&
+    a.position.x + a.hitbox.width > b.position.x &&
+    a.position.y < b.position.y + b.hitbox.height &&
+    a.position.y + a.hitbox.height > b.position.y
+  )
+}
+```
+
+### System Pipeline
+
+Systems run in a defined order each tick:
+
+```typescript
+// worker/src/game/ecs/pipeline.ts
+
+const SYSTEM_ORDER: System[] = [
+  inputSystem,        // 1. Process player input → velocity
+  behaviorSystem,     // 2. AI updates velocity/targets
+  physicsSystem,      // 3. Apply velocity → position
+  collisionSystem,    // 4. Detect hits, apply damage
+  spawnSystem,        // 5. Spawn new entities (bullets, special enemies)
+  cleanupSystem,      // 6. Remove dead entities
+]
+
+export function runSystems(
+  entities: Entity[],
+  context: SystemContext
+): { entities: Entity[]; events: GameEvent[] } {
+  let current = entities
+  const allEvents: GameEvent[] = []
+
+  for (const system of SYSTEM_ORDER) {
+    const result = system.update(current, context)
+
+    if (Array.isArray(result)) {
+      current = result
+    } else {
+      current = result.entities
+      allEvents.push(...result.events)
+    }
+  }
+
+  return { entities: current, events: allEvents }
+}
+```
+
+### Testing the Functional Core
+
+Because the core is pure functions, testing requires no mocks:
+
+```typescript
+// worker/src/game/__tests__/reducer.test.ts
+
+import { describe, expect, test } from 'bun:test'
+import { gameReducer } from '../reducer'
+import { createInitialState, createPlayer } from '../factories'
+
+describe('gameReducer', () => {
+  test('PLAYER_INPUT updates inputState and lastInputSeq', () => {
+    const state = createInitialState()
+    state.players['p1'] = createPlayer({ id: 'p1' })
+    state.status = 'playing'
+
+    const result = gameReducer(state, {
+      type: 'PLAYER_INPUT',
+      playerId: 'p1',
+      input: { left: true, right: false },
+      seq: 42,
+    })
+
+    expect(result.state.players['p1'].inputState).toEqual({ left: true, right: false })
+    expect(result.state.players['p1'].lastInputSeq).toBe(42)
+  })
+
+  test('TICK blocked during countdown status', () => {
+    const state = createInitialState()
+    state.status = 'countdown'
+    const tick = state.tick
+
+    const result = gameReducer(state, { type: 'TICK', deltaTime: 33 })
+
+    // State unchanged - TICK not allowed during countdown
+    expect(result.state.tick).toBe(tick)
+  })
+
+  test('collision kills alien and awards points', () => {
+    const state = createInitialState()
+    state.status = 'playing'
+    state.entities = [
+      { id: 'a1', kind: 'alien', alive: true, position: { x: 10, y: 5 }, hitbox: { width: 3, height: 1 }, score: { points: 30 } },
+      { id: 'b1', kind: 'bullet', alive: true, position: { x: 10, y: 5 }, hitbox: { width: 1, height: 1 }, velocity: { dx: 0, dy: -1 } },
+    ]
+
+    const result = gameReducer(state, { type: 'TICK', deltaTime: 33 })
+
+    const alien = result.state.entities.find(e => e.id === 'a1')
+    expect(alien?.alive).toBe(false)
+    expect(result.events).toContainEqual(
+      expect.objectContaining({ name: 'entity_killed', data: { entityId: 'a1', points: 30 } })
+    )
+  })
+})
+
+describe('state machine', () => {
+  test('cannot start solo when multiple players present', () => {
+    const state = createInitialState()
+    state.players['p1'] = createPlayer({ id: 'p1' })
+    state.players['p2'] = createPlayer({ id: 'p2' })
+
+    const result = gameReducer(state, { type: 'START_SOLO', enhancedMode: false })
+
+    // Action rejected - still waiting
+    expect(result.state.status).toBe('waiting')
+  })
+
+  test('player leave during countdown cancels it', () => {
+    const state = createInitialState()
+    state.status = 'countdown'
+    state.players['p1'] = createPlayer({ id: 'p1' })
+    state.players['p2'] = createPlayer({ id: 'p2' })
+
+    const result = gameReducer(state, { type: 'PLAYER_LEAVE', playerId: 'p2' })
+
+    expect(result.state.status).toBe('waiting')
+    expect(result.events).toContainEqual(
+      expect.objectContaining({ name: 'countdown_cancelled' })
+    )
+  })
+})
+```
+
+---
+
 ## Worker Router
 
 The Worker handles HTTP routing and room management. Each room code maps deterministically to a Durable Object ID.
