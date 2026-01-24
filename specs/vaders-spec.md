@@ -2200,35 +2200,11 @@ interface Player {
 
 type ClassicAlienType = 'squid' | 'crab' | 'octopus'
 
-// Enhanced mode alien types - Commander and DiveBomber have separate interfaces
-// with additional state (health, diveState, etc.) so they extend BaseAlien directly
-
-interface BaseAlien extends GameEntity {
-  row: number       // Formation row index (used for bottom-row shooter selection)
-  col: number       // Formation column index (used for bottom-row shooter selection)
-  alive: boolean
-  points: number
-}
-
-interface Alien extends BaseAlien {
-  type: ClassicAlienType
-}
-
-interface Commander extends BaseAlien {
-  type: 'commander'
-  health: 2 | 1                     // 2 hits to kill (green → purple → dead)
-  tractorBeamActive: boolean        // Currently firing tractor beam
-  tractorBeamCooldown: number       // Ticks until beam can fire again
-  capturedPlayerId: string | null   // Player currently captured
-  escorts: string[]                 // IDs of escorting aliens in V-formation
-}
-
-interface DiveBomber extends BaseAlien {
-  type: 'dive_bomber'
-  diveState: 'formation' | 'diving' | 'returning'
-  divePathProgress: number
-  diveDirection: 1 | -1
-}
+// Type aliases for Entity types (used in documentation and behavior sections)
+type Alien = AlienEntity
+type Commander = CommanderEntity
+type DiveBomber = DiveBomberEntity
+type Bullet = BulletEntity
 
 // ─── Alien Registry ──────────────────────────────────────────────────────────
 
@@ -2240,12 +2216,7 @@ const ALIEN_REGISTRY = {
 
 const FORMATION_ROWS: ClassicAlienType[] = ['squid', 'crab', 'crab', 'octopus', 'octopus']
 
-// ─── Projectiles & Obstacles ──────────────────────────────────────────────────
-
-interface Bullet extends GameEntity {
-  ownerId: string | null            // null = alien bullet
-  dy: -1 | 1                        // -1 = up (player), 1 = down (alien)
-}
+// ─── Obstacles ────────────────────────────────────────────────────────────────
 
 interface Barrier {
   x: number                         // Left edge
@@ -5259,9 +5230,10 @@ export function createPlayer(overrides: Partial<Player> = {}): Player {
   }
 }
 
-export function createAlien(overrides: Partial<Alien> = {}): Alien {
+export function createAlien(overrides: Partial<AlienEntity> = {}): AlienEntity {
   return {
-    id: 0,
+    kind: 'alien',
+    id: 'a_1',
     type: 'octopus',
     row: 0,
     col: 0,
