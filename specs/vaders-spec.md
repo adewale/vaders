@@ -1,11 +1,11 @@
-# Multiplayer TUI Space Invaders — Technical Spec
-## 1-4 Players • OpenTUI + Durable Objects
+# Vaders — Technical Spec
+## Multiplayer TUI Space Invaders • 1-4 Players • OpenTUI + Durable Objects
 
 ---
 
 ## Overview
 
-TUI Space Invaders clone (with elements of Galaga, Galaxian and Amiga aesthetics) supporting solo play or 2-4 player co-op, synchronized via Cloudflare Durable Objects. Single player can start immediately; multiplayer requires a ready-up lobby.
+**Vaders** is a TUI Space Invaders clone (with elements of Galaga, Galaxian and Amiga aesthetics) supporting solo play or 2-4 player co-op, synchronized via Cloudflare Durable Objects. Single player can start immediately; multiplayer requires a ready-up lobby.
 
 ---
 
@@ -1277,94 +1277,19 @@ export function gameReducer(state: GameState, action: GameAction): ReducerResult
 }
 
 // Tick reducer runs all game systems (pure, deterministic)
+// Uses seeded RNG (stored in state.rngSeed) for all random decisions
 function tickReducer(state: GameState, deltaTime: number): ReducerResult {
-  const scaled = getScaledConfig(Object.keys(state.players).length, state.config)
-  let entities = state.entities
-  let players = { ...state.players }
-  let events: ServerEvent[] = []
-  let rngSeed = state.rngSeed
-  let alienDirection = state.alienDirection
-  let lives = state.lives
-  let score = state.score
+  // Steps (all pure, no I/O):
+  // 1. Apply player movement from held input (inputState.left/right)
+  // 2. Move bullets (physics) - remove off-screen bullets
+  // 3. Check collisions → emit alien_killed, player_died events
+  // 4. Move aliens (at scaled interval) - side-to-side, drop at edges
+  // 5. Alien shooting (seeded RNG) - bottom row aliens only
+  // 6. Player respawns (co-op: after respawnDelayTicks)
+  // 7. Enhanced mode systems (commanders, dive bombers, UFOs)
+  // 8. Check end conditions → wave_complete or game_over events
 
-  // 1. Apply player movement from held input
-  for (const [id, player] of Object.entries(players)) {
-    if (!player.alive) continue
-    let x = player.x
-    if (player.inputState.left) x = Math.max(LAYOUT.PLAYER_MIN_X, x - state.config.playerMoveSpeed)
-    if (player.inputState.right) x = Math.min(LAYOUT.PLAYER_MAX_X, x + state.config.playerMoveSpeed)
-    if (x !== player.x) players[id] = { ...player, x }
-  }
-
-  // 2. Move bullets (physics)
-  entities = entities.map(e => {
-    if (e.kind !== 'bullet') return e
-    return { ...e, y: e.y + e.dy * state.config.baseBulletSpeed }
-  }).filter(e => e.kind !== 'bullet' || (e.y > 0 && e.y < state.config.height))
-
-  // 3. Check collisions
-  const collisionResult = collisionSystem(entities, state, players)
-  entities = collisionResult.entities
-  players = collisionResult.players
-  events = [...events, ...collisionResult.events]
-  score += collisionResult.scoreGained
-  lives -= collisionResult.livesLost
-
-  // 4. Move aliens (at scaled interval)
-  if (state.tick % scaled.alienMoveIntervalTicks === 0) {
-    const moveResult = moveAliens(entities, alienDirection, state.config)
-    entities = moveResult.entities
-    alienDirection = moveResult.newDirection
-  }
-
-  // 5. Alien shooting (seeded RNG for determinism)
-  let tempState = { ...state, rngSeed }
-  if (seededRandom(tempState) < scaled.alienShootProbability) {
-    const shootResult = alienShoot(entities, tempState)
-    entities = shootResult.entities
-  }
-  rngSeed = tempState.rngSeed
-
-  // 6. Player respawns (co-op only)
-  const nextTick = state.tick + 1
-  for (const [id, player] of Object.entries(players)) {
-    if (!player.alive && player.respawnAtTick && nextTick >= player.respawnAtTick) {
-      players[id] = {
-        ...player,
-        alive: true,
-        respawnAtTick: null,
-        x: getPlayerSpawnX(player.slot, Object.keys(players).length, state.config.width),
-      }
-      events.push({ type: 'event', name: 'player_respawned', data: { playerId: id } })
-    }
-  }
-
-  // 7. Enhanced mode systems
-  if (state.enhancedMode) {
-    const enhancedResult = tickEnhancedMode(entities, state, tempState)
-    entities = enhancedResult.entities
-    events = [...events, ...enhancedResult.events]
-    rngSeed = tempState.rngSeed
-  }
-
-  // 8. Check end conditions
-  const endResult = checkEndConditions({ ...state, entities, players, lives })
-
-  return {
-    state: {
-      ...state,
-      entities,
-      players,
-      tick: nextTick,
-      rngSeed,
-      alienDirection,
-      lives,
-      score,
-      status: endResult.status ?? state.status,
-    },
-    events: [...events, ...endResult.events],
-    persist: endResult.persist ?? false,
-  }
+  // Returns: { state, events, persist }
 }
 ```
 
@@ -1598,349 +1523,6 @@ const enhancedMode: GameMode = {
 export function getGameMode(enhanced: boolean): GameMode {
   return enhanced ? enhancedMode : classicMode
 }
-```
-
-### Entity Component System (ECS)
-
-Entities are bags of components. Systems operate on any entity with the required components.
-
-```typescript
-// worker/src/game/ecs/components.ts
-
-// Components are plain data objects
-interface PositionComponent {
-  x: number
-  y: number
-}
-
-interface VelocityComponent {
-  dx: number  // Cells per tick
-  dy: number
-}
-
-interface HitboxComponent {
-  width: number
-  height: number
-}
-
-interface HealthComponent {
-  health: number
-  maxHealth: number
-}
-
-interface AIComponent {
-  aiType: 'alien_march' | 'commander_dive' | 'dive_bomber_arc' | 'ufo_linear'
-  state: 'idle' | 'diving' | 'returning'
-  targetX?: number
-  targetY?: number
-  arcPhase?: number
-}
-
-interface PlayerControlComponent {
-  playerId: string
-  inputState: InputState
-}
-
-interface RenderComponent {
-  sprite: string
-  color: string
-}
-
-interface ScoreComponent {
-  points: number
-}
-
-// ECSEntity is a composition of components (alternative pattern shown for reference)
-// NOTE: The actual implementation uses discriminated union Entity type in types.ts
-interface ECSEntity {
-  id: string
-  kind: string  // For quick filtering: 'alien', 'bullet', 'player', 'barrier'
-  alive: boolean
-
-  // Optional components - entity has component if property exists
-  position?: PositionComponent
-  velocity?: VelocityComponent
-  hitbox?: HitboxComponent
-  health?: HealthComponent
-  ai?: AIComponent
-  playerControl?: PlayerControlComponent
-  render?: RenderComponent
-  score?: ScoreComponent
-}
-```
-
-```typescript
-// worker/src/game/ecs/systems.ts
-
-// System interface (works with ECSEntity pattern)
-interface System {
-  // Components this system requires
-  requiredComponents: (keyof ECSEntity)[]
-
-  // Pure update function
-  update(entities: ECSEntity[], context: SystemContext): ECSEntity[]
-}
-
-interface SystemContext {
-  tick: number
-  deltaTime: number
-  players: Record<string, Player>
-  config: ScaledConfig
-  mode: GameMode
-}
-
-// Helper to filter entities with required components
-function query(entities: ECSEntity[], required: (keyof ECSEntity)[]): ECSEntity[] {
-  return entities.filter(e =>
-    e.alive && required.every(comp => e[comp] !== undefined)
-  )
-}
-
-// Physics System: Updates positions based on velocity
-const physicsSystem: System = {
-  requiredComponents: ['position', 'velocity'],
-
-  update(entities, ctx) {
-    return entities.map(entity => {
-      if (!entity.position || !entity.velocity) return entity
-
-      return {
-        ...entity,
-        position: {
-          x: entity.position.x + entity.velocity.dx,
-          y: entity.position.y + entity.velocity.dy,
-        },
-      }
-    })
-  },
-}
-
-// Input System: Translates player input to velocity
-const inputSystem: System = {
-  requiredComponents: ['playerControl', 'velocity', 'position'],
-
-  update(entities, ctx) {
-    return entities.map(entity => {
-      if (!entity.playerControl || !entity.velocity) return entity
-
-      const input = entity.playerControl.inputState
-      const speed = ctx.config.playerMoveSpeed
-
-      let dx = 0
-      if (input.left) dx -= speed
-      if (input.right) dx += speed
-
-      // Clamp to screen bounds
-      const newX = Math.max(1, Math.min(ctx.config.width - 2,
-        entity.position!.x + dx
-      ))
-
-      return {
-        ...entity,
-        position: { ...entity.position!, x: newX },
-      }
-    })
-  },
-}
-
-// Collision System: Detects overlaps and handles damage
-const collisionSystem = {
-  requiredComponents: ['position', 'hitbox'],
-
-  update(entities: ECSEntity[], ctx: SystemContext): { entities: ECSEntity[]; events: ServerEvent[] } {
-    const events: ServerEvent[] = []
-    const bullets = entities.filter(e => e.kind === 'bullet' && e.alive)
-
-    const updated = entities.map(entity => {
-      if (!entity.alive || !entity.position || !entity.hitbox) return entity
-
-      // Check bullet collisions
-      for (const bullet of bullets) {
-        if (!bullet.alive || !bullet.position) continue
-
-        if (overlaps(entity, bullet)) {
-          // Mark bullet as dead
-          bullet.alive = false
-
-          // Damage entity
-          if (entity.health) {
-            entity.health.health--
-            if (entity.health.health <= 0) {
-              entity.alive = false
-              if (entity.score) {
-                events.push({
-                  type: 'event',
-                  name: 'alien_killed',  // Matches protocol ServerEvent type
-                  data: { alienId: entity.id, playerId: bullet.ownerId, points: entity.score.points },
-                })
-              }
-            }
-          } else {
-            // No health component = instant death
-            entity.alive = false
-          }
-        }
-      }
-
-      return entity
-    })
-
-    return { entities: updated, events }
-  },
-}
-
-// Behavior System: Complex AI behaviors (commander dive, dive bomber arcs)
-const behaviorSystem: System = {
-  requiredComponents: ['ai', 'position', 'velocity'],
-
-  update(entities, ctx) {
-    return entities.map(entity => {
-      if (!entity.ai || !entity.position || !entity.velocity) return entity
-
-      switch (entity.ai.aiType) {
-        case 'commander_dive':
-          return updateCommanderDive(entity, ctx)
-        case 'dive_bomber_arc':
-          return updateDiveBomberArc(entity, ctx)
-        case 'ufo_linear':
-          return updateUFOLinear(entity, ctx)
-        default:
-          return entity
-      }
-    })
-  },
-}
-
-function overlaps(a: Entity, b: Entity): boolean {
-  if (!a.position || !b.position || !a.hitbox || !b.hitbox) return false
-  return (
-    a.position.x < b.position.x + b.hitbox.width &&
-    a.position.x + a.hitbox.width > b.position.x &&
-    a.position.y < b.position.y + b.hitbox.height &&
-    a.position.y + a.hitbox.height > b.position.y
-  )
-}
-```
-
-### System Pipeline
-
-Systems run in a defined order each tick:
-
-```typescript
-// worker/src/game/ecs/pipeline.ts
-
-const SYSTEM_ORDER: System[] = [
-  inputSystem,        // 1. Process player input → velocity
-  behaviorSystem,     // 2. AI updates velocity/targets
-  physicsSystem,      // 3. Apply velocity → position
-  collisionSystem,    // 4. Detect hits, apply damage
-  spawnSystem,        // 5. Spawn new entities (bullets, special enemies)
-  cleanupSystem,      // 6. Remove dead entities
-]
-
-export function runSystems(
-  entities: ECSEntity[],
-  context: SystemContext
-): { entities: ECSEntity[]; events: ServerEvent[] } {
-  let current = entities
-  const allEvents: ServerEvent[] = []
-
-  for (const system of SYSTEM_ORDER) {
-    const result = system.update(current, context)
-
-    if (Array.isArray(result)) {
-      current = result
-    } else {
-      current = result.entities
-      allEvents.push(...result.events)
-    }
-  }
-
-  return { entities: current, events: allEvents }
-}
-```
-
-### Testing the Functional Core
-
-Because the core is pure functions, testing requires no mocks:
-
-```typescript
-// worker/src/game/__tests__/reducer.test.ts
-
-import { describe, expect, test } from 'bun:test'
-import { gameReducer } from '../reducer'
-import { createInitialState, createPlayer } from '../factories'
-
-describe('gameReducer', () => {
-  test('PLAYER_INPUT updates inputState', () => {
-    const state = createInitialState()
-    state.players['p1'] = createPlayer({ id: 'p1' })
-    state.status = 'playing'
-
-    const result = gameReducer(state, {
-      type: 'PLAYER_INPUT',
-      playerId: 'p1',
-      input: { left: true, right: false },
-    })
-
-    expect(result.state.players['p1'].inputState).toEqual({ left: true, right: false })
-  })
-
-  test('TICK blocked during countdown status', () => {
-    const state = createInitialState()
-    state.status = 'countdown'
-    const tick = state.tick
-
-    const result = gameReducer(state, { type: 'TICK', deltaTime: 33 })
-
-    // State unchanged - TICK not allowed during countdown
-    expect(result.state.tick).toBe(tick)
-  })
-
-  test('collision kills alien and awards points', () => {
-    const state = createInitialState()
-    state.status = 'playing'
-    state.entities = [
-      { id: 'a1', kind: 'alien', alive: true, position: { x: 10, y: 5 }, hitbox: { width: 3, height: 1 }, score: { points: 30 } },
-      { id: 'b1', kind: 'bullet', alive: true, position: { x: 10, y: 5 }, hitbox: { width: 1, height: 1 }, velocity: { dx: 0, dy: -1 } },
-    ]
-
-    const result = gameReducer(state, { type: 'TICK', deltaTime: 33 })
-
-    const alien = result.state.entities.find(e => e.id === 'a1')
-    expect(alien?.alive).toBe(false)
-    expect(result.events).toContainEqual(
-      expect.objectContaining({ name: 'alien_killed', data: { alienId: 'a1', playerId: 'p1', points: 30 } })
-    )
-  })
-})
-
-describe('state machine', () => {
-  test('cannot start solo when multiple players present', () => {
-    const state = createInitialState()
-    state.players['p1'] = createPlayer({ id: 'p1' })
-    state.players['p2'] = createPlayer({ id: 'p2' })
-
-    const result = gameReducer(state, { type: 'START_SOLO', enhancedMode: false })
-
-    // Action rejected - still waiting
-    expect(result.state.status).toBe('waiting')
-  })
-
-  test('player leave during countdown cancels it', () => {
-    const state = createInitialState()
-    state.status = 'countdown'
-    state.players['p1'] = createPlayer({ id: 'p1' })
-    state.players['p2'] = createPlayer({ id: 'p2' })
-
-    const result = gameReducer(state, { type: 'PLAYER_LEAVE', playerId: 'p2' })
-
-    expect(result.state.status).toBe('waiting')
-    expect(result.events).toContainEqual(
-      expect.objectContaining({ name: 'countdown_cancelled' })
-    )
-  })
-})
 ```
 
 ---
@@ -2235,14 +1817,10 @@ interface GameState {
   config: GameConfig
 }
 
-// Seeded random number generator (mulberry32) for deterministic simulation
+// Seeded random number generator for deterministic simulation
+// Uses any fast PRNG (e.g., mulberry32, xorshift)
 // Mutates state.rngSeed and returns value in [0, 1)
-function seededRandom(state: GameState): number {
-  let t = state.rngSeed += 0x6D2B79F5
-  t = Math.imul(t ^ t >>> 15, t | 1)
-  t ^= t + Math.imul(t ^ t >>> 7, t | 61)
-  return ((t ^ t >>> 14) >>> 0) / 4294967296
-}
+function seededRandom(state: GameState): number
 
 // Unified entity type for all game objects (discriminated union on 'kind')
 type Entity =
@@ -3108,10 +2686,20 @@ export class GameRoom implements DurableObject {
     this.game = tickResult.state
     for (const event of tickResult.events) {
       this.broadcast(event)
+      // Handle events that require shell I/O
+      if (event.name === 'wave_complete') {
+        this.nextWave()
+      }
     }
     if (tickResult.persist) void this.persistState()
 
-    // 3. Handle disconnect grace period (I/O concern - stays in shell)
+    // 3. Handle game_over status (reducer sets status, shell handles I/O cleanup)
+    if (this.game.status === 'game_over') {
+      this.endGame(this.game.lives <= 0 ? 'defeat' : 'victory')
+      return  // Stop processing this tick
+    }
+
+    // 4. Handle disconnect grace period (I/O concern - stays in shell)
     const toRemove: string[] = []
     const now = Date.now()
     for (const player of Object.values(this.game.players)) {
@@ -3126,7 +2714,7 @@ export class GameRoom implements DurableObject {
       void this.removePlayer(playerId)
     }
 
-    // 4. Heartbeat: update registry every ~60s to prevent staleness eviction
+    // 5. Heartbeat: update registry every ~60s to prevent staleness eviction
     // At 30Hz, 1800 ticks ≈ 60 seconds
     if (this.game.tick % 1800 === 0) {
       void this.updateRoomRegistry()
@@ -3134,12 +2722,6 @@ export class GameRoom implements DurableObject {
 
     // Full state sync every tick (30Hz)
     this.broadcastFullState()
-
-    // Deferred async cleanup: remove disconnected players after tick completes
-    // Using void to indicate fire-and-forget (persistence is best-effort)
-    if (toRemove.length > 0) {
-      void Promise.all(toRemove.map(id => this.removePlayer(id)))
-    }
   }
 
   private broadcastFullState() {
@@ -3151,25 +2733,6 @@ export class GameRoom implements DurableObject {
       } catch {
         // WebSocket may be closed
       }
-    }
-  }
-
-  private handleShoot(playerId: string) {
-    if (!this.game) return
-    const player = this.game.players[playerId]
-    if (!player || !player.alive) return
-
-    if (this.game.tick - player.lastShotTick >= this.game.config.playerCooldownTicks) {
-      const bullet: BulletEntity = {
-        kind: 'bullet',
-        id: this.generateEntityId(),
-        x: player.x,
-        y: LAYOUT.PLAYER_Y - LAYOUT.BULLET_SPAWN_OFFSET,
-        ownerId: playerId,
-        dy: -1,
-      }
-      this.game.entities.push(bullet)
-      player.lastShotTick = this.game.tick
     }
   }
 
@@ -3537,7 +3100,7 @@ export function LobbyScreen({ state, currentPlayerId, onReady, onUnready, onStar
   
   return (
     <box flexDirection="column" width={60} height={20} borderStyle="double" borderColor="cyan" alignSelf="center" padding={2}>
-      <text fg="cyan"><strong>◀ SPACE INVADERS ▶</strong></text>
+      <text fg="cyan"><strong>◀ VADERS ▶</strong></text>
       <box height={1} />
       <text fg="white">Room: {state.roomId}</text>
       <box height={1} />
@@ -3611,7 +3174,7 @@ export function GameScreen({ state, currentPlayerId }: GameScreenProps) {
     <box flexDirection="column" width={80} height={24}>
       {/* Header */}
       <box height={1} paddingLeft={1} paddingRight={1}>
-        <text fg="white"><strong>◀ SPACE INVADERS ▶</strong></text>
+        <text fg="white"><strong>◀ VADERS ▶</strong></text>
         <box flex={1} />
         <text fg="gray">{mode === 'solo' ? 'SOLO' : \`\${playerCount}P CO-OP\`}</text>
         <box width={2} />
@@ -4082,7 +3645,7 @@ vaders/
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│◀ SPACE INVADERS ▶               SOLO   SCORE:01450   WAVE:3   ♥♥♥           │
+│◀ VADERS ▶               SOLO   SCORE:01450   WAVE:3   ♥♥♥           │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │   ╔═╗ ╔═╗ ╔═╗ ╔═╗ ╔═╗ ╔═╗ ╔═╗ ╔═╗ ╔═╗ ╔═╗ ╔═╗                              │
