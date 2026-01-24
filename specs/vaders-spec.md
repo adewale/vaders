@@ -609,23 +609,151 @@ function plasmaColor(value: number): [number, number, number] {
 
 ## Architecture
 
+### High-Level Overview
+
 ```
-┌─────────────────────┐                    ┌──────────────────────────┐
-│   OpenTUI Client    │                    │    Cloudflare Worker     │
-│   (@opentui/react)  │◄── WebSocket ─────►│         Router           │
-│   Bun runtime       │                    │   ┌──────────────────┐   │
-└─────────────────────┘                    │   │  Durable Object  │   │
-         ▲                                 │   │    GameRoom      │   │
-         │ Terminal                        │   │                  │   │
-         │ Rendering                       │   │  • Game state    │   │
-         ▼                                 │   │  • 30Hz tick     │   │
-┌─────────────────────┐                    │   │  • Full sync     │   │
-│   Zig Native Layer  │                    │   └──────────────────┘   │
-│   (via FFI/dlopen)  │                    │   ┌──────────────────┐   │
-│   • Buffer diffing  │                    │   │  KV: RoomRegistry │   │
-│   • ANSI generation │                    │   │  (matchmaking)   │   │
-│   • Yoga layout     │                    │   └──────────────────┘   │
-└─────────────────────┘                    └──────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              VADERS ARCHITECTURE                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+  TERMINAL                          NETWORK                    CLOUDFLARE EDGE
+ ══════════                        ═════════                  ═════════════════
+
+┌───────────────────┐          ┌─────────────┐          ┌──────────────────────┐
+│   Bun Runtime     │          │  WebSocket  │          │   Worker (Router)    │
+│  ┌─────────────┐  │          │   wss://    │          │  ┌────────────────┐  │
+│  │  OpenTUI    │  │◄────────►│  /room/     │◄────────►│  │ POST /room     │  │
+│  │  React App  │  │  JSON    │  ABC123/ws  │  HTTP    │  │ GET /room/:id  │  │
+│  └─────────────┘  │  msgs    └─────────────┘  +WS     │  │ GET /matchmake │  │
+│        │          │                                   │  └────────────────┘  │
+│        ▼          │                                   │          │           │
+│  ┌─────────────┐  │                                   │          ▼           │
+│  │  useGame()  │  │                                   │  ┌────────────────┐  │
+│  │  Hook       │  │                                   │  │ Durable Object │  │
+│  │  • state    │  │         ┌─────────────┐          │  │   GameRoom     │  │
+│  │  • send()   │  │         │  Full State │          │  │  ┌──────────┐  │  │
+│  └─────────────┘  │◄────────│  Sync @30Hz │◄─────────│  │  │GameState │  │  │
+│        │          │         └─────────────┘          │  │  │• players │  │  │
+│        ▼          │                                   │  │  │• aliens  │  │  │
+│  ┌─────────────┐  │         ┌─────────────┐          │  │  │• bullets │  │  │
+│  │ Zig Native  │  │────────►│ InputState  │─────────►│  │  │• score   │  │  │
+│  │ • diffing   │  │         │ {left,right}│          │  │  └──────────┘  │  │
+│  │ • ANSI      │  │         │ + shoot     │          │  │  tick() @30Hz  │  │
+│  └─────────────┘  │         └─────────────┘          │  └────────────────┘  │
+│        │          │                                   │          │           │
+│        ▼          │                                   │          ▼           │
+│   ┌─────────┐     │                                   │  ┌────────────────┐  │
+│   │ stdout  │     │                                   │  │ KV: Registry   │  │
+│   │ 80×24   │     │                                   │  │ • open rooms   │  │
+│   └─────────┘     │                                   │  │ • matchmaking  │  │
+└───────────────────┘                                   │  └────────────────┘  │
+                                                        └──────────────────────┘
+```
+
+### Data Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                               DATA FLOW                                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+1. PLAYER JOINS
+   Client                           Server
+     │                                │
+     │──── POST /room ───────────────►│  Create room
+     │◄─── { roomCode: "ABC123" } ────│
+     │                                │
+     │──── WS /room/ABC123/ws ───────►│  Upgrade to WebSocket
+     │◄─── { type: "sync", state } ───│  Full state sync
+     │                                │
+
+2. GAME LOOP (30Hz)
+   Client                           Server
+     │                                │
+     │──── { type: "input",          │
+     │       held: {left:T,right:F} } │  Input state (continuous)
+     │                                │
+     │──── { type: "shoot" } ────────►│  Discrete action
+     │                                │
+     │         ┌──────────────────────┤  Server tick():
+     │         │  • Move players      │    - Process inputs
+     │         │  • Move aliens       │    - Update positions
+     │         │  • Move bullets      │    - Check collisions
+     │         │  • Check collisions  │    - Broadcast state
+     │         └──────────────────────┤
+     │                                │
+     │◄─── { type: "sync", state } ───│  Full state @30Hz
+     │                                │
+
+3. GAME EVENTS
+   Client                           Server
+     │                                │
+     │◄─── { type: "event",          │
+     │       name: "alien_killed",   │  Game events broadcast
+     │       data: {alienId, ...} }  │  to all clients
+     │                                │
+```
+
+### Component Responsibilities
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          COMPONENT BREAKDOWN                                │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+CLIENT (Bun + OpenTUI)
+├── App.tsx ─────────────── Root component, screen routing
+├── useGame() ───────────── WebSocket connection, state management
+├── useKeyboard() ───────── Input capture, key state tracking
+├── GameScreen.tsx ──────── Main gameplay rendering
+├── LobbyScreen.tsx ─────── Room code display, ready state
+├── AudioEngine ─────────── Terminal bell + optional native FFI
+└── Zig Native ──────────── Buffer diffing, ANSI escape codes
+
+SERVER (Cloudflare)
+├── Worker Router
+│   ├── POST /room ──────── Create room, register in KV
+│   ├── GET /room/:code/ws  Route to Durable Object
+│   └── GET /matchmake ──── Find open room from KV
+│
+├── Durable Object: GameRoom
+│   ├── state.storage ───── Persist game state across restarts
+│   ├── tick() ──────────── Game loop at 30Hz (33ms interval)
+│   ├── broadcast() ─────── Send state to all connected clients
+│   └── WebSocket handlers  join, ready, input, shoot, ping
+│
+└── KV: RoomRegistry
+    ├── room:{code} ─────── Room metadata (playerCount, status)
+    └── TTL: 1 hour ─────── Auto-cleanup of stale rooms
+```
+
+### State Synchronization Model
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      STATE SYNC: FULL STATE @ 30Hz                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Why full state sync (not delta):
+• Simplicity: No client-side prediction or reconciliation
+• Reliability: Clients always converge to server truth
+• Bandwidth: ~2-4KB/tick for 4 players is acceptable at 30Hz
+
+Server (authoritative)                    Client (render-only)
+┌────────────────────┐                   ┌────────────────────┐
+│     GameState      │                   │     GameState      │
+│  ┌──────────────┐  │   sync @30Hz     │  ┌──────────────┐  │
+│  │ players: {}  │  │ ═══════════════► │  │ players: {}  │  │
+│  │ aliens: []   │  │   (complete)     │  │ aliens: []   │  │
+│  │ bullets: []  │  │                   │  │ bullets: []  │  │
+│  │ score: N     │  │                   │  │ score: N     │  │
+│  │ tick: N      │  │                   │  │ tick: N      │  │
+│  └──────────────┘  │                   │  └──────────────┘  │
+│         ▲          │                   │         │          │
+│         │          │                   │         ▼          │
+│    tick() loop     │                   │    render(state)   │
+│    (mutations)     │                   │    (read-only)     │
+└────────────────────┘                   └────────────────────┘
 ```
 
 ---
