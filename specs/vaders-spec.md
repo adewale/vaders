@@ -3290,10 +3290,13 @@ export function App({ roomUrl, playerName, enhanced }: AppProps) {
   const heldKeys = useRef<InputState>({ left: false, right: false })
   const predictionInterval = useRef<ReturnType<typeof setInterval> | null>(null)
 
+  // Get interpolated render state ONCE per render (expensive: clones, interpolates)
+  const state = getRenderState()
+  const gameStatus = state?.status
+
   // Local prediction loop: when keys are held, continuously apply movement locally
   // and periodically resend input state (even if unchanged) at 30Hz for server sync
   // IMPORTANT: Only run when game is playing to avoid drift during lobby/countdown
-  const gameStatus = getRenderState()?.status
   useEffect(() => {
     // Don't start prediction loop unless actively playing
     if (gameStatus !== 'playing') {
@@ -3354,9 +3357,6 @@ export function App({ roomUrl, playerName, enhanced }: AppProps) {
       renderer.destroy()
     }
   }, { release: true })  // Enable release events for held key tracking
-
-  // Get interpolated render state
-  const state = getRenderState()
 
   if (!connected || !state || !playerId) {
     return (
