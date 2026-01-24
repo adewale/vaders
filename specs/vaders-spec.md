@@ -707,17 +707,16 @@ function plasmaColor(value: number): [number, number, number] {
      │◄─── { roomCode: "ABC123" } ────│
      │                                │
      │──── WS /room/ABC123/ws ───────►│  Upgrade to WebSocket
-     │◄─── { type: "sync", state,    │  Full state + lastInputSeq
-     │       lastInputSeq: 0 } ───────│
+     │◄─── { type: "sync", state,    │  Full state sent to client
+     │       playerId: "..." } ───────│
      │                                │
 
 2. GAME LOOP (30Hz) - Input Queue + Reducer Pattern
    Client                           Server
      │                                │
      │──── { type: "input",          │
-     │       seq: N,                 │  Messages queued (not processed
-     │       held: {left:T,right:F} } │  immediately)
-     │                                │
+     │       held: {left:T,right:F} } │  Messages queued (not processed
+     │                                │  immediately)
      │──── { type: "shoot" } ────────►│  → inputQueue.push(action)
      │                                │
      │         ┌──────────────────────┤  tick() {
@@ -732,8 +731,8 @@ function plasmaColor(value: number): [number, number, number] {
      │         │    └─ behaviorSystem │
      │         └──────────────────────┤  }
      │                                │
-     │◄─── { type: "sync", state,    │  Full state @30Hz + lastInputSeq
-     │       lastInputSeq: N } ───────│  (for prediction reconciliation)
+     │◄─── { type: "sync", state,    │  Full state @30Hz
+     │       playerId: "..." } ───────│  (client applies held input locally)
      │                                │
 
 3. GAME EVENTS (from Reducer)
@@ -1095,7 +1094,7 @@ type GameAction =
   | { type: 'TICK'; deltaTime: number }
   | { type: 'PLAYER_JOIN'; player: Player }
   | { type: 'PLAYER_LEAVE'; playerId: string }
-  | { type: 'PLAYER_INPUT'; playerId: string; input: InputState; seq: number }
+  | { type: 'PLAYER_INPUT'; playerId: string; input: InputState }
   | { type: 'PLAYER_SHOOT'; playerId: string }
   | { type: 'PLAYER_READY'; playerId: string }
   | { type: 'PLAYER_UNREADY'; playerId: string }
@@ -1125,7 +1124,7 @@ export function gameReducer(state: GameState, action: GameAction): ReducerResult
     case 'PLAYER_JOIN':
       return playerJoinReducer(state, action.player)
     case 'PLAYER_INPUT':
-      return inputReducer(state, action.playerId, action.input, action.seq)
+      return inputReducer(state, action.playerId, action.input)
     // ... other actions
     default:
       return { state, events: [], persist: false }
@@ -1247,7 +1246,7 @@ export class GameRoom implements DurableObject {
   private messageToAction(msg: ClientMessage, playerId: string): GameAction | null {
     switch (msg.type) {
       case 'input':
-        return { type: 'PLAYER_INPUT', playerId, input: msg.held, seq: msg.seq }
+        return { type: 'PLAYER_INPUT', playerId, input: msg.held }
       case 'shoot':
         return { type: 'PLAYER_SHOOT', playerId }
       case 'ready':
@@ -1432,7 +1431,6 @@ interface AIComponent {
 interface PlayerControlComponent {
   playerId: string
   inputState: InputState
-  lastInputSeq: number
 }
 
 interface RenderComponent {
@@ -1665,7 +1663,7 @@ import { gameReducer } from '../reducer'
 import { createInitialState, createPlayer } from '../factories'
 
 describe('gameReducer', () => {
-  test('PLAYER_INPUT updates inputState and lastInputSeq', () => {
+  test('PLAYER_INPUT updates inputState', () => {
     const state = createInitialState()
     state.players['p1'] = createPlayer({ id: 'p1' })
     state.status = 'playing'
@@ -1674,11 +1672,9 @@ describe('gameReducer', () => {
       type: 'PLAYER_INPUT',
       playerId: 'p1',
       input: { left: true, right: false },
-      seq: 42,
     })
 
     expect(result.state.players['p1'].inputState).toEqual({ left: true, right: false })
-    expect(result.state.players['p1'].lastInputSeq).toBe(42)
   })
 
   test('TICK blocked during countdown status', () => {
@@ -1930,7 +1926,7 @@ export class Matchmaker implements DurableObject {
       return new Response('OK')
     }
 
-    // GET /find - Find an open room (O(1) average via Set)
+    // GET /find - Find an open room (iterates Set to skip stale entries)
     if (url.pathname === '/find') {
       const STALE_THRESHOLD = 5 * 60 * 1000  // 5 minutes without update = stale
       const now = Date.now()
@@ -2192,7 +2188,6 @@ interface Player {
   respawnAt: number | null          // Tick to respawn (co-op only)
   kills: number
   disconnectedAt: number | null     // Timestamp (ms) when disconnected (for grace period)
-  lastInputSeq: number              // Last processed input sequence (for client prediction)
 
   // Input state (server-authoritative, updated from client input messages)
   inputState: {
@@ -2426,7 +2421,7 @@ type ClientMessage =
   | { type: 'ready' }
   | { type: 'unready' }
   | { type: 'start_solo'; enhancedMode?: boolean }
-  | { type: 'input'; seq: number; held: InputState }  // seq for prediction reconciliation
+  | { type: 'input'; held: InputState }               // Held-state networking (no seq needed)
   | { type: 'shoot' }                                  // Discrete action (rate-limited server-side)
   | { type: 'ping' }
 
@@ -2453,7 +2448,7 @@ type ServerEvent =
   | { type: 'event'; name: 'ufo_spawn'; data: { x: number } }
 
 type ServerMessage =
-  | { type: 'sync'; state: GameState; playerId: string; lastInputSeq: number }  // lastInputSeq for prediction
+  | { type: 'sync'; state: GameState; playerId: string }  // Full state at 30Hz
   | ServerEvent
   | { type: 'pong'; serverTime: number }
   | { type: 'error'; code: ErrorCode; message: string }
@@ -2672,7 +2667,6 @@ export class GameRoom implements DurableObject {
           respawnAt: null,
           kills: 0,
           disconnectedAt: null,
-          lastInputSeq: 0,  // Initialize for prediction reconciliation
           inputState: { left: false, right: false },
         }
 
@@ -2680,7 +2674,7 @@ export class GameRoom implements DurableObject {
         this.sessions.set(ws, player.id)
         this.game.mode = Object.keys(this.game.players).length === 1 ? 'solo' : 'coop'
 
-        ws.send(JSON.stringify({ type: 'sync', state: this.game, playerId: player.id, lastInputSeq: 0 }))
+        ws.send(JSON.stringify({ type: 'sync', state: this.game, playerId: player.id }))
         this.broadcast({ type: 'event', name: 'player_joined', data: { player } })
         await this.persistState()  // Persist on player join
         await this.updateRoomRegistry()
@@ -2730,7 +2724,6 @@ export class GameRoom implements DurableObject {
         // Update held key state (processed on each tick)
         if (playerId && this.game.players[playerId] && this.game.status === 'playing') {
           this.game.players[playerId].inputState = msg.held
-          this.game.players[playerId].lastInputSeq = msg.seq  // Track for prediction reconciliation
         }
         break
       }
@@ -2824,6 +2817,20 @@ export class GameRoom implements DurableObject {
         status: this.game.status,
       })
     }))
+  }
+
+  // Transactional status change: mutate → persist → registry → broadcast
+  private async setStatus(
+    newStatus: GameState['status'],
+    options?: { broadcast?: ServerMessage }
+  ): Promise<void> {
+    if (!this.game) return
+    this.game.status = newStatus
+    await this.persistState()
+    await this.updateRoomRegistry()
+    if (options?.broadcast) {
+      this.broadcast(options.broadcast)
+    }
   }
 
   private async startGame() {
@@ -2925,11 +2932,9 @@ export class GameRoom implements DurableObject {
   private broadcastFullState() {
     if (!this.game) return
     // Broadcast full game state to all connected clients
-    // Each client gets their own lastInputSeq for prediction reconciliation
     for (const [ws, playerId] of this.sessions) {
       try {
-        const lastInputSeq = this.game.players[playerId]?.lastInputSeq ?? 0
-        ws.send(JSON.stringify({ type: 'sync', state: this.game, playerId, lastInputSeq }))
+        ws.send(JSON.stringify({ type: 'sync', state: this.game, playerId }))
       } catch {
         // WebSocket may be closed
       }
@@ -3019,7 +3024,7 @@ export class GameRoom implements DurableObject {
             const segY = LAYOUT.BARRIER_Y + seg.offsetY
             // Exact cell collision: bullet must be in same cell as segment
             if (bullet.x === segX && bullet.y === segY) {
-              seg.health = (seg.health - 1) as 0 | 1 | 2 | 3
+              seg.health = Math.max(0, seg.health - 1) as BarrierSegment['health']
               bulletsToRemove.add(bullet.id)
               break barrierLoop  // Exit both loops
             }
@@ -4947,13 +4952,8 @@ describe('GameRoom WebSocket protocol', () => {
     expect(respawnedEvents.length).toBeGreaterThan(0)
   })
 
-  test('input seq is acknowledged in sync messages', async () => {
-    // This is the core prediction reconciliation feature:
-    // 1. Client sends input with seq number
-    // 2. Server updates player.lastInputSeq
-    // 3. Server includes lastInputSeq in sync message
-    // Without this, client prediction never stabilizes
-
+  test('input held state is applied on next tick', async () => {
+    // Held-state networking: client sends held input, server applies on each tick
     const ws = new MockWebSocket()
     await room.handleSession(ws)
     ws.receive({ type: 'join', name: 'Alice' })
@@ -4962,21 +4962,18 @@ describe('GameRoom WebSocket protocol', () => {
     ws.receive({ type: 'start_solo' })
     ws.messages = []  // Clear previous messages
 
-    // Send input with seq = 42
-    ws.receive({ type: 'input', seq: 42, held: { left: true, right: false } })
+    // Send held input (left key down)
+    ws.receive({ type: 'input', held: { left: true, right: false } })
 
-    // Manually trigger a tick to get sync message
-    // (In real test, wait for interval or call tick directly)
+    // Trigger a tick to process input and get sync message
     room.tick?.()
 
     // Find the sync message
     const syncMsg = ws.messages.find(m => m.type === 'sync')
     expect(syncMsg).toBeDefined()
-    expect(syncMsg.lastInputSeq).toBe(42)
 
-    // Verify player state was also updated
+    // Verify player inputState was updated
     const player = syncMsg.state.players[syncMsg.playerId]
-    expect(player.lastInputSeq).toBe(42)
     expect(player.inputState).toEqual({ left: true, right: false })
   })
 })
@@ -5027,16 +5024,16 @@ describe('Game Connection', () => {
     expect(sentMessages[0]).toEqual({ type: 'join', name: 'Alice', enhancedMode: false })
   })
 
-  test('input state message includes held keys and seq', () => {
+  test('input state message includes held keys', () => {
     const sentMessages: any[] = []
     const mockWs = {
       send: (data: string) => sentMessages.push(JSON.parse(data)),
     }
 
-    // Simulate updating input state with sequence number
-    mockWs.send(JSON.stringify({ type: 'input', seq: 1, held: { left: true, right: false } }))
+    // Simulate updating held input state
+    mockWs.send(JSON.stringify({ type: 'input', held: { left: true, right: false } }))
 
-    expect(sentMessages[0]).toEqual({ type: 'input', seq: 1, held: { left: true, right: false } })
+    expect(sentMessages[0]).toEqual({ type: 'input', held: { left: true, right: false } })
   })
 })
 ```
@@ -5257,7 +5254,6 @@ export function createPlayer(overrides: Partial<Player> = {}): Player {
     respawnAt: null,
     kills: 0,
     disconnectedAt: null,
-    lastInputSeq: 0,
     inputState: { left: false, right: false },
     ...overrides,
   }
@@ -5350,6 +5346,8 @@ describe('scaling properties', () => {
 
 ### OpenTUI Version Requirements
 
+> **Warning:** OpenTUI is pre-1.0 and not production-ready. APIs may change between versions. This spec pins to 0.1.72 for stability; check [releases](https://github.com/anomalyco/opentui/releases) for updates.
+
 Pin all `@opentui/*` packages to the same version to avoid reconciler mismatches:
 
 ```json
@@ -5361,6 +5359,8 @@ Pin all `@opentui/*` packages to the same version to avoid reconciler mismatches
 }
 ```
 
+**Upgrading:** When upgrading OpenTUI, update both packages together and test keyboard input handling, as the `KeyEvent` shape may change between versions.
+
 **Build Requirements:**
 - **Zig**: OpenTUI requires Zig for native builds. Install via `brew install zig` or see [ziglang.org](https://ziglang.org/download/)
 - **Bun**: v1.0+ required for client runtime
@@ -5369,7 +5369,7 @@ Pin all `@opentui/*` packages to the same version to avoid reconciler mismatches
 ### Cloudflare Workers
 
 - Wrangler v3.0+
-- Durable Objects requires paid Workers plan
+- Durable Objects available on [Workers Paid plan ($5/mo)](https://developers.cloudflare.com/workers/platform/pricing/)
 - SQLite storage (beta) recommended for new projects
 
 ---
