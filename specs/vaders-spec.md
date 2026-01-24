@@ -382,9 +382,11 @@ Row 5:  {ö} {ö} {ö} ...         # Octopuses (11)
 ```typescript
 interface Commander extends Alien {
   type: 'commander'
-  health: 2                    // Requires 2 hits (green → purple → dead)
-  tractorBeamCooldown: number
-  capturedPlayerId: string | null
+  health: 2 | 1                   // 2 hits to kill (green → purple → dead)
+  tractorBeamActive: boolean      // Currently firing tractor beam
+  tractorBeamCooldown: number     // Ticks until beam can fire again
+  capturedPlayerId: string | null // Player currently captured
+  escorts: string[]               // IDs of escorting aliens in V-formation
 }
 ```
 
