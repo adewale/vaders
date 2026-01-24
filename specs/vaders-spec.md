@@ -796,9 +796,9 @@ The server runs at 30Hz (33ms ticks) to stay within Cloudflare DO CPU limits.
 The client renders at 60fps (16ms frames) for smooth visuals.
 
 To bridge the gap:
-• Client-Side Prediction: Local player moves instantly on input
+• Local Smoothing: Local player moves instantly on input (held-state applied locally)
+• Server Snap: On each sync, snap local player to server position + apply held input
 • Interpolation (Lerp): Other entities smoothly animate between server states
-• Reconciliation: Server state corrects prediction errors
 
 Server (authoritative)                    Client (predictive render)
 ┌────────────────────┐                   ┌────────────────────┐
@@ -816,83 +816,57 @@ Server (authoritative)                    Client (predictive render)
 └────────────────────┘                   └────────────────────┘
 ```
 
-### Client-Side Prediction
+### Local Player Smoothing (Held-State Model)
 
-The local player's ship responds instantly to input. The client predicts movement locally, then reconciles when server state arrives.
+The local player's ship responds instantly to input. This uses a simple held-state model:
+- Client tracks which keys are currently held
+- On each frame, apply held input to local predicted position
+- On server sync, snap to server position + re-apply held input
+
+No replay queue, no sequence numbers, no acknowledgment needed.
 
 ```typescript
-// client/src/hooks/useClientPrediction.ts
-
-interface PredictedState {
-  localPlayerX: number           // Predicted position
-  pendingInputs: InputSnapshot[] // Inputs not yet acknowledged by server
-  lastServerTick: number         // Last tick received from server
-}
-
-interface InputSnapshot {
-  tick: number
-  held: InputState
-}
+// client/src/hooks/useLocalSmoothing.ts
 
 const PLAYER_SPEED = 1  // Must match server DEFAULT_CONFIG.playerMoveSpeed
 
-export function useClientPrediction(
+export function useLocalSmoothing(
   serverState: GameState | null,
   playerId: string | null,
-  currentInput: InputState
+  heldInput: InputState
 ) {
-  const predicted = useRef<PredictedState>({
-    localPlayerX: 0,
-    pendingInputs: [],
-    lastServerTick: 0,
-  })
+  const localX = useRef(0)
 
-  // When server state arrives, reconcile
+  // On server sync: snap to server position, then apply held input
   useEffect(() => {
     if (!serverState || !playerId) return
     const serverPlayer = serverState.players[playerId]
     if (!serverPlayer) return
 
-    // Server has processed up to this tick
-    const serverTick = serverState.tick
-
-    // Discard inputs the server has already processed
-    predicted.current.pendingInputs = predicted.current.pendingInputs.filter(
-      input => input.tick > serverTick
-    )
-
-    // Start from server position and replay pending inputs
+    // Start from server's authoritative position
     let x = serverPlayer.x
-    for (const input of predicted.current.pendingInputs) {
-      if (input.held.left) x -= PLAYER_SPEED
-      if (input.held.right) x += PLAYER_SPEED
-      x = Math.max(1, Math.min(serverState.config.width - 2, x))
-    }
 
-    predicted.current.localPlayerX = x
-    predicted.current.lastServerTick = serverTick
-  }, [serverState, playerId])
+    // Apply currently held input for smoothing
+    if (heldInput.left) x -= PLAYER_SPEED
+    if (heldInput.right) x += PLAYER_SPEED
 
-  // Apply local input immediately (called every frame)
-  const applyLocalInput = useCallback((tick: number) => {
-    // Record this input for replay during reconciliation
-    predicted.current.pendingInputs.push({ tick, held: { ...currentInput } })
+    // Clamp to bounds
+    x = Math.max(1, Math.min(serverState.config.width - 2, x))
+    localX.current = x
+  }, [serverState, playerId, heldInput])
 
-    // Apply immediately to predicted position
-    let x = predicted.current.localPlayerX
-    if (currentInput.left) x -= PLAYER_SPEED
-    if (currentInput.right) x += PLAYER_SPEED
+  // Apply local input each frame (called at 60fps)
+  const applyLocalInput = useCallback(() => {
+    let x = localX.current
+    if (heldInput.left) x -= PLAYER_SPEED
+    if (heldInput.right) x += PLAYER_SPEED
 
     const width = serverState?.config.width ?? 80
-    predicted.current.localPlayerX = Math.max(1, Math.min(width - 2, x))
+    localX.current = Math.max(1, Math.min(width - 2, x))
+    return localX.current
+  }, [heldInput, serverState])
 
-    return predicted.current.localPlayerX
-  }, [currentInput, serverState])
-
-  return {
-    predictedX: predicted.current.localPlayerX,
-    applyLocalInput,
-  }
+  return { localX: localX.current, applyLocalInput }
 }
 ```
 
@@ -2078,16 +2052,15 @@ interface BulletEntity {
   id: string
   x: number
   y: number
-  alive: boolean          // Set to false when bullet hits something
   ownerId: string | null  // null = alien bullet
   dy: -1 | 1              // -1 = up (player), 1 = down (alien)
 }
+// Bullets removed by filtering entities array, not by alive flag
 
 interface BarrierEntity {
   kind: 'barrier'
   id: string
-  x: number
-  y: number               // Always LAYOUT.BARRIER_Y
+  x: number               // Left edge (y is always LAYOUT.BARRIER_Y)
   segments: BarrierSegment[]
 }
 
@@ -2502,6 +2475,7 @@ export class GameRoom implements DurableObject {
   private interval: ReturnType<typeof setInterval> | null = null
   private countdownInterval: ReturnType<typeof setInterval> | null = null
   private nextEntityId = 1  // Monotonic counter for entity IDs
+  private inputQueue: GameAction[] = []  // Queued actions processed on tick
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state
@@ -2615,18 +2589,23 @@ export class GameRoom implements DurableObject {
     ws.addEventListener('close', async () => {
       const playerId = this.sessions.get(ws)
       if (playerId && this.game?.players[playerId]) {
-        // Mark as disconnected, don't remove immediately (grace period)
-        // Use timestamp so grace works in lobby/countdown too (tick only increments during playing)
-        this.game.players[playerId].disconnectedAt = Date.now()
         this.sessions.delete(ws)
         this.broadcast({ type: 'event', name: 'player_left', data: { playerId, reason: 'disconnect' } })
+
+        if (this.game.status === 'playing') {
+          // During gameplay: mark for grace period, removal handled in tick()
+          this.game.players[playerId].disconnectedAt = Date.now()
+        } else {
+          // In lobby/countdown: remove immediately (no reason to wait)
+          await this.removePlayer(playerId)
+        }
 
         // Cancel countdown if a player disconnects during it
         if (this.game.status === 'countdown') {
           await this.cancelCountdown('Player disconnected')
         }
 
-        await this.persistState()  // Persist on player leave
+        await this.persistState()
         await this.updateRoomRegistry()
       }
     })
@@ -2719,17 +2698,17 @@ export class GameRoom implements DurableObject {
       }
 
       case 'input': {
-        // Update held key state (processed on each tick)
+        // Queue input action (processed on next tick via reducer)
         if (playerId && this.game.players[playerId] && this.game.status === 'playing') {
-          this.game.players[playerId].inputState = msg.held
+          this.inputQueue.push({ type: 'PLAYER_INPUT', playerId, input: msg.held })
         }
         break
       }
 
       case 'shoot': {
-        // Discrete shoot action (rate-limited)
+        // Queue shoot action (processed on next tick via reducer)
         if (playerId && this.game.players[playerId] && this.game.status === 'playing') {
-          this.handleShoot(playerId)
+          this.inputQueue.push({ type: 'PLAYER_SHOOT', playerId })
         }
         break
       }
@@ -2859,22 +2838,26 @@ export class GameRoom implements DurableObject {
   private tick() {
     if (!this.game || this.game.status !== 'playing') return
 
-    const playerCount = Object.keys(this.game.players).length
-    const scaled = getScaledConfig(playerCount, this.game.config)
+    // 1. Process queued input actions via reducer
+    const queuedActions = this.inputQueue
+    this.inputQueue = []  // Clear queue
 
-    // Process player input state (held keys)
-    for (const player of Object.values(this.game.players)) {
-      if (!player.alive) continue
-      if (player.inputState.left) {
-        player.x = Math.max(LAYOUT.PLAYER_MIN_X, player.x - this.game.config.playerMoveSpeed)
-      }
-      if (player.inputState.right) {
-        player.x = Math.min(LAYOUT.PLAYER_MAX_X, player.x + this.game.config.playerMoveSpeed)
+    for (const action of queuedActions) {
+      const result = gameReducer(this.game, action)
+      this.game = result.state
+      for (const event of result.events) {
+        this.broadcast(event)
       }
     }
 
-    // Collect players to remove (async removal deferred to end of tick)
-    // Uses timestamp-based grace period (works in lobby/countdown too)
+    // 2. Run TICK action via reducer (movement, collisions, AI, spawning)
+    const tickResult = gameReducer(this.game, { type: 'TICK', deltaTime: this.game.config.tickIntervalMs })
+    this.game = tickResult.state
+    for (const event of tickResult.events) {
+      this.broadcast(event)
+    }
+
+    // 3. Handle disconnect grace period (only during playing - lobby removes immediately)
     const toRemove: string[] = []
     const now = Date.now()
     for (const player of Object.values(this.game.players)) {
@@ -2886,20 +2869,7 @@ export class GameRoom implements DurableObject {
       }
     }
 
-    // Handle respawns (co-op only)
-    if (this.game.mode === 'coop') {
-      for (const player of Object.values(this.game.players)) {
-        if (!player.alive && player.respawnAt && this.game.tick >= player.respawnAt) {
-          player.alive = true
-          player.x = getPlayerSpawnX(player.slot, Object.keys(this.game.players).length, 80)
-          player.respawnAt = null
-          this.broadcast({ type: 'event', name: 'player_respawned', data: { playerId: player.id } })
-        }
-      }
-    }
-
-    this.moveBullets()
-    this.checkCollisions()
+    // 4. Check game-ending conditions
 
     if (this.game.tick % scaled.alienMoveInterval === 0) {
       this.moveAliens()
@@ -2916,6 +2886,12 @@ export class GameRoom implements DurableObject {
 
     this.checkEndConditions()
     this.game.tick++
+
+    // Heartbeat: update registry every ~60s to prevent staleness eviction
+    // At 30Hz, 1800 ticks ≈ 60 seconds
+    if (this.game.tick % 1800 === 0) {
+      void this.updateRoomRegistry()
+    }
 
     // Full state sync every tick (30Hz)
     this.broadcastFullState()
@@ -2950,7 +2926,6 @@ export class GameRoom implements DurableObject {
         id: this.generateEntityId(),
         x: player.x,
         y: LAYOUT.PLAYER_Y - LAYOUT.BULLET_SPAWN_OFFSET,
-        alive: true,
         ownerId: playerId,
         dy: -1,
       }
@@ -3079,7 +3054,6 @@ export class GameRoom implements DurableObject {
       id: this.generateEntityId(),
       x: shooter.x,
       y: shooter.y + 1,
-      alive: true,
       ownerId: null,
       dy: 1,
     }
@@ -3253,7 +3227,6 @@ export class GameRoom implements DurableObject {
         kind: 'barrier',
         id: this.generateEntityId(),
         x,
-        y: LAYOUT.BARRIER_Y,
         segments,
       })
     }
