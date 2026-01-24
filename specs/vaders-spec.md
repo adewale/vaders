@@ -126,6 +126,7 @@ export function Logo() {
 ```tsx
 // client/src/components/LaunchScreen.tsx
 import { useKeyboard, useRenderer } from '@opentui/react'
+import type { KeyEvent } from '@opentui/react'  // OpenTUI's key event type
 import { useState, useCallback } from 'react'
 import { Logo } from './Logo'
 
@@ -143,31 +144,34 @@ export function LaunchScreen({ onStartSolo, onCreateRoom, onJoinRoom, onMatchmak
   const [joinMode, setJoinMode] = useState(false)
   const [roomCode, setRoomCode] = useState('')
 
-  // Handle alphanumeric text input for room code
-  const handleKeyInput = useCallback((event: KeyboardEvent) => {
+  // Handle key events using OpenTUI's KeyEvent type
+  // KeyEvent has: name (string), sequence (raw input), ctrl/meta/shift modifiers
+  const handleKeyInput = useCallback((event: KeyEvent) => {
     if (joinMode) {
-      if (event.key === 'Escape') {
+      if (event.name === 'escape') {
         setJoinMode(false)
         setRoomCode('')
         return
       }
-      if (event.key === 'Enter' && roomCode.length === 6) {
+      if (event.name === 'return' && roomCode.length === 6) {
         onJoinRoom(roomCode, enhanced)
         return
       }
-      if (event.key === 'Backspace') {
+      if (event.name === 'backspace') {
         setRoomCode(prev => prev.slice(0, -1))
         return
       }
+      // For text input, use event.sequence (the raw character(s) typed)
       // Accept alphanumeric characters, auto-uppercase, max 6 chars
-      if (/^[a-zA-Z0-9]$/.test(event.key) && roomCode.length < 6) {
-        setRoomCode(prev => prev + event.key.toUpperCase())
+      if (event.sequence && /^[a-zA-Z0-9]$/.test(event.sequence) && roomCode.length < 6) {
+        setRoomCode(prev => prev + event.sequence!.toUpperCase())
       }
       return
     }
 
-    // Menu selection
-    switch (event.key) {
+    // Menu selection (use event.name or event.sequence for single chars)
+    const key = event.sequence || event.name
+    switch (key) {
       case '1':
         onStartSolo(enhanced)
         break
@@ -1362,6 +1366,53 @@ interface TransformEnemy extends GameEntity {
   velocity: Position
   lifetime: number                  // Ticks until auto-despawn
 }
+
+// ─── Exports ─────────────────────────────────────────────────────────────────
+
+// Re-export protocol types for convenience (single import source)
+export * from './protocol'
+
+// Export all types
+export type {
+  Position,
+  GameEntity,
+  GameState,
+  GameConfig,
+  Entity,
+  AlienEntity,
+  CommanderEntity,
+  DiveBomberEntity,
+  BulletEntity,
+  BarrierEntity,
+  TransformEntity,
+  Player,
+  PlayerSlot,
+  PlayerColor,
+  ClassicAlienType,
+  Alien,
+  Commander,
+  DiveBomber,
+  Bullet,
+  Barrier,
+  BarrierSegment,
+  TransformType,
+  TransformEnemy,
+}
+
+// Export constants and helpers
+export {
+  LAYOUT,
+  PLAYER_COLORS,
+  ALIEN_REGISTRY,
+  FORMATION_ROWS,
+  DEFAULT_CONFIG,
+  getAliens,
+  getBullets,
+  getBarriers,
+  getCommanders,
+  getDiveBombers,
+  getTransforms,
+}
 ```
 
 ### Scaling Logic
@@ -1370,13 +1421,14 @@ interface TransformEnemy extends GameEntity {
 // worker/src/game/scaling.ts
 
 export function getScaledConfig(playerCount: number, baseConfig: GameConfig) {
-  // shootsPerSecond: how many shots aliens fire per second (from bottom row)
-  // At 30Hz tick rate, probability = shootsPerSecond / 30
+  // shootsPerSecond: average shots aliens fire per second (from bottom row)
+  // At 30Hz tick rate, probability per tick = shootsPerSecond / 30
+  // Monotonically increases with player count for increased difficulty
   const scaleTable = {
-    1: { speedMult: 1.0,  shootsPerSecond: 0.5, cols: 11, rows: 5 },  // ~1 shot every 2s
-    2: { speedMult: 1.25, shootsPerSecond: 0.75, cols: 11, rows: 5 }, // ~1.5 shots/s
-    3: { speedMult: 1.5,  shootsPerSecond: 1.0, cols: 13, rows: 5 },  // ~1 shot/s
-    4: { speedMult: 1.75, shootsPerSecond: 1.25, cols: 15, rows: 6 }, // ~1.25 shots/s
+    1: { speedMult: 1.0,  shootsPerSecond: 0.5,  cols: 11, rows: 5 }, // 0.5/s = 1 shot every 2s
+    2: { speedMult: 1.25, shootsPerSecond: 0.75, cols: 11, rows: 5 }, // 0.75/s = 1 shot every 1.3s
+    3: { speedMult: 1.5,  shootsPerSecond: 1.0,  cols: 13, rows: 5 }, // 1.0/s = 1 shot per second
+    4: { speedMult: 1.75, shootsPerSecond: 1.25, cols: 15, rows: 6 }, // 1.25/s = 1 shot every 0.8s
   }
   const scale = scaleTable[playerCount as keyof typeof scaleTable] ?? scaleTable[1]
 
@@ -1453,7 +1505,9 @@ type ServerMessage =
 // Delta sync is error-prone (missed updates cause permanent desync) and the
 // full game state is small enough (~2-4KB) that full sync is simpler and more robust.
 
-type ErrorCode = 'room_full' | 'game_in_progress' | 'invalid_action' | 'invalid_room'
+type ErrorCode = 'room_full' | 'game_in_progress' | 'invalid_action' | 'invalid_room' | 'countdown_in_progress'
+
+export type { ClientMessage, ServerMessage, ServerEvent, InputState, ErrorCode }
 ```
 
 ### Keep-Alive Strategy
@@ -1607,11 +1661,11 @@ export class GameRoom implements DurableObject {
 
         // Cancel countdown if a player disconnects during it
         if (this.game.status === 'countdown') {
-          this.cancelCountdown('Player disconnected')
+          await this.cancelCountdown('Player disconnected')
         }
 
         await this.persistState()  // Persist on player leave
-        this.updateRoomRegistry()
+        await this.updateRoomRegistry()
       }
     })
   }
@@ -2196,23 +2250,27 @@ export class GameRoom implements DurableObject {
     return barriers
   }
 
-  private removePlayer(playerId: string) {
+  private async removePlayer(playerId: string) {
+    if (!this.game) return
     delete this.game.players[playerId]
     this.game.readyPlayerIds = this.game.readyPlayerIds.filter(id => id !== playerId)
-    
+
     const playerCount = Object.keys(this.game.players).length
-    
+
     if (playerCount === 0) {
       if (this.game.status === 'playing') {
         this.game.status = 'paused'
         if (this.interval) clearInterval(this.interval)
       }
+      // Set alarm for cleanup in 5 minutes
       this.state.storage.setAlarm(Date.now() + 5 * 60 * 1000)
     } else if (playerCount === 1 && this.game.status === 'waiting') {
       this.game.mode = 'solo'
     }
-    
+
     this.broadcast({ type: 'event', name: 'player_left', data: { playerId } })
+    await this.persistState()  // Persist after removing player
+    await this.updateRoomRegistry()
   }
 
   private broadcast(msg: ServerMessage) {
@@ -2228,8 +2286,12 @@ export class GameRoom implements DurableObject {
 
   async alarm() {
     // Cleanup: This alarm fires 5 minutes after the last player leaves.
-    // Empty rooms are garbage collected by Durable Objects runtime.
-    // No explicit cleanup needed - the DO instance will be evicted.
+    // Remove from matchmaking registry so /matchmake doesn't return dead rooms.
+    if (this.game) {
+      await this.env.ROOM_REGISTRY.delete(`room:${this.game.roomId}`)
+    }
+    // Clear stored state - DO instance will be evicted by runtime
+    await this.state.storage.deleteAll()
   }
 }
 ```
@@ -2475,15 +2537,8 @@ export function LobbyScreen({ state, currentPlayerId, onReady, onUnready, onStar
 ```tsx
 // client/src/components/GameScreen.tsx
 import type { GameState, Player, Entity, AlienEntity, BulletEntity, BarrierEntity } from '../../../shared/types'
+import { LAYOUT, getAliens, getBullets, getBarriers } from '../../../shared/types'
 import { SPRITES, COLORS } from '../sprites'
-
-// Helper functions to filter entities by kind
-const getAliens = (entities: Entity[]): AlienEntity[] =>
-  entities.filter((e): e is AlienEntity => e.kind === 'alien')
-const getBullets = (entities: Entity[]): BulletEntity[] =>
-  entities.filter((e): e is BulletEntity => e.kind === 'bullet')
-const getBarriers = (entities: Entity[]): BarrierEntity[] =>
-  entities.filter((e): e is BarrierEntity => e.kind === 'barrier')
 
 interface GameScreenProps {
   state: GameState
@@ -2588,7 +2643,7 @@ function PlayerScores({ players, currentPlayerId }: { players: Record<string, Pl
   )
 }
 
-function Barrier({ barrier }: { barrier: BarrierType }) {
+function Barrier({ barrier }: { barrier: BarrierEntity }) {
   return (
     <>
       {barrier.segments.filter(s => s.health > 0).map((seg, i) => (
