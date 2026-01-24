@@ -48,9 +48,9 @@ This split makes debugging and testing possible.
 
 Pick one time basis for game logic. We use:
 - **Ticks** for gameplay timing (movement, cooldowns, respawn)
-- **Milliseconds** for real-world timing (disconnect grace, keep-alive)
+- **Milliseconds** for real-world timing (keep-alive, timeouts)
 
-Put units in names: `respawnDelayTicks`, `disconnectGraceMs`.
+Put units in names: `respawnDelayTicks`, `tickIntervalMs`.
 
 ### 6. State Machines for Lifecycle Transitions
 
@@ -850,12 +850,47 @@ function plasmaColor(value: number): [number, number, number] {
 
 CLIENT (Bun + OpenTUI)
 ├── App.tsx ─────────────── Root component, screen routing
+├── input.ts ────────────── Input adapter (normalizes OpenTUI → VadersKey)
 ├── useGame() ───────────── WebSocket connection, state management
-├── useKeyboard() ───────── Input capture (release: true for held keys)
 ├── GameScreen.tsx ──────── Main gameplay rendering
 ├── LobbyScreen.tsx ─────── Room code display, ready state
 ├── AudioEngine ─────────── Terminal bell + optional native FFI
 └── Zig Native ──────────── Buffer diffing, ANSI escape codes
+
+### Input Adapter Layer
+
+Normalize OpenTUI's KeyEvent into a stable internal type. This prevents OpenTUI's
+API changes from leaking into components.
+
+```typescript
+// client/src/input.ts
+
+// Internal key event type (stable, not tied to OpenTUI)
+type VadersKey =
+  | { type: 'key'; key: 'left' | 'right' | 'up' | 'down' | 'space' | 'enter' | 'escape' | 'q' | 'm' }
+  | { type: 'char'; char: string }  // For text input (room codes, names)
+
+// Normalize OpenTUI KeyEvent → VadersKey
+function normalizeKey(event: OpenTUIKeyEvent): VadersKey | null {
+  // Map OpenTUI key names to our internal names
+  if (event.name === 'left' || event.sequence === '\x1b[D') return { type: 'key', key: 'left' }
+  if (event.name === 'right' || event.sequence === '\x1b[C') return { type: 'key', key: 'right' }
+  if (event.name === 'space' || event.sequence === ' ') return { type: 'key', key: 'space' }
+  if (event.name === 'return') return { type: 'key', key: 'enter' }
+  if (event.name === 'escape') return { type: 'key', key: 'escape' }
+  if (event.sequence?.length === 1) {
+    const char = event.sequence.toLowerCase()
+    if (char === 'q') return { type: 'key', key: 'q' }
+    if (char === 'm') return { type: 'key', key: 'm' }
+    if (char === 'a') return { type: 'key', key: 'left' }
+    if (char === 'd') return { type: 'key', key: 'right' }
+    return { type: 'char', char }
+  }
+  return null  // Ignore unrecognized keys
+}
+```
+
+Components use `VadersKey`, never `OpenTUIKeyEvent`.
 
 SERVER (Cloudflare) - Functional Core / Imperative Shell
 ├── Worker Router
@@ -902,8 +937,7 @@ This game uses **held-state networking** with **full-state snapshots**. These ru
 
 3. **Tick is the only clock for gameplay**
    - Movement, cooldowns, shooting, collisions, waves: all driven by `state.tick`
-   - Wall-clock time only for connection management: pings, disconnect grace
-   - Field naming: `respawnAtTick` vs `disconnectedAtMs`
+   - Wall-clock time only for connection management: pings, timeouts
 
 4. **Snapshot cadence is fixed**
    - Server sends full state at fixed 30Hz (every `tickIntervalMs`)
@@ -951,8 +985,10 @@ This game uses **held-state networking** with **full-state snapshots**. These ru
 
 | Scenario | Decision |
 |----------|----------|
-| Input during waiting/countdown | Accept and store `inputState`, apply when `playing` starts |
-| Reconnect within grace period | **Not supported** - player removed after grace, must rejoin as new |
+| Input during waiting/countdown | Accept and store `inputState`, apply movement only in `playing` |
+| Player disconnect in lobby | Remove immediately, broadcast full sync |
+| Player disconnect mid-game | Remove immediately, deduct life (co-op) or end game (solo) |
+| Reconnect | **Not supported** - no grace period, no rejoin protocol |
 
 ---
 
@@ -1068,7 +1104,7 @@ All game logic flows through a single pure reducer function. This makes the game
 
 // Actions represent everything that can happen in the game
 type GameAction =
-  | { type: 'TICK'; deltaTime: number }
+  | { type: 'TICK' }  // Fixed cadence, no deltaTime needed
   | { type: 'PLAYER_JOIN'; player: Player }
   | { type: 'PLAYER_LEAVE'; playerId: string }
   | { type: 'PLAYER_INPUT'; playerId: string; input: InputState }
@@ -1097,7 +1133,7 @@ export function gameReducer(state: GameState, action: GameAction): ReducerResult
 
   switch (action.type) {
     case 'TICK':
-      return tickReducer(state, action.deltaTime)
+      return tickReducer(state)  // Fixed cadence, no deltaTime
     case 'PLAYER_JOIN':
       return playerJoinReducer(state, action.player)
     case 'PLAYER_INPUT':
@@ -1110,7 +1146,8 @@ export function gameReducer(state: GameState, action: GameAction): ReducerResult
 
 // Tick reducer runs all game systems (pure, deterministic)
 // Uses seeded RNG (stored in state.rngSeed) for all random decisions
-function tickReducer(state: GameState, deltaTime: number): ReducerResult {
+// Fixed tick cadence - no deltaTime parameter needed
+function tickReducer(state: GameState): ReducerResult {
   // Steps (all pure, no I/O):
   // 1. Apply player movement from held input (inputState.left/right)
   // 2. Move bullets (physics) - remove off-screen bullets
@@ -1137,8 +1174,10 @@ type GameStatus = 'waiting' | 'countdown' | 'playing' | 'game_over'
 // Define valid transitions
 const TRANSITIONS: Record<GameStatus, Partial<Record<GameAction['type'], GameStatus>>> = {
   waiting: {
+    PLAYER_JOIN: 'waiting',
     PLAYER_READY: 'waiting',       // Stay waiting, but check if all ready
     PLAYER_UNREADY: 'waiting',
+    PLAYER_INPUT: 'waiting',       // Accept input anytime, store in inputState
     START_SOLO: 'playing',
     START_COUNTDOWN: 'countdown',
     PLAYER_LEAVE: 'waiting',
@@ -1147,7 +1186,7 @@ const TRANSITIONS: Record<GameStatus, Partial<Record<GameAction['type'], GameSta
     COUNTDOWN_TICK: 'countdown',
     COUNTDOWN_CANCEL: 'waiting',
     PLAYER_LEAVE: 'waiting',       // Cancel countdown if player leaves
-    // Note: TICK, PLAYER_INPUT, PLAYER_SHOOT are BLOCKED during countdown
+    PLAYER_INPUT: 'countdown',     // Accept input anytime, store in inputState
   },
   playing: {
     TICK: 'playing',
@@ -1239,7 +1278,7 @@ export class GameRoom implements DurableObject {
     this.inputQueue = []
 
     // 2. Run the tick action
-    const result = gameReducer(this.game, { type: 'TICK', deltaTime: 33 })
+    const result = gameReducer(this.game, { type: 'TICK' })
     this.game = result.state
     this.broadcastEvents(result.events)
     if (result.persist) void this.persistState()
@@ -1610,9 +1649,16 @@ export class Matchmaker implements DurableObject {
 
 // ─── Base Types ───────────────────────────────────────────────────────────────
 
+// ─── Coordinate System ────────────────────────────────────────────────────────
+// All entity positions are TOP-LEFT origin:
+// - x: 0 = left edge, increases rightward
+// - y: 0 = top edge, increases downward
+// - Entity sprites render from their (x, y) position rightward/downward
+// Screen is 80×24 cells (columns × rows)
+
 interface Position {
-  x: number
-  y: number
+  x: number  // Top-left x coordinate
+  y: number  // Top-left y coordinate
 }
 
 interface GameEntity extends Position {
@@ -1638,8 +1684,8 @@ interface GameState {
   // All game entities in a single array with discriminated union
   entities: Entity[]
 
-  // Enhanced mode: captured player tracking
-  capturedPlayerIds?: Record<string, string>  // playerId → commanderId
+  // Note: captured players tracked in CommanderEntity.capturedPlayerId (single source of truth)
+  // To find all captured players, filter entities for CommanderEntity with capturedPlayerId !== null
 
   wave: number
   lives: number                     // 3 solo, 5 co-op
@@ -1762,8 +1808,6 @@ interface GameConfig {
   playerMoveSpeed: number              // Cells per tick when holding move key
   respawnDelayTicks: number            // Ticks until respawn (90 = 3s at 30Hz)
 
-  // Millisecond-based timing (real-world)
-  disconnectGraceMs: number            // Grace period before removal (10000 = 10s)
 }
 
 export const DEFAULT_CONFIG: GameConfig = {
@@ -1780,8 +1824,6 @@ export const DEFAULT_CONFIG: GameConfig = {
   playerMoveSpeed: 1,                  // 1 cell per tick when holding key
   respawnDelayTicks: 90,               // 3 seconds at 30Hz
 
-  // Millisecond-based timing
-  disconnectGraceMs: 10000,            // 10 seconds
 }
 
 /** Return type of getScaledConfig() - player-count-scaled game parameters */
@@ -1816,6 +1858,7 @@ type GameEvent =
   | 'countdown_cancelled'
   | 'game_start'
   | 'alien_killed'
+  | 'score_awarded'
   | 'wave_complete'
   | 'game_over'
   | 'ufo_spawn'
@@ -1861,7 +1904,6 @@ interface Player {
   alive: boolean
   respawnAtTick: number | null      // Tick to respawn (co-op only)
   kills: number
-  disconnectedAtMs: number | null   // Timestamp (ms) when disconnected (for grace period)
 
   // Input state (server-authoritative, updated from client input messages)
   inputState: {
@@ -2073,22 +2115,33 @@ type ServerEvent =
   | { type: 'event'; name: 'countdown_tick'; data: { count: number } }
   | { type: 'event'; name: 'countdown_cancelled'; data: { reason: string } }
   | { type: 'event'; name: 'game_start' }
-  | { type: 'event'; name: 'alien_killed'; data: { alienId: string; playerId: string | null; points: number } }
+  | { type: 'event'; name: 'alien_killed'; data: { alienId: string; playerId: string | null } }
+  | { type: 'event'; name: 'score_awarded'; data: { playerId: string | null; points: number; source: 'alien' | 'ufo' | 'commander' | 'wave_bonus' } }
   | { type: 'event'; name: 'wave_complete'; data: { wave: number } }
   | { type: 'event'; name: 'game_over'; data: { result: 'victory' | 'defeat' } }
   | { type: 'event'; name: 'ufo_spawn'; data: { x: number } }
 
 type ServerMessage =
-  | { type: 'sync'; state: GameState; playerId: string }  // Full state at 30Hz
+  | { type: 'sync'; state: GameState; playerId?: string; config?: GameConfig }
   | ServerEvent
   | { type: 'pong'; serverTime: number }
   | { type: 'error'; code: ErrorCode; message: string }
 
-// NOTE: We use full state sync at 30Hz instead of delta updates.
-// Delta sync is error-prone (missed updates cause permanent desync) and the
-// full game state is small enough (~2-4KB) that full sync is simpler and more robust.
+// Sync optimization:
+// - playerId: sent ONCE on initial join sync, omitted thereafter (client caches it)
+// - config: sent ONCE on initial join sync, omitted thereafter (config is static)
+// - state: sent at 30Hz but omits config field (client uses cached config)
+// This reduces per-sync payload from ~4KB to ~2KB.
 
-type ErrorCode = 'room_full' | 'game_in_progress' | 'invalid_action' | 'invalid_room' | 'countdown_in_progress'
+type ErrorCode =
+  | 'room_full'              // 4 players already in room
+  | 'game_in_progress'       // Can't join mid-game
+  | 'invalid_room'           // Room code doesn't exist
+  | 'invalid_action'         // Action not allowed in current state
+  | 'invalid_message'        // Malformed WebSocket message
+  | 'name_taken'             // Player name already in use in room
+  | 'not_in_room'            // Action requires being in room first
+  | 'rate_limited'           // Too many requests
 
 export type { ClientMessage, ServerMessage, ServerEvent, InputState, ErrorCode }
 ```
@@ -2251,23 +2304,15 @@ export class GameRoom implements DurableObject {
       const playerId = this.sessions.get(ws)
       if (playerId && this.game?.players[playerId]) {
         this.sessions.delete(ws)
-        this.broadcast({ type: 'event', name: 'player_left', data: { playerId, reason: 'disconnect' } })
-
-        if (this.game.status === 'playing') {
-          // During gameplay: mark for grace period, removal handled in tick()
-          this.game.players[playerId].disconnectedAtMs = Date.now()
-        } else {
-          // In lobby/countdown: remove immediately (no reason to wait)
-          await this.removePlayer(playerId)
-        }
 
         // Cancel countdown if a player disconnects during it
         if (this.game.status === 'countdown') {
           await this.cancelCountdown('Player disconnected')
         }
 
-        await this.persistState()
-        await this.updateRoomRegistry()
+        // Remove player immediately (no grace period)
+        await this.removePlayer(playerId)
+        this.broadcastFullState()  // Full sync after lobby mutation
       }
     })
   }
@@ -2304,7 +2349,6 @@ export class GameRoom implements DurableObject {
           alive: true,
           respawnAtTick: null,
           kills: 0,
-          disconnectedAtMs: null,
           inputState: { left: false, right: false },
         }
 
@@ -2312,9 +2356,10 @@ export class GameRoom implements DurableObject {
         this.sessions.set(ws, player.id)
         this.game.mode = Object.keys(this.game.players).length === 1 ? 'solo' : 'coop'
 
-        ws.send(JSON.stringify({ type: 'sync', state: this.game, playerId: player.id }))
+        ws.send(JSON.stringify({ type: 'sync', state: this.game, playerId: player.id, config: this.game.config }))
         this.broadcast({ type: 'event', name: 'player_joined', data: { player } })
-        await this.persistState()  // Persist on player join
+        this.broadcastFullState()  // Full sync after lobby mutation
+        await this.persistState()
         await this.updateRoomRegistry()
         break
       }
@@ -2335,7 +2380,8 @@ export class GameRoom implements DurableObject {
         if (playerId && this.game.players[playerId] && !this.game.readyPlayerIds.includes(playerId)) {
           this.game.readyPlayerIds.push(playerId)
           this.broadcast({ type: 'event', name: 'player_ready', data: { playerId } })
-          await this.persistState()  // Persist on ready
+          this.broadcastFullState()  // Full sync after lobby mutation
+          await this.persistState()
           this.checkStartConditions()
         }
         break
@@ -2346,21 +2392,21 @@ export class GameRoom implements DurableObject {
           const wasReady = this.game.readyPlayerIds.includes(playerId)
           this.game.readyPlayerIds = this.game.readyPlayerIds.filter(id => id !== playerId)
           this.broadcast({ type: 'event', name: 'player_unready', data: { playerId } })
+          this.broadcastFullState()  // Full sync after lobby mutation
 
           // Cancel countdown if someone unreadies during it
           if (wasReady && this.game.status === 'countdown') {
             await this.cancelCountdown('Player unreadied')
-            // Note: cancelCountdown already persists state
           } else {
-            await this.persistState()  // Persist on unready
+            await this.persistState()
           }
         }
         break
       }
 
       case 'input': {
-        // Queue input action (processed on next tick via reducer)
-        if (playerId && this.game.players[playerId] && this.game.status === 'playing') {
+        // Queue input action - accepted in any state, reducer applies movement only in 'playing'
+        if (playerId && this.game.players[playerId]) {
           this.inputQueue.push({ type: 'PLAYER_INPUT', playerId, input: msg.held })
         }
         break
@@ -2404,9 +2450,10 @@ export class GameRoom implements DurableObject {
     this.game.status = 'countdown'
     this.game.countdownRemaining = 3
 
-    await this.persistState()  // Persist on countdown start
-    await this.updateRoomRegistry()  // Update matchmaker so room not returned as 'waiting'
+    await this.persistState()
+    await this.updateRoomRegistry()
     this.broadcast({ type: 'event', name: 'countdown_tick', data: { count: 3 } })
+    this.broadcastFullState()  // Full sync after lobby mutation
 
     this.countdownInterval = setInterval(() => {
       // Guard: interval can fire after cancellation due to timing
@@ -2416,9 +2463,7 @@ export class GameRoom implements DurableObject {
       if (this.game.countdownRemaining === 0) {
         clearInterval(this.countdownInterval)
         this.countdownInterval = null
-        // Catch to prevent unhandled rejection if startGame throws
         void this.startGame().catch((err) => {
-          // Log with roomId context per wide events pattern
           console.error(JSON.stringify({
             event: 'startGame_failed',
             roomId: this.game?.roomId,
@@ -2427,6 +2472,7 @@ export class GameRoom implements DurableObject {
         })
       } else {
         this.broadcast({ type: 'event', name: 'countdown_tick', data: { count: this.game.countdownRemaining } })
+        this.broadcastFullState()  // Full sync after each countdown tick
       }
     }, 1000)
   }
@@ -2440,7 +2486,8 @@ export class GameRoom implements DurableObject {
     this.game.status = 'waiting'
     this.game.countdownRemaining = null
     this.broadcast({ type: 'event', name: 'countdown_cancelled', data: { reason } })
-    await this.persistState()  // Persist on countdown cancel
+    this.broadcastFullState()  // Full sync after lobby mutation
+    await this.persistState()
   }
 
   private async updateRoomRegistry() {
@@ -2514,7 +2561,7 @@ export class GameRoom implements DurableObject {
 
     // 2. Run TICK action via reducer (movement, collisions, AI, respawns, end conditions)
     // All game logic is in the pure reducer - shell only handles I/O
-    const tickResult = gameReducer(this.game, { type: 'TICK', deltaTime: this.game.config.tickIntervalMs })
+    const tickResult = gameReducer(this.game, { type: 'TICK' })
     this.game = tickResult.state
     for (const event of tickResult.events) {
       this.broadcast(event)
@@ -2531,22 +2578,7 @@ export class GameRoom implements DurableObject {
       return  // Stop processing this tick
     }
 
-    // 4. Handle disconnect grace period (I/O concern - stays in shell)
-    const toRemove: string[] = []
-    const now = Date.now()
-    for (const player of Object.values(this.game.players)) {
-      if (player.disconnectedAtMs !== null) {
-        const elapsed = now - player.disconnectedAtMs
-        if (elapsed >= this.game.config.disconnectGraceMs) {
-          toRemove.push(player.id)
-        }
-      }
-    }
-    for (const playerId of toRemove) {
-      void this.removePlayer(playerId)
-    }
-
-    // 5. Heartbeat: update registry every ~60s to prevent staleness eviction
+    // 4. Heartbeat: update registry every ~60s to prevent staleness eviction
     // At 30Hz, 1800 ticks ≈ 60 seconds
     if (this.game.tick % 1800 === 0) {
       void this.updateRoomRegistry()
@@ -2568,8 +2600,8 @@ export class GameRoom implements DurableObject {
     }
   }
 
-  // Synchronous state change; async persistence is fire-and-forget
-  // Called when reducer returns wave_complete event
+  // Synchronous state mutation; called when reducer emits wave_complete event
+  // NOTE: Reducer emits wave_complete; shell mutates state but does NOT re-emit
   private nextWave() {
     if (!this.game) return
     this.game.wave++
@@ -2584,7 +2616,6 @@ export class GameRoom implements DurableObject {
     ]
     this.game.alienDirection = 1
 
-    this.broadcast({ type: 'event', name: 'wave_complete', data: { wave: this.game.wave } })
     // Fire-and-forget persistence (no await - nextWave must be synchronous)
     void this.persistState()
   }
@@ -2606,8 +2637,10 @@ export class GameRoom implements DurableObject {
   private createAlienFormation(cols: number, rows: number): AlienEntity[] {
     if (!this.game) return []
     const aliens: AlienEntity[] = []
-    // Center the alien grid: (screenWidth - gridWidth) / 2
-    const startX = Math.floor((this.game.config.width - cols * LAYOUT.ALIEN_COL_SPACING) / 2)
+    // Grid width = (cols - 1) * spacing + spriteWidth (3 chars)
+    // Center: (screenWidth - gridWidth) / 2
+    const gridWidth = (cols - 1) * LAYOUT.ALIEN_COL_SPACING + 3
+    const startX = Math.floor((this.game.config.width - gridWidth) / 2)
 
     for (let row = 0; row < rows; row++) {
       const type = FORMATION_ROWS[row] || 'octopus'
@@ -2750,15 +2783,31 @@ import { createCliRenderer } from '@opentui/core'
 import { createRoot } from '@opentui/react'
 import { App } from './App'
 
+// Parse CLI flags: --room ABC123 --name Alice --matchmake --enhanced
+function parseArgs(): { room?: string; name: string; matchmake: boolean; enhanced: boolean } {
+  const args = process.argv.slice(2)
+  const flags: Record<string, string | boolean> = {}
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--room' && args[i + 1]) flags.room = args[++i]
+    else if (args[i] === '--name' && args[i + 1]) flags.name = args[++i]
+    else if (args[i] === '--matchmake') flags.matchmake = true
+    else if (args[i] === '--enhanced') flags.enhanced = true
+  }
+  return {
+    room: flags.room as string | undefined,
+    name: (flags.name as string) || `Player${Math.floor(Math.random() * 1000)}`,
+    matchmake: !!flags.matchmake,
+    enhanced: !!flags.enhanced,
+  }
+}
+
 async function main() {
+  const { room, name, matchmake, enhanced } = parseArgs()
   const renderer = await createCliRenderer()
   const root = createRoot(renderer)
-  
-  const roomUrl = process.argv[2] || 'ws://localhost:8787/ws'
-  const playerName = process.argv[3] || \`Player\${Math.floor(Math.random() * 1000)}\`
-  
-  root.render(<App roomUrl={roomUrl} playerName={playerName} />)
-  
+
+  root.render(<App roomCode={room} playerName={name} matchmake={matchmake} enhanced={enhanced} />)
+
   process.on('SIGINT', () => {
     root.unmount()
     renderer.destroy()
@@ -3254,7 +3303,7 @@ vaders/
 {
   "name": "vaders",
   "main": "src/index.ts",
-  "compatibility_date": "2024-01-15",
+  "compatibility_date": "2026-01-24",  // Use current date at time of deployment
   "durable_objects": {
     "bindings": [
       { "name": "GAME_ROOM", "class_name": "GameRoom" },
@@ -3381,7 +3430,7 @@ See `getScaledConfig()` in Scaling Logic section for canonical values. Summary:
 
 | Scenario | Handling |
 |----------|----------|
-| Player disconnect | Mark `disconnectedAtMs` (timestamp), keep in game for 10s grace period, then remove |
+| Player disconnect | Remove player immediately, broadcast full sync |
 | All players leave | End game, destroy room after 5min via Durable Object alarm |
 | Room full (4 players) | Return HTTP 429 with `room_full` error |
 | Terminal too small | Show "resize terminal to 80×24" message |
