@@ -9,6 +9,99 @@ TUI Space Invaders clone (with elements of Galaga, Galaxian and Amiga aesthetics
 
 ---
 
+## Architectural Principles
+
+These principles guide all design decisions in this project.
+
+### 1. One Source of Truth per Concern
+
+| Concern | Authority | Examples |
+|---------|-----------|----------|
+| **Game state** | Server (Durable Object) | Collisions, deaths, scoring, wave transitions |
+| **Presentation** | Client | Effects, interpolation, color cycling, sprites |
+| **Input** | Client captures, server interprets | Client: what keys are held. Server: what that means (movement, cooldowns) |
+
+### 2. Determinism over Cleverness
+
+- Same inputs + same initial state → same state evolution on the server
+- Avoid `Math.random()` in the hot loop unless seeded and stored in state
+- For randomness, store `rngSeed` in `GameState` and advance deterministically
+
+### 3. Keep Network Contracts Tiny and Stable
+
+- Define a strict protocol module (`shared/protocol.ts`) and treat it like an API
+- Never "just add a field" without versioning or making it optional
+- Prefer full-state sync until it hurts, then event + snapshot (not diffs that desync forever)
+
+### 4. Separate Simulation from I/O
+
+Even without a full reducer pattern, enforce this split:
+
+| Layer | Responsibility |
+|-------|----------------|
+| **Simulation** | Pure functions: take state + inputs → return next state + events |
+| **Shell** | WebSocket, timers, storage, matchmaker updates |
+
+This split makes debugging and testing possible.
+
+### 5. Make Time Explicit (Don't Mix Units)
+
+Pick one time basis for game logic. We use:
+- **Ticks** for gameplay timing (movement, cooldowns, respawn)
+- **Milliseconds** for real-world timing (disconnect grace, keep-alive)
+
+Put units in names: `respawnDelayTicks`, `disconnectGraceMs`.
+
+### 6. State Machines for Lifecycle Transitions
+
+Guard `waiting → countdown → playing → game_over` with explicit state machine:
+- Inputs that don't apply in a state are ignored or rejected
+- Countdown cancellation, join blocking, and game start are impossible to race
+- See `canTransition()` function in reducer
+
+### 7. Idempotency and Monotonicity
+
+- Events/IDs are monotonic: `tick`, `entityId` (via `e_${counter++}`)
+- Matchmaker registration/unregistration must be idempotent (repeated calls don't corrupt)
+- Reconnect: either support properly (token + reclaim slot) or explicitly reject everywhere
+
+### 8. Do Less Work on the Server
+
+Durable Objects have CPU limits:
+- Keep server loop simple and branch-free
+- Don't stringify giant objects more than needed
+- Don't run background effects server-side (visuals are client-only)
+
+### 9. Fail Safe: Drift is OK, Desync is Not
+
+When something goes wrong:
+- Client may snap/teleport a sprite, but state must remain correct
+- Missing an event is tolerable if full-state snapshots catch up
+- Never rely on "deltas must arrive" logic without recovery mechanism
+
+### 10. Observability is First-Class
+
+- Every room has a `roomId`, every connection has a `playerId`
+- Log one wide event per transition (join/leave/start/end/error)
+- Include `tick`, `wave`, entity counts in server logs for performance debugging
+
+### 11. Compatibility and Sharp Edges
+
+OpenTUI is pre-1.0:
+- Pin versions, upgrade intentionally
+- Isolate OpenTUI-specific quirks behind adapters (`input.ts`, `capabilities.ts`)
+- Don't leak OpenTUI event shapes into the rest of the codebase
+
+### 12. Keep Enhanced Mode as a Plugin, Not a Fork
+
+Enhanced behaviors are additive via:
+- Mode strategy object (`GameMode` interface)
+- ECS systems registered by mode
+
+Do NOT scatter `if (enhancedMode)` checks throughout the tick loop.
+
+---
+
 ## Quick Start: Launch & Play
 
 ### Installation
@@ -788,6 +881,80 @@ SERVER (Cloudflare) - Functional Core / Imperative Shell
     ├── /unregister ──────── Rooms unregister on cleanup
     └── /find ────────────── In-memory open room lookup
 ```
+
+### Held-Input + Full-State Snapshot Model
+
+This game uses **held-state networking** with **full-state snapshots**. These rules must be true:
+
+#### Input Rules
+
+1. **Client sends state, not events**
+   - Client sends `{ type: 'input', held: {left, right} }` on change AND periodically (10Hz) while any key held
+   - Periodic resends prevent dropped packets from freezing movement
+   - Do NOT send discrete "left pressed" / "left released" events
+
+2. **Server applies input on tick boundaries only**
+   - WebSocket handler only updates `player.inputState`
+   - Movement happens inside `tick()`, not in message handler
+   - This keeps simulation deterministic
+
+#### Timing Rules
+
+3. **Tick is the only clock for gameplay**
+   - Movement, cooldowns, shooting, collisions, waves: all driven by `state.tick`
+   - Wall-clock time only for connection management: pings, disconnect grace
+   - Field naming: `respawnAtTick` vs `disconnectedAtMs`
+
+4. **Snapshot cadence is fixed**
+   - Server sends full state at fixed 30Hz (every `tickIntervalMs`)
+   - Client assumes this cadence for interpolation (`SYNC_INTERVAL_MS = 33`)
+
+#### Prediction Rules
+
+5. **Local prediction is cosmetic and limited**
+   - Predict local player X only
+   - Clamp to bounds
+   - On every snapshot: snap to server X, then apply currently-held input
+   - NO replay queue (that's for seq/ack models)
+
+6. **Interpolation is for remote entities only**
+   - Other players: interpolate X
+   - Aliens/bullets: interpolate or accept chunky movement
+   - Local player: render predicted X, never interpolate (causes laggy controls)
+
+#### Shooting Rules
+
+7. **Shooting is server-authoritative with client feedback**
+   - Client sends `{type:'shoot'}` discrete message
+   - Server rate-limits via `player.lastShotTick`
+   - Client can play sound immediately, but bullet appears in next snapshot
+
+#### Consistency Rules
+
+8. **Snapshots must be internally consistent**
+   - All positions correspond to `state.tick`
+   - Score/lives updated atomically
+   - Dead entities removed (we filter, not mark `alive:false` on bullets)
+
+9. **Dropped packets must not break correctness**
+   - Missing snapshots: fine (client waits, lerps less)
+   - Missing input: NOT fine unless client resends periodically
+   - Always resend held input while held
+
+#### Lifecycle Rules
+
+10. **Join/leave during countdown**
+    - During countdown: reject new joins (return error)
+    - If player disconnects during countdown: cancel, return to waiting
+
+#### Edge Cases (Decided)
+
+| Scenario | Decision |
+|----------|----------|
+| Input during waiting/countdown | Accept and store `inputState`, apply when `playing` starts |
+| Reconnect within grace period | **Not supported** - player removed after grace, must rejoin as new |
+
+---
 
 ### State Synchronization Model
 
@@ -2099,38 +2266,44 @@ function getTransforms(entities: Entity[]): TransformEntity[] {
 }
 
 interface GameConfig {
-  width: number                     // Default: 80
-  height: number                    // Default: 24
-  maxPlayers: number                // Default: 4
-  tickIntervalMs: number            // Default: 33 (~30Hz tick rate, state broadcast on every tick)
+  width: number                        // Default: 80
+  height: number                       // Default: 24
+  maxPlayers: number                   // Default: 4
+  tickIntervalMs: number               // Default: 33 (~30Hz tick rate)
 
-  // Base values (scaled by player count)
-  baseAlienMoveInterval: number     // Ticks between alien moves
-  baseBulletSpeed: number           // Cells per tick
-  baseAlienShootRate: number        // Probability per tick (legacy, use getScaledConfig)
-  playerCooldown: number            // Ticks between shots
-  playerMoveSpeed: number           // Cells per tick when holding move key
-  respawnDelay: number              // Ticks (90 = 3 seconds at 30Hz)
-  disconnectGracePeriod: number     // Milliseconds (10000 = 10 seconds)
+  // Tick-based timing (game loop)
+  baseAlienMoveIntervalTicks: number   // Ticks between alien moves
+  baseBulletSpeed: number              // Cells per tick
+  baseAlienShootRate: number           // Probability per tick (use getScaledConfig)
+  playerCooldownTicks: number          // Ticks between shots
+  playerMoveSpeed: number              // Cells per tick when holding move key
+  respawnDelayTicks: number            // Ticks until respawn (90 = 3s at 30Hz)
+
+  // Millisecond-based timing (real-world)
+  disconnectGraceMs: number            // Grace period before removal (10000 = 10s)
 }
 
 export const DEFAULT_CONFIG: GameConfig = {
   width: 80,
   height: 24,
   maxPlayers: 4,
-  tickIntervalMs: 33,               // ~30Hz server tick (state broadcast on every tick)
-  baseAlienMoveInterval: 15,        // Move every 15 ticks (~2 Hz at 30Hz tick)
-  baseBulletSpeed: 1,               // 1 cell per tick
-  baseAlienShootRate: 0.02,         // Legacy (actual rate from getScaledConfig)
-  playerCooldown: 6,                // ~200ms between shots
-  playerMoveSpeed: 1,               // 1 cell per tick when holding key
-  respawnDelay: 90,                 // 3 seconds at 30Hz
-  disconnectGracePeriod: 10000,     // 10 seconds in ms
+  tickIntervalMs: 33,                  // ~30Hz server tick
+
+  // Tick-based timing
+  baseAlienMoveIntervalTicks: 15,      // Move every 15 ticks (~2Hz at 30Hz tick)
+  baseBulletSpeed: 1,                  // 1 cell per tick
+  baseAlienShootRate: 0.02,            // Use getScaledConfig for actual rate
+  playerCooldownTicks: 6,              // ~200ms between shots
+  playerMoveSpeed: 1,                  // 1 cell per tick when holding key
+  respawnDelayTicks: 90,               // 3 seconds at 30Hz
+
+  // Millisecond-based timing
+  disconnectGraceMs: 10000,            // 10 seconds
 }
 
 /** Return type of getScaledConfig() - player-count-scaled game parameters */
 interface ScaledConfig {
-  alienMoveInterval: number         // Ticks between alien moves (scaled from base)
+  alienMoveIntervalTicks: number    // Ticks between alien moves (scaled from base)
   alienShootProbability: number     // Probability per tick (~0.017 to 0.042)
   alienCols: number                 // Grid columns (11-15 based on player count)
   alienRows: number                 // Grid rows (5-6 based on player count)
@@ -2201,11 +2374,11 @@ interface Player {
   x: number                         // Horizontal position (y is always LAYOUT.PLAYER_Y)
   slot: PlayerSlot
   color: PlayerColor
-  lastShot: number                  // Tick of last shot (for cooldown)
+  lastShotTick: number              // Tick of last shot (for cooldown)
   alive: boolean
-  respawnAt: number | null          // Tick to respawn (co-op only)
+  respawnAtTick: number | null      // Tick to respawn (co-op only)
   kills: number
-  disconnectedAt: number | null     // Timestamp (ms) when disconnected (for grace period)
+  disconnectedAtMs: number | null   // Timestamp (ms) when disconnected (for grace period)
 
   // Input state (server-authoritative, updated from client input messages)
   inputState: {
@@ -2315,7 +2488,7 @@ export function getScaledConfig(playerCount: number, baseConfig: GameConfig) {
   const shootProbability = scale.shootsPerSecond / tickRate
 
   return {
-    alienMoveInterval: Math.floor(baseConfig.baseAlienMoveInterval / scale.speedMult),
+    alienMoveIntervalTicks: Math.floor(baseConfig.baseAlienMoveIntervalTicks / scale.speedMult),
     alienShootProbability: shootProbability,  // ~0.017 to 0.042 per tick
     alienCols: scale.cols,
     alienRows: scale.rows,
@@ -2366,7 +2539,7 @@ export function tickMovementOnly(state: GameState, config: GameConfig): GameStat
   )
 
   // Move aliens (if on move interval, uses LAYOUT constants)
-  if (next.tick % scaled.alienMoveInterval === 0) {
+  if (next.tick % scaled.alienMoveIntervalTicks === 0) {
     const aliens = next.entities.filter((e): e is AlienEntity => e.kind === 'alien' && e.alive)
     for (const alien of aliens) {
       alien.x += next.alienDirection * 2
@@ -2598,7 +2771,7 @@ export class GameRoom implements DurableObject {
 
         if (this.game.status === 'playing') {
           // During gameplay: mark for grace period, removal handled in tick()
-          this.game.players[playerId].disconnectedAt = Date.now()
+          this.game.players[playerId].disconnectedAtMs = Date.now()
         } else {
           // In lobby/countdown: remove immediately (no reason to wait)
           await this.removePlayer(playerId)
@@ -2643,11 +2816,11 @@ export class GameRoom implements DurableObject {
           x: getPlayerSpawnX(slot, Object.keys(this.game.players).length + 1, 80),
           slot,
           color: PLAYER_COLORS[slot],
-          lastShot: 0,
+          lastShotTick: 0,
           alive: true,
-          respawnAt: null,
+          respawnAtTick: null,
           kills: 0,
-          disconnectedAt: null,
+          disconnectedAtMs: null,
           inputState: { left: false, right: false },
         }
 
@@ -2865,9 +3038,9 @@ export class GameRoom implements DurableObject {
     const toRemove: string[] = []
     const now = Date.now()
     for (const player of Object.values(this.game.players)) {
-      if (player.disconnectedAt !== null) {
-        const elapsed = now - player.disconnectedAt
-        if (elapsed >= this.game.config.disconnectGracePeriod) {
+      if (player.disconnectedAtMs !== null) {
+        const elapsed = now - player.disconnectedAtMs
+        if (elapsed >= this.game.config.disconnectGraceMs) {
           toRemove.push(player.id)
         }
       }
@@ -2875,7 +3048,7 @@ export class GameRoom implements DurableObject {
 
     // 4. Check game-ending conditions
 
-    if (this.game.tick % scaled.alienMoveInterval === 0) {
+    if (this.game.tick % scaled.alienMoveIntervalTicks === 0) {
       this.moveAliens()
     }
 
@@ -2924,7 +3097,7 @@ export class GameRoom implements DurableObject {
     const player = this.game.players[playerId]
     if (!player || !player.alive) return
 
-    if (this.game.tick - player.lastShot >= this.game.config.playerCooldown) {
+    if (this.game.tick - player.lastShotTick >= this.game.config.playerCooldownTicks) {
       const bullet: BulletEntity = {
         kind: 'bullet',
         id: this.generateEntityId(),
@@ -2934,7 +3107,7 @@ export class GameRoom implements DurableObject {
         dy: -1,
       }
       this.game.entities.push(bullet)
-      player.lastShot = this.game.tick
+      player.lastShotTick = this.game.tick
     }
   }
 
@@ -3077,7 +3250,7 @@ export class GameRoom implements DurableObject {
     this.broadcast({ type: 'event', name: 'player_died', data: { playerId } })
 
     if (this.game.lives > 0 && this.game.mode === 'coop') {
-      player.respawnAt = this.game.tick + this.game.config.respawnDelay
+      player.respawnAtTick = this.game.tick + this.game.config.respawnDelayTicks
     }
 
     if (this.game.lives <= 0) {
@@ -3370,17 +3543,16 @@ export function App({ roomUrl, playerName, enhanced }: AppProps) {
 
   // Track held keys for continuous input
   const heldKeys = useRef<InputState>({ left: false, right: false })
-  const lastSentInput = useRef<InputState>({ left: false, right: false })
   const predictionInterval = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Get interpolated render state ONCE per render (expensive: clones, interpolates)
   const state = getRenderState()
   const gameStatus = state?.status
 
-  // Local prediction loop: resend held state at 30Hz for server sync
-  // IMPORTANT: Only run when game is playing to avoid drift during lobby/countdown
+  // Held-input resend loop: resend while any key held (handles dropped packets)
+  // Per networking rules: must resend periodically, not just on change
   useEffect(() => {
-    // Don't start prediction loop unless actively playing
+    // Only run when game is playing
     if (gameStatus !== 'playing') {
       if (predictionInterval.current) clearInterval(predictionInterval.current)
       predictionInterval.current = null
@@ -3389,13 +3561,11 @@ export function App({ roomUrl, playerName, enhanced }: AppProps) {
 
     predictionInterval.current = setInterval(() => {
       const held = heldKeys.current
-      // Skip if no keys held or state unchanged since last send
-      if (!held.left && !held.right) return
-      if (held.left === lastSentInput.current.left && held.right === lastSentInput.current.right) return
-
-      lastSentInput.current = { ...held }
-      updateInput(held)
-    }, 33)  // 30Hz matches server tick rate
+      // Always resend while any key is held (dropped packet recovery)
+      if (held.left || held.right) {
+        updateInput(held)
+      }
+    }, 100)  // 10Hz resend rate while keys held
 
     return () => {
       if (predictionInterval.current) clearInterval(predictionInterval.current)
@@ -3643,7 +3813,7 @@ export function GameScreen({ state, currentPlayerId }: GameScreenProps) {
 
 function PlayerShip({ player, isCurrentPlayer, tick }: { player: Player; isCurrentPlayer: boolean; tick: number }) {
   if (!player.alive) {
-    if (!player.respawnAt) return null
+    if (!player.respawnAtTick) return null
     if (Math.floor(tick / 10) % 2 === 0) return null
   }
   
@@ -3663,7 +3833,7 @@ function PlayerScores({ players, currentPlayerId }: { players: Record<string, Pl
     <box>
       {sorted.map((p, i) => (
         <text key={p.id} fg={p.color}>
-          {i > 0 ? ' ' : ''}{p.id === currentPlayerId ? SYM.pointer : ' '}{p.name}:{p.kills}{!p.alive && p.respawnAt ? SYM.skull : ''}
+          {i > 0 ? ' ' : ''}{p.id === currentPlayerId ? SYM.pointer : ' '}{p.name}:{p.kills}{!p.alive && p.respawnAtTick ? SYM.skull : ''}
         </text>
       ))}
     </box>
@@ -4163,7 +4333,7 @@ See `getScaledConfig()` in Scaling Logic section for canonical values. Summary:
 
 | Scenario | Handling |
 |----------|----------|
-| Player disconnect | Mark `disconnectedAt` (timestamp), keep in game for 10s grace period, then remove |
+| Player disconnect | Mark `disconnectedAtMs` (timestamp), keep in game for 10s grace period, then remove |
 | All players leave | End game, destroy room after 5min via Durable Object alarm |
 | Room full (4 players) | Return HTTP 429 with `room_full` error |
 | Terminal too small | Show "resize terminal to 80×24" message |
@@ -4718,7 +4888,7 @@ import { getScaledConfig, getPlayerSpawnX } from '../scaling'
 describe('getScaledConfig', () => {
   // Must include tickIntervalMs for shoot probability calculation
   const baseConfig = {
-    baseAlienMoveInterval: 30,
+    baseAlienMoveIntervalTicks: 30,
     tickIntervalMs: 33,  // 30Hz tick rate
   } as GameConfig
 
@@ -4727,7 +4897,7 @@ describe('getScaledConfig', () => {
     expect(config.lives).toBe(3)
     expect(config.alienCols).toBe(11)
     expect(config.alienRows).toBe(5)
-    expect(config.alienMoveInterval).toBe(30)
+    expect(config.alienMoveIntervalTicks).toBe(30)
     expect(config.alienShootProbability).toBeCloseTo(0.5 / 30, 3)  // 0.5 shots/s at 30Hz
   })
 
@@ -4736,7 +4906,7 @@ describe('getScaledConfig', () => {
     expect(config.lives).toBe(5)
     expect(config.alienCols).toBe(15)
     expect(config.alienRows).toBe(6)
-    expect(config.alienMoveInterval).toBe(17)  // 30 / 1.75 ≈ 17
+    expect(config.alienMoveIntervalTicks).toBe(17)  // 30 / 1.75 ≈ 17
     expect(config.alienShootProbability).toBeCloseTo(1.25 / 30, 3)  // 1.25 shots/s at 30Hz
   })
 
@@ -5229,11 +5399,11 @@ export function createPlayer(overrides: Partial<Player> = {}): Player {
     x: 40,
     slot: 1,
     color: 'green',
-    lastShot: 0,
+    lastShotTick: 0,
     alive: true,
-    respawnAt: null,
+    respawnAtTick: null,
     kills: 0,
-    disconnectedAt: null,
+    disconnectedAtMs: null,
     inputState: { left: false, right: false },
     ...overrides,
   }
@@ -5294,7 +5464,7 @@ describe('scaling properties', () => {
             const c1 = getScaledConfig(p1, DEFAULT_CONFIG)
             const c2 = getScaledConfig(p2, DEFAULT_CONFIG)
             // More players = lower interval = faster aliens
-            return c1.alienMoveInterval >= c2.alienMoveInterval
+            return c1.alienMoveIntervalTicks >= c2.alienMoveIntervalTicks
           }
           return true
         }
