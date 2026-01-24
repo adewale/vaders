@@ -1140,13 +1140,12 @@ interface GameConfig {
   width: number                     // Default: 80
   height: number                    // Default: 24
   maxPlayers: number                // Default: 4
-  tickIntervalMs: number            // Default: 33 (~30Hz, full state sync)
-  syncRateHz: number                // Default: 30 (state broadcasts per second)
+  tickIntervalMs: number            // Default: 33 (~30Hz tick rate, state broadcast on every tick)
 
   // Base values (scaled by player count)
   baseAlienMoveInterval: number     // Ticks between alien moves
   baseBulletSpeed: number           // Cells per tick
-  baseAlienShootRate: number        // Probability per tick
+  baseAlienShootRate: number        // Probability per tick (legacy, use getScaledConfig)
   playerCooldown: number            // Ticks between shots
   playerMoveSpeed: number           // Cells per tick when holding move key
   respawnDelay: number              // Ticks (90 = 3 seconds at 30Hz)
@@ -1157,11 +1156,10 @@ const DEFAULT_CONFIG: GameConfig = {
   width: 80,
   height: 24,
   maxPlayers: 4,
-  tickIntervalMs: 33,               // ~30Hz server tick
-  syncRateHz: 30,                   // Full state broadcast rate
+  tickIntervalMs: 33,               // ~30Hz server tick (state broadcast on every tick)
   baseAlienMoveInterval: 15,        // Move every 15 ticks (~2 Hz at 30Hz tick)
   baseBulletSpeed: 1,               // 1 cell per tick
-  baseAlienShootRate: 0.02,         // ~0.6 shots/second at 30Hz
+  baseAlienShootRate: 0.02,         // Legacy (actual rate from getScaledConfig)
   playerCooldown: 6,                // ~200ms between shots
   playerMoveSpeed: 1,               // 1 cell per tick when holding key
   respawnDelay: 90,                 // 3 seconds at 30Hz
@@ -1294,17 +1292,24 @@ interface TransformEnemy extends GameEntity {
 // worker/src/game/scaling.ts
 
 export function getScaledConfig(playerCount: number, baseConfig: GameConfig) {
+  // shootsPerSecond: how many shots aliens fire per second (from bottom row)
+  // At 30Hz tick rate, probability = shootsPerSecond / 30
   const scaleTable = {
-    1: { speedMult: 1.0,  shootRate: 0.5,  cols: 11, rows: 5 },
-    2: { speedMult: 1.25, shootRate: 0.75, cols: 11, rows: 5 },
-    3: { speedMult: 1.5,  shootRate: 1.0,  cols: 13, rows: 5 },
-    4: { speedMult: 1.75, shootRate: 1.25, cols: 15, rows: 6 },
+    1: { speedMult: 1.0,  shootsPerSecond: 0.5, cols: 11, rows: 5 },  // ~1 shot every 2s
+    2: { speedMult: 1.25, shootsPerSecond: 0.75, cols: 11, rows: 5 }, // ~1.5 shots/s
+    3: { speedMult: 1.5,  shootsPerSecond: 1.0, cols: 13, rows: 5 },  // ~1 shot/s
+    4: { speedMult: 1.75, shootsPerSecond: 1.25, cols: 15, rows: 6 }, // ~1.25 shots/s
   }
   const scale = scaleTable[playerCount as keyof typeof scaleTable] ?? scaleTable[1]
-  
+
+  // Convert shots/second to probability per tick
+  // P(shoot per tick) = shootsPerSecond / tickRate
+  const tickRate = 1000 / baseConfig.tickIntervalMs  // e.g., 1000/33 ≈ 30Hz
+  const shootProbability = scale.shootsPerSecond / tickRate
+
   return {
     alienMoveInterval: Math.floor(baseConfig.baseAlienMoveInterval / scale.speedMult),
-    alienShootRate: scale.shootRate,
+    alienShootProbability: shootProbability,  // ~0.017 to 0.042 per tick
     alienCols: scale.cols,
     alienRows: scale.rows,
     lives: playerCount === 1 ? 3 : 5,
@@ -1412,9 +1417,13 @@ export class GameRoom implements DurableObject {
   constructor(state: DurableObjectState, env: Env) {
     this.state = state
     this.env = env
-    // Restore game state from storage on construction
+    // Restore game state and entity ID counter from storage on construction
     this.state.blockConcurrencyWhile(async () => {
-      this.game = await this.state.storage.get('game') ?? null
+      const stored = await this.state.storage.get<{ game: GameState; nextEntityId: number }>('state')
+      if (stored) {
+        this.game = stored.game
+        this.nextEntityId = stored.nextEntityId
+      }
     })
   }
 
@@ -1422,10 +1431,13 @@ export class GameRoom implements DurableObject {
     return `e_${this.nextEntityId++}`
   }
 
+  // Persist on key state transitions (not every tick)
+  // Called on: init, join, leave, ready, countdown start/cancel, game start/end, wave complete
   private async persistState() {
-    if (this.game) {
-      await this.state.storage.put('game', this.game)
-    }
+    await this.state.storage.put('state', {
+      game: this.game,
+      nextEntityId: this.nextEntityId,
+    })
   }
 
   private createInitialState(roomCode: string): GameState {
@@ -1510,7 +1522,7 @@ export class GameRoom implements DurableObject {
       await this.handleMessage(ws, msg)
     })
 
-    ws.addEventListener('close', () => {
+    ws.addEventListener('close', async () => {
       const playerId = this.sessions.get(ws)
       if (playerId && this.game?.players[playerId]) {
         // Mark as disconnected, don't remove immediately (grace period)
@@ -1523,7 +1535,7 @@ export class GameRoom implements DurableObject {
           this.cancelCountdown('Player disconnected')
         }
 
-        // Update room registry
+        await this.persistState()  // Persist on player leave
         this.updateRoomRegistry()
       }
     })
@@ -1535,6 +1547,11 @@ export class GameRoom implements DurableObject {
 
     switch (msg.type) {
       case 'join': {
+        // Reject joins during countdown (lobby locked)
+        if (this.game.status === 'countdown') {
+          ws.send(JSON.stringify({ type: 'error', code: 'countdown_in_progress', message: 'Game starting, try again' }))
+          return
+        }
         if (Object.keys(this.game.players).length >= 4) {
           ws.send(JSON.stringify({ type: 'error', code: 'room_full', message: 'Room is full' }))
           return
@@ -1566,6 +1583,7 @@ export class GameRoom implements DurableObject {
 
         ws.send(JSON.stringify({ type: 'sync', state: this.game, playerId: player.id }))
         this.broadcast({ type: 'event', name: 'player_joined', data: { player } })
+        await this.persistState()  // Persist on player join
         await this.updateRoomRegistry()
         break
       }
@@ -1586,6 +1604,7 @@ export class GameRoom implements DurableObject {
         if (playerId && this.game.players[playerId] && !this.game.readyPlayerIds.includes(playerId)) {
           this.game.readyPlayerIds.push(playerId)
           this.broadcast({ type: 'event', name: 'player_ready', data: { playerId } })
+          await this.persistState()  // Persist on ready
           this.checkStartConditions()
         }
         break
@@ -1601,6 +1620,7 @@ export class GameRoom implements DurableObject {
           if (wasReady && this.game.status === 'countdown') {
             this.cancelCountdown('Player unreadied')
           }
+          await this.persistState()  // Persist on unready
         }
         break
       }
@@ -1646,11 +1666,12 @@ export class GameRoom implements DurableObject {
     }
   }
 
-  private startCountdown() {
+  private async startCountdown() {
     if (!this.game) return
     this.game.status = 'countdown'
     this.game.countdownRemaining = 3
 
+    await this.persistState()  // Persist on countdown start
     this.broadcast({ type: 'event', name: 'countdown_tick', data: { count: 3 } })
 
     this.countdownInterval = setInterval(() => {
@@ -1667,7 +1688,7 @@ export class GameRoom implements DurableObject {
     }, 1000)
   }
 
-  private cancelCountdown(reason: string) {
+  private async cancelCountdown(reason: string) {
     if (!this.game) return
     if (this.countdownInterval) {
       clearInterval(this.countdownInterval)
@@ -1676,6 +1697,7 @@ export class GameRoom implements DurableObject {
     this.game.status = 'waiting'
     this.game.countdownRemaining = null
     this.broadcast({ type: 'event', name: 'countdown_cancelled', data: { reason } })
+    await this.persistState()  // Persist on countdown cancel
   }
 
   private async updateRoomRegistry() {
@@ -1756,7 +1778,7 @@ export class GameRoom implements DurableObject {
       this.moveAliens()
     }
 
-    if (Math.random() < scaled.alienShootRate) {
+    if (Math.random() < scaled.alienShootProbability) {
       this.alienShoot()
     }
 
@@ -1850,16 +1872,21 @@ export class GameRoom implements DurableObject {
         }
       }
 
-      // Bullets hitting barriers
-      for (const barrier of this.game.barriers) {
-        for (const seg of barrier.segments) {
-          if (seg.health <= 0) continue
-          const segX = barrier.x + seg.offsetX
-          const segY = LAYOUT.BARRIER_Y + seg.offsetY
-          if (Math.abs(bullet.x - segX) <= 1 && Math.abs(bullet.y - segY) <= 1) {
-            seg.health = (seg.health - 1) as 0 | 1 | 2 | 3
-            bulletsToRemove.add(bullet.id)
-            break
+      // Bullets hitting barriers (exact cell collision)
+      // Once a bullet hits something, stop checking other obstacles
+      if (!bulletsToRemove.has(bullet.id)) {
+        barrierLoop:
+        for (const barrier of this.game.barriers) {
+          for (const seg of barrier.segments) {
+            if (seg.health <= 0) continue
+            const segX = barrier.x + seg.offsetX
+            const segY = LAYOUT.BARRIER_Y + seg.offsetY
+            // Exact cell collision: bullet must be in same cell as segment
+            if (bullet.x === segX && bullet.y === segY) {
+              seg.health = (seg.health - 1) as 0 | 1 | 2 | 3
+              bulletsToRemove.add(bullet.id)
+              break barrierLoop  // Exit both loops
+            }
           }
         }
       }
@@ -1946,7 +1973,7 @@ export class GameRoom implements DurableObject {
     }
   }
 
-  private nextWave() {
+  private async nextWave() {
     if (!this.game) return
     this.game.wave++
     const playerCount = Object.keys(this.game.players).length
@@ -1957,10 +1984,10 @@ export class GameRoom implements DurableObject {
     this.game.alienDirection = 1
 
     this.broadcast({ type: 'event', name: 'wave_complete', data: { wave: this.game.wave } })
-    // Full state sync will happen on next tick
+    await this.persistState()  // Persist on wave complete
   }
 
-  private endGame(result: 'victory' | 'defeat') {
+  private async endGame(result: 'victory' | 'defeat') {
     if (!this.game) return
     this.game.status = 'game_over'
     if (this.interval) {
@@ -1968,6 +1995,7 @@ export class GameRoom implements DurableObject {
       this.interval = null
     }
     this.broadcast({ type: 'event', name: 'game_over', data: { result } })
+    await this.persistState()  // Persist on game end
   }
 
   private tickEnhancedMode() {
@@ -2334,10 +2362,13 @@ export function GameScreen({ state, currentPlayerId }: GameScreenProps) {
         <text fg="red">{'♥'.repeat(lives)}{'♡'.repeat(Math.max(0, (mode === 'solo' ? 3 : 5) - lives))}</text>
       </box>
       
-      {/* Countdown overlay */}
-      {status === 'countdown' && (
+      {/* Countdown overlay - shows numeric countdown */}
+      {status === 'countdown' && state.countdownRemaining !== null && (
         <box position="absolute" width="100%" height="100%" justifyContent="center" alignItems="center">
-          <text fg="yellow"><strong>GET READY!</strong></text>
+          <box flexDirection="column" alignItems="center">
+            <text fg="yellow" bold>GET READY!</text>
+            <text fg="white" bold fontSize={4}>{state.countdownRemaining}</text>
+          </box>
         </box>
       )}
       
