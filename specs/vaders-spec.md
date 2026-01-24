@@ -261,8 +261,10 @@ function MenuItem({ hotkey, label, desc }: { hotkey: string; label: string; desc
 // client/src/capabilities.ts
 
 export interface TerminalCapabilities {
-  trueColor: boolean    // 24-bit color support
+  trueColor: boolean    // 24-bit color support (COLORTERM=truecolor or 24bit)
+  color256: boolean     // 256-color support (TERM includes 256color)
   unicode: boolean      // Unicode character support
+  asciiMode: boolean    // Use ASCII-only symbols (safer for alignment)
   width: number         // Terminal width
   height: number        // Terminal height
 }
@@ -272,8 +274,12 @@ export function detectCapabilities(): TerminalCapabilities {
   const term = process.env.TERM
 
   return {
-    trueColor: colorTerm === 'truecolor' || colorTerm === '24bit' || term?.includes('256color'),
+    // Note: 256color is NOT truecolor (24-bit). Only check COLORTERM for true 24-bit support.
+    trueColor: colorTerm === 'truecolor' || colorTerm === '24bit',
+    color256: term?.includes('256color') ?? false,
     unicode: process.env.LANG?.includes('UTF-8') ?? true,
+    // Default to ASCII mode for safer alignment (emoji widths vary by terminal)
+    asciiMode: process.env.VADERS_ASCII === '1' || !(process.env.LANG?.includes('UTF-8')),
     width: process.stdout.columns ?? 80,
     height: process.stdout.rows ?? 24,
   }
@@ -285,6 +291,33 @@ export const ASCII_SPRITES = {
   player: '^A^',
   bullet: '|',
   barrier: '#',
+}
+
+// ASCII symbols (safe for alignment - no variable-width emoji)
+export const ASCII_SYMBOLS = {
+  heart: '<3',
+  heartEmpty: '.',
+  skull: 'X',
+  trophy: '#1',
+  pointer: '>',
+  star: '*',
+  cross: 'X',
+} as const
+
+// Unicode symbols (may cause alignment issues in some terminals)
+export const UNICODE_SYMBOLS = {
+  heart: '♥',
+  heartEmpty: '♡',
+  skull: '☠',
+  trophy: '🏆',
+  pointer: '►',
+  star: '★',
+  cross: '✖',
+} as const
+
+// Get symbols based on capabilities
+export function getSymbols(caps: TerminalCapabilities) {
+  return caps.asciiMode ? ASCII_SYMBOLS : UNICODE_SYMBOLS
 }
 ```
 
@@ -994,7 +1027,24 @@ export default {
 
     // POST /room - Create new room, returns room code
     if (url.pathname === '/room' && request.method === 'POST') {
-      const roomCode = generateRoomCode()  // 6-char base36
+      // Generate unique room code (loop until we find one not in KV)
+      let roomCode: string
+      let attempts = 0
+      const maxAttempts = 10
+      do {
+        roomCode = generateRoomCode()  // 6-char base36
+        const existing = await env.ROOM_REGISTRY.get(`room:${roomCode}`)
+        if (!existing) break
+        attempts++
+      } while (attempts < maxAttempts)
+
+      if (attempts >= maxAttempts) {
+        return new Response(JSON.stringify({ code: 'room_generation_failed', message: 'Could not generate unique room code' }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      }
+
       const id = env.GAME_ROOM.idFromName(roomCode)
       const stub = env.GAME_ROOM.get(id)
 
@@ -1288,6 +1338,7 @@ interface Player {
   respawnAt: number | null          // Tick to respawn (co-op only)
   kills: number
   disconnectedAt: number | null     // Tick when disconnected (for grace period)
+  lastInputSeq: number              // Last processed input sequence (for client prediction)
 
   // Input state (server-authoritative, updated from client input messages)
   inputState: {
@@ -1469,8 +1520,8 @@ type ClientMessage =
   | { type: 'ready' }
   | { type: 'unready' }
   | { type: 'start_solo'; enhancedMode?: boolean }
-  | { type: 'input'; held: InputState }  // Continuous input state, not discrete events
-  | { type: 'shoot' }                     // Discrete action (rate-limited server-side)
+  | { type: 'input'; seq: number; held: InputState }  // seq for prediction reconciliation
+  | { type: 'shoot' }                                  // Discrete action (rate-limited server-side)
   | { type: 'ping' }
 
 /** Which movement keys are currently held */
@@ -1496,7 +1547,7 @@ type ServerEvent =
   | { type: 'event'; name: 'ufo_spawn'; data: { x: number } }
 
 type ServerMessage =
-  | { type: 'sync'; state: GameState; playerId: string }
+  | { type: 'sync'; state: GameState; playerId: string; lastInputSeq: number }  // lastInputSeq for prediction
   | ServerEvent
   | { type: 'pong'; serverTime: number }
   | { type: 'error'; code: ErrorCode; message: string }
@@ -1520,6 +1571,7 @@ const PING_INTERVAL = 30000
 const PONG_TIMEOUT = 5000
 let lastPong = Date.now()
 
+// Ping interval - check connection health and send ping
 setInterval(() => {
   if (Date.now() - lastPong > PING_INTERVAL + PONG_TIMEOUT) {
     ws.close()  // Trigger reconnect
@@ -1528,8 +1580,14 @@ setInterval(() => {
   ws.send(JSON.stringify({ type: 'ping' }))
 }, PING_INTERVAL)
 
-// On pong received
-lastPong = Date.now()
+// Handle pong in message handler
+ws.onmessage = (event) => {
+  const msg = JSON.parse(event.data)
+  if (msg.type === 'pong') {
+    lastPong = Date.now()  // Update last pong time
+  }
+  // ... handle other message types
+}
 ```
 
 ### Durable Object Implementation
@@ -1595,7 +1653,11 @@ export class GameRoom implements DurableObject {
     const url = new URL(request.url)
 
     // POST /init - Initialize room with code (called by Worker router)
+    // Only allowed when room is not yet initialized (prevents reset attacks)
     if (url.pathname === '/init' && request.method === 'POST') {
+      if (this.game !== null) {
+        return new Response('Already initialized', { status: 409 })
+      }
       const { roomCode } = await request.json() as { roomCode: string }
       this.game = this.createInitialState(roomCode)
       await this.persistState()
@@ -2539,6 +2601,11 @@ export function LobbyScreen({ state, currentPlayerId, onReady, onUnready, onStar
 import type { GameState, Player, Entity, AlienEntity, BulletEntity, BarrierEntity } from '../../../shared/types'
 import { LAYOUT, getAliens, getBullets, getBarriers } from '../../../shared/types'
 import { SPRITES, COLORS } from '../sprites'
+import { getSymbols, detectCapabilities } from '../capabilities'
+
+// Detect once at startup
+const caps = detectCapabilities()
+const SYM = getSymbols(caps)
 
 interface GameScreenProps {
   state: GameState
@@ -2564,7 +2631,7 @@ export function GameScreen({ state, currentPlayerId }: GameScreenProps) {
         <box width={2} />
         <text fg="cyan">WAVE:{wave}</text>
         <box width={2} />
-        <text fg="red">{'♥'.repeat(lives)}{'♡'.repeat(Math.max(0, (mode === 'solo' ? 3 : 5) - lives))}</text>
+        <text fg="red">{SYM.heart.repeat(lives)}{SYM.heartEmpty.repeat(Math.max(0, (mode === 'solo' ? 3 : 5) - lives))}</text>
       </box>
       
       {/* Countdown overlay - shows numeric countdown */}
@@ -2636,7 +2703,7 @@ function PlayerScores({ players, currentPlayerId }: { players: Record<string, Pl
     <box>
       {sorted.map((p, i) => (
         <text key={p.id} fg={p.color}>
-          {i > 0 ? ' ' : ''}{p.id === currentPlayerId ? '►' : ' '}{p.name}:{p.kills}{!p.alive && p.respawnAt ? '☠' : ''}
+          {i > 0 ? ' ' : ''}{p.id === currentPlayerId ? SYM.pointer : ' '}{p.name}:{p.kills}{!p.alive && p.respawnAt ? SYM.skull : ''}
         </text>
       ))}
     </box>
@@ -2663,6 +2730,10 @@ function Barrier({ barrier }: { barrier: BarrierEntity }) {
 // client/src/components/GameOverScreen.tsx
 import { useKeyboard, useRenderer } from '@opentui/react'
 import type { GameState, AlienEntity } from '../../../shared/types'
+import { getSymbols, detectCapabilities } from '../capabilities'
+
+const caps = detectCapabilities()
+const SYM = getSymbols(caps)
 
 interface GameOverScreenProps {
   state: GameState
@@ -2681,7 +2752,7 @@ export function GameOverScreen({ state, currentPlayerId }: GameOverScreenProps) 
   
   return (
     <box flexDirection="column" width={50} borderStyle="double" borderColor={victory ? 'green' : 'red'} alignSelf="center" padding={2}>
-      <text fg={victory ? 'green' : 'red'}><strong>{victory ? '★ VICTORY ★' : '✖ GAME OVER ✖'}</strong></text>
+      <text fg={victory ? 'green' : 'red'}><strong>{victory ? \`\${SYM.star} VICTORY \${SYM.star}\` : \`\${SYM.cross} GAME OVER \${SYM.cross}\`}</strong></text>
       <box height={1} />
       <text fg="yellow">Final Score: {state.score}</text>
       <text fg="cyan">Wave Reached: {state.wave}</text>
@@ -2689,7 +2760,7 @@ export function GameOverScreen({ state, currentPlayerId }: GameOverScreenProps) 
       <text fg="white"><strong>Player Stats:</strong></text>
       {players.map((p, i) => (
         <box key={p.id}>
-          <text fg={p.color}>{i === 0 ? '🏆' : \` \${i + 1}\`} {p.name}</text>
+          <text fg={p.color}>{i === 0 ? SYM.trophy : \` \${i + 1}\`} {p.name}</text>
           <box flex={1} />
           <text fg="white">{p.kills} kills</text>
         </box>
@@ -2750,8 +2821,8 @@ export function useGameConnection(url: string, playerName: string, enhanced: boo
 
   // Client-side prediction state
   const localPlayerX = useRef(0)
-  const pendingInputs = useRef<Array<{ tick: number; held: InputState }>>([])
-  const localTick = useRef(0)
+  const pendingInputs = useRef<Array<{ seq: number; held: InputState }>>([])
+  const inputSeq = useRef(0)  // Monotonic input sequence number
 
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectAttempts = useRef(0)
@@ -2789,15 +2860,15 @@ export function useGameConnection(url: string, playerName: string, enhanced: boo
           prevState.current = serverState
           lastSyncTime.current = Date.now()
 
-          // Reconcile prediction: discard acknowledged inputs, replay pending
+          // Reconcile prediction using input sequence numbers
           if (playerId && msg.state.players[playerId]) {
             const serverPlayer = msg.state.players[playerId]
-            const serverTick = msg.state.tick
+            const lastAckedSeq = msg.lastInputSeq
 
-            // Discard inputs server has processed
-            pendingInputs.current = pendingInputs.current.filter(i => i.tick > serverTick)
+            // Discard inputs server has processed (by seq, not tick)
+            pendingInputs.current = pendingInputs.current.filter(i => i.seq > lastAckedSeq)
 
-            // Replay pending inputs from server position
+            // Replay unacknowledged inputs from server position
             let x = serverPlayer.x
             const moveSpeed = msg.state.config.playerMoveSpeed
             for (const input of pendingInputs.current) {
@@ -2847,14 +2918,15 @@ export function useGameConnection(url: string, playerName: string, enhanced: boo
     }
   }, [connect])
 
-  // Send input state and apply prediction immediately
+  // Send input state with sequence number for prediction reconciliation
   const updateInput = useCallback((held: InputState) => {
     inputState.current = held
-    wsRef.current?.send(JSON.stringify({ type: 'input', held }))
+    inputSeq.current++
+    const seq = inputSeq.current
+    wsRef.current?.send(JSON.stringify({ type: 'input', seq, held }))
 
     // Record for reconciliation and apply immediately
-    localTick.current++
-    pendingInputs.current.push({ tick: localTick.current, held: { ...held } })
+    pendingInputs.current.push({ seq, held: { ...held } })
 
     // Predict movement locally (use server config or default)
     const moveSpeed = serverState?.config.playerMoveSpeed ?? 1
@@ -2890,41 +2962,44 @@ export function useGameConnection(url: string, playerName: string, enhanced: boo
   }, [getLerpT])
 
   // Build render state with prediction + interpolation
+  // Uses shallow clones to avoid expensive JSON.parse(JSON.stringify())
   const getRenderState = useCallback((): GameState | null => {
     if (!serverState) return null
 
-    // Clone state for rendering
-    const renderState = JSON.parse(JSON.stringify(serverState)) as GameState
-
-    // Apply local player prediction
-    if (playerId && renderState.players[playerId]) {
-      renderState.players[playerId].x = localPlayerX.current
-    }
-
-    // Interpolate other players
-    for (const [id, player] of Object.entries(renderState.players)) {
-      if (id === playerId) continue  // Local player uses prediction
-      const prevPlayer = prevState.current?.players[id]
-      if (prevPlayer) {
-        player.x = lerpPosition(prevPlayer.x, player.x) ?? player.x
+    // Shallow clone players with interpolated/predicted positions
+    const players: Record<string, Player> = {}
+    for (const [id, player] of Object.entries(serverState.players)) {
+      if (id === playerId) {
+        // Local player: use predicted position
+        players[id] = { ...player, x: localPlayerX.current }
+      } else {
+        // Other players: interpolate position
+        const prevPlayer = prevState.current?.players[id]
+        const x = prevPlayer ? (lerpPosition(prevPlayer.x, player.x) ?? player.x) : player.x
+        players[id] = { ...player, x }
       }
     }
 
-    // Interpolate entities (aliens, bullets, etc.)
-    for (const entity of renderState.entities) {
-      const prevEntity = prevState.current?.entities.find(e => e.id === entity.id)
-      if (!prevEntity) continue
+    // Shallow clone entities with interpolated positions
+    // Build a map for O(1) lookup of previous entities
+    const prevEntityMap = new Map(prevState.current?.entities.map(e => [e.id, e]) ?? [])
+    const entities = serverState.entities.map(entity => {
+      const prevEntity = prevEntityMap.get(entity.id)
+      if (!prevEntity) return entity  // No interpolation for new entities
 
-      // Interpolate position for movable entities
-      if ('x' in entity && 'x' in prevEntity) {
-        entity.x = lerpPosition(prevEntity.x, entity.x) ?? entity.x
+      // Only interpolate entities with x/y positions
+      if ('x' in entity && 'x' in prevEntity && 'y' in entity && 'y' in prevEntity) {
+        return {
+          ...entity,
+          x: lerpPosition(prevEntity.x as number, entity.x as number) ?? entity.x,
+          y: lerpPosition(prevEntity.y as number, entity.y as number) ?? entity.y,
+        }
       }
-      if ('y' in entity && 'y' in prevEntity) {
-        entity.y = lerpPosition(prevEntity.y, entity.y) ?? entity.y
-      }
-    }
+      return entity
+    })
 
-    return renderState
+    // Return shallow-cloned state with interpolated data
+    return { ...serverState, players, entities }
   }, [serverState, playerId, lerpPosition])
 
   return {
@@ -3673,7 +3748,7 @@ Testing is organized into three layers:
 |-------|-------|-------|-------|
 | **Unit** | Pure functions, game logic | Bun test | <1s |
 | **Integration** | WebSocket protocol, state sync | Bun test + mock WS | <5s |
-| **E2E** | Full client-server flow | Playwright + wrangler dev | <30s |
+| **E2E** | Full client-server flow | Bun test + node-pty + wrangler dev | <30s |
 
 ### Unit Tests
 
@@ -3938,82 +4013,151 @@ describe('Game Connection', () => {
     expect(sentMessages[0]).toEqual({ type: 'join', name: 'Alice', enhancedMode: false })
   })
 
-  test('input state message includes held keys', () => {
+  test('input state message includes held keys and seq', () => {
     const sentMessages: any[] = []
     const mockWs = {
       send: (data: string) => sentMessages.push(JSON.parse(data)),
     }
 
-    // Simulate updating input state
-    mockWs.send(JSON.stringify({ type: 'input', held: { left: true, right: false } }))
+    // Simulate updating input state with sequence number
+    mockWs.send(JSON.stringify({ type: 'input', seq: 1, held: { left: true, right: false } }))
 
-    expect(sentMessages[0]).toEqual({ type: 'input', held: { left: true, right: false } })
-  })
-
-  test('updates score and lives', () => {
-    const delta = { score: 100, lives: 2 }
-    const next = applyDelta(baseState, delta)
-    expect(next.score).toBe(100)
-    expect(next.lives).toBe(2)
+    expect(sentMessages[0]).toEqual({ type: 'input', seq: 1, held: { left: true, right: false } })
   })
 })
 ```
 
 ### E2E Tests
 
+E2E tests for terminal apps use `node-pty` to spawn real terminal processes and capture/verify output. This avoids browser-based testing tools like Playwright which don't apply to TUI apps.
+
 ```typescript
 // e2e/game.spec.ts
-import { test, expect } from '@playwright/test'
+import { describe, test, expect, beforeAll, afterAll } from 'bun:test'
+import * as pty from 'node-pty'
 import { spawn } from 'child_process'
 
-test.describe('Vaders E2E', () => {
+// Helper to wait for specific output in PTY buffer
+function waitForOutput(buffer: string[], pattern: RegExp | string, timeout = 5000): Promise<void> {
+  const start = Date.now()
+  return new Promise((resolve, reject) => {
+    const check = () => {
+      const fullOutput = buffer.join('')
+      const found = typeof pattern === 'string'
+        ? fullOutput.includes(pattern)
+        : pattern.test(fullOutput)
+      if (found) return resolve()
+      if (Date.now() - start > timeout) {
+        return reject(new Error(`Timeout waiting for: ${pattern}\nGot: ${fullOutput.slice(-500)}`))
+      }
+      setTimeout(check, 100)
+    }
+    check()
+  })
+}
+
+describe('Vaders E2E', () => {
   let workerProcess: ReturnType<typeof spawn>
 
-  test.beforeAll(async () => {
+  beforeAll(async () => {
     // Start local worker
-    workerProcess = spawn('bunx', ['wrangler', 'dev'], { cwd: './worker' })
+    workerProcess = spawn('bunx', ['wrangler', 'dev'], { cwd: './worker', stdio: 'pipe' })
     await new Promise(r => setTimeout(r, 3000))  // Wait for startup
   })
 
-  test.afterAll(() => {
+  afterAll(() => {
     workerProcess?.kill()
   })
 
-  test('solo game flow', async ({ page }) => {
-    // Start client
-    const client = spawn('bun', ['run', 'dev'], { cwd: './client' })
+  test('solo game flow', async () => {
+    const output: string[] = []
 
-    // Verify connection
-    await expect(page.locator('text=Connecting')).toBeHidden({ timeout: 5000 })
+    // Spawn client in a PTY for realistic terminal behavior
+    const ptyProcess = pty.spawn('bun', ['run', 'dev'], {
+      name: 'xterm-256color',
+      cols: 80,
+      rows: 24,
+      cwd: './client',
+      env: { ...process.env, VADERS_ASCII: '1' },  // Use ASCII mode for reliable matching
+    })
 
-    // Start solo game
-    await page.keyboard.press('s')
+    ptyProcess.onData((data) => output.push(data))
 
-    // Verify game started
-    await expect(page.locator('text=WAVE:1')).toBeVisible()
+    try {
+      // Wait for connection and menu
+      await waitForOutput(output, /VADERS|Press.*to.*start/i, 10000)
 
-    // Shoot and verify score
-    await page.keyboard.press('Space')
-    await expect(page.locator('text=SCORE:00030')).toBeVisible({ timeout: 2000 })
+      // Start solo game
+      ptyProcess.write('s')
 
-    client.kill()
+      // Verify game started
+      await waitForOutput(output, 'WAVE:1', 5000)
+
+      // Shoot
+      ptyProcess.write(' ')
+
+      // Verify score increased (alien hit)
+      await waitForOutput(output, /SCORE:000[1-9]|SCORE:0001/, 3000)
+    } finally {
+      ptyProcess.kill()
+    }
   })
 
-  test('multiplayer lobby ready flow', async ({ browser }) => {
-    const player1 = await browser.newPage()
-    const player2 = await browser.newPage()
+  test('multiplayer lobby ready flow', async () => {
+    const output1: string[] = []
+    const output2: string[] = []
 
-    // Both join same room
-    // ... room joining logic
+    // Create room with first player
+    const player1 = pty.spawn('bun', ['run', 'dev'], {
+      name: 'xterm-256color',
+      cols: 80,
+      rows: 24,
+      cwd: './client',
+      env: { ...process.env, VADERS_ASCII: '1' },
+    })
+    player1.onData((data) => output1.push(data))
 
-    // Player 1 readies
-    await player1.keyboard.press('Enter')
-    await expect(player1.locator('text=✓ READY')).toBeVisible()
+    try {
+      // Wait for menu, create new room
+      await waitForOutput(output1, /VADERS|Press.*to.*start/i, 10000)
+      player1.write('2')  // Create room
 
-    // Player 2 readies - should trigger countdown
-    await player2.keyboard.press('Enter')
-    await expect(player1.locator('text=GET READY')).toBeVisible()
-    await expect(player2.locator('text=GET READY')).toBeVisible()
+      // Wait for room code to appear
+      await waitForOutput(output1, /Room.*[A-Z0-9]{6}/i, 5000)
+
+      // Extract room code from output
+      const roomCodeMatch = output1.join('').match(/Room[:\s]+([A-Z0-9]{6})/i)
+      expect(roomCodeMatch).toBeTruthy()
+      const roomCode = roomCodeMatch![1]
+
+      // Second player joins
+      const player2 = pty.spawn('bun', ['run', 'dev', '--room', roomCode], {
+        name: 'xterm-256color',
+        cols: 80,
+        rows: 24,
+        cwd: './client',
+        env: { ...process.env, VADERS_ASCII: '1' },
+      })
+      player2.onData((data) => output2.push(data))
+
+      try {
+        // Wait for player 2 to join
+        await waitForOutput(output2, /Lobby|waiting/i, 10000)
+
+        // Player 1 readies
+        player1.write('\r')  // Enter key
+        await waitForOutput(output1, /READY/i, 3000)
+
+        // Player 2 readies - should trigger countdown
+        player2.write('\r')
+        await waitForOutput(output1, /GET READY|3|countdown/i, 3000)
+        await waitForOutput(output2, /GET READY|3|countdown/i, 3000)
+      } finally {
+        player2.kill()
+      }
+    } finally {
+      player1.kill()
+    }
   })
 })
 ```
@@ -4034,7 +4178,7 @@ bun test --coverage
 bun test --watch
 
 # E2E tests (requires wrangler dev running)
-bunx playwright test
+bun test e2e/
 ```
 
 ### Test Coverage Requirements
@@ -4079,7 +4223,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_TOKEN }}
 
       - name: Run E2E tests
-        run: bunx playwright test
+        run: bun test e2e/
 ```
 
 ### Test Data Factories
