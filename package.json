@@ -1,0 +1,36 @@
+{
+  "name": "vaders",
+  "version": "1.0.0",
+  "description": "Multiplayer TUI Space Invaders clone (1-4 players) using OpenTUI and Cloudflare Durable Objects",
+  "type": "module",
+  "bin": {
+    "vaders": "./bin/vaders.ts"
+  },
+  "workspaces": [
+    "client",
+    "worker",
+    "shared"
+  ],
+  "scripts": {
+    "vaders": "bun run bin/vaders.ts",
+    "dev": "bun run bin/vaders.ts",
+    "dev:client": "cd client && bun run dev",
+    "dev:worker": "cd worker && bun run dev",
+    "build": "cd client && bun run build",
+    "deploy": "cd worker && bun run deploy",
+    "typecheck": "cd worker && bun run typecheck && cd ../client && bun run typecheck",
+    "install:all": "cd worker && bun install && cd ../client && bun install"
+  },
+  "keywords": [
+    "space-invaders",
+    "multiplayer",
+    "tui",
+    "terminal",
+    "game",
+    "cloudflare",
+    "durable-objects",
+    "opentui"
+  ],
+  "author": "",
+  "license": "MIT"
+}

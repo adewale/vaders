@@ -1,0 +1,24 @@
+{
+  "name": "vaders-client",
+  "version": "1.0.0",
+  "type": "module",
+  "bin": {
+    "vaders": "./src/index.tsx"
+  },
+  "scripts": {
+    "dev": "bun run src/index.tsx",
+    "build": "bun build src/index.tsx --outdir dist --target bun",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@opentui/core": "0.1.74",
+    "@opentui/react": "0.1.74",
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.0.0",
+    "@types/react": "^19.0.0",
+    "typescript": "^5.3.0"
+  }
+}

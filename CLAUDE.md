@@ -14,38 +14,42 @@ The project has three main parts:
 2. **Client** (`client/`) - Bun + OpenTUI React app that renders the TUI, handles keyboard input, and maintains WebSocket connection
 3. **Shared** (`shared/`) - TypeScript types (`GameState`, `Player`, `Alien`, etc.) and WebSocket protocol definitions
 
-## Installation & Usage
+## Quick Start
 
 ```bash
-# Install globally
-bun add -g vaders
+# From project root - starts server and client, shows launch menu
+bun run vaders
+```
 
-# Start a new game (creates room, shows room code)
-vaders
+The launch screen provides all options:
+- **Solo Game** - Start immediately with 3 lives
+- **Create Room** - Get a room code to share with friends
+- **Join Room** - Enter a friend's room code
+- **Matchmaking** - Auto-join an open game
+- **Enhanced Mode** - Toggle Galaga/Galaxian style enemies
 
-# Join existing room
-vaders --room ABC123
+## Command-Line Options
 
-# Auto-matchmaking
-vaders --matchmake
-
-# With player name
-vaders --name "Alice" --room ABC123
+```bash
+bun run vaders                     # Show launch menu (default)
+bun run vaders -- --room ABC123    # Join room directly
+bun run vaders -- --matchmake      # Auto-matchmake directly
+bun run vaders -- --name "Alice"   # Set player name
+bun run vaders -- --remote         # Use deployed server instead of local
 ```
 
 ## Development Commands
 
 ```bash
-# Client
-cd client
-bun install
-bun run dev                    # Run client (connects to ws://localhost:8787/ws)
+# Run game (unified - starts worker and client together)
+bun run vaders                 # Solo mode by default
 
-# Worker
-cd worker
-bun install
-bunx wrangler dev              # Local development
-bunx wrangler deploy           # Deploy to Cloudflare
+# Run components separately
+bun run dev:client             # Client only (needs worker running)
+bun run dev:worker             # Worker only
+
+# Deploy to Cloudflare
+cd worker && bunx wrangler deploy
 ```
 
 ## Key Technical Details

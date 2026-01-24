@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.wasm
+*.scm
+
+# Wrangler state (local dev)
+.wrangler/
+
+# Debug logs
+*.log
+/tmp/
+
+# OS files
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+
+# Environment
+.env
+.env.local

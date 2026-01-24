@@ -1,0 +1,13 @@
+{
+  "name": "vaders-shared",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./types.ts",
+  "types": "./types.ts",
+  "exports": {
+    ".": "./types.ts",
+    "./types": "./types.ts",
+    "./protocol": "./protocol.ts"
+  }
+}
