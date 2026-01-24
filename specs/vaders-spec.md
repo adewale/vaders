@@ -1815,8 +1815,24 @@ export default {
           headers: { 'Content-Type': 'application/json' }
         })
       }
-      // No open rooms - create one (inline to avoid recursive fetch)
-      const newRoomCode = generateRoomCode()
+      // No open rooms - create one with collision-checking (same as POST /room)
+      let newRoomCode: string
+      let attempts = 0
+      const maxAttempts = 10
+      do {
+        newRoomCode = generateRoomCode()
+        const check = await matchmaker.fetch(new Request(`https://internal/info/${newRoomCode}`))
+        if (check.status === 404) break  // Room code not in use
+        attempts++
+      } while (attempts < maxAttempts)
+
+      if (attempts >= maxAttempts) {
+        return new Response(JSON.stringify({ code: 'room_generation_failed', message: 'Could not generate unique room code' }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      }
+
       const id = env.GAME_ROOM.idFromName(newRoomCode)
       const stub = env.GAME_ROOM.get(id)
       await stub.fetch(new Request('https://internal/init', {
@@ -2896,7 +2912,7 @@ export class GameRoom implements DurableObject {
               this.game.players[bullet.ownerId].kills++
             }
 
-            this.broadcast({ type: 'event', name: 'alien_killed', data: { alienId: alien.id, playerId: bullet.ownerId } })
+            this.broadcast({ type: 'event', name: 'alien_killed', data: { alienId: alien.id, playerId: bullet.ownerId, points: alien.points } })
             break
           }
         }
@@ -3024,7 +3040,8 @@ export class GameRoom implements DurableObject {
     }
   }
 
-  private async nextWave() {
+  // Synchronous state change; async persistence is fire-and-forget
+  private nextWave() {
     if (!this.game) return
     this.game.wave++
     const playerCount = Object.keys(this.game.players).length
@@ -3039,7 +3056,8 @@ export class GameRoom implements DurableObject {
     this.game.alienDirection = 1
 
     this.broadcast({ type: 'event', name: 'wave_complete', data: { wave: this.game.wave } })
-    await this.persistState()  // Persist on wave complete
+    // Fire-and-forget persistence (no await - nextWave must be synchronous)
+    void this.persistState()
   }
 
   // Synchronous state change + teardown; async persistence is fire-and-forget
@@ -3205,6 +3223,8 @@ export class GameRoom implements DurableObject {
     await this.state.storage.deleteAlarm()
     // Clear stored state - DO instance will be evicted by runtime
     await this.state.storage.deleteAll()
+    // Clear in-memory state to prevent stale references
+    this.game = null
   }
 }
 ```
