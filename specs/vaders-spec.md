@@ -4172,7 +4172,7 @@ vaders/
 │   │       ├── collision.ts      # Hit detection
 │   │       ├── aliens.ts         # Alien AI
 │   │       └── barriers.ts       # Barrier creation
-│   └── wrangler.toml
+│   └── wrangler.jsonc
 │
 ├── client/
 │   ├── src/
@@ -4199,25 +4199,23 @@ vaders/
 
 ## Wrangler Configuration
 
-```toml
-# worker/wrangler.toml
-name = "vaders"
-main = "src/index.ts"
-compatibility_date = "2024-01-15"
-
-[durable_objects]
-bindings = [
-  { name = "GAME_ROOM", class_name = "GameRoom" },
-  { name = "MATCHMAKER", class_name = "Matchmaker" }
-]
-
-[[migrations]]
-tag = "v1"
-new_classes = ["GameRoom"]
-
-[[migrations]]
-tag = "v2"
-new_classes = ["Matchmaker"]
+```jsonc
+// worker/wrangler.jsonc
+{
+  "name": "vaders",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-01-15",
+  "durable_objects": {
+    "bindings": [
+      { "name": "GAME_ROOM", "class_name": "GameRoom" },
+      { "name": "MATCHMAKER", "class_name": "Matchmaker" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_classes": ["GameRoom"] },
+    { "tag": "v2", "new_classes": ["Matchmaker"] }
+  ]
+}
 ```
 
 ---
@@ -5519,7 +5517,7 @@ Pin all `@opentui/*` packages to the same version to avoid reconciler mismatches
 
 ### Cloudflare Workers
 
-- Wrangler v3.0+ Make sure the version date is set to today.
+- Wrangler v4.6.0+ Make sure the version date is set to today.
 
 ---
 
