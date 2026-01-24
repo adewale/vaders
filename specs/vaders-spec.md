@@ -1421,6 +1421,11 @@ export class GameRoom implements DurableObject {
       this.alienShoot()
     }
 
+    // Enhanced mode: process commanders, dive bombers, transforms
+    if (this.game.enhancedMode) {
+      this.tickEnhancedMode()
+    }
+
     this.checkEndConditions()
     this.game.tick++
 
@@ -1617,6 +1622,7 @@ export class GameRoom implements DurableObject {
   }
 
   private endGame(result: 'victory' | 'defeat') {
+    if (!this.game) return
     this.game.status = 'game_over'
     if (this.interval) {
       clearInterval(this.interval)
@@ -1625,26 +1631,62 @@ export class GameRoom implements DurableObject {
     this.broadcast({ type: 'event', name: 'game_over', data: { result } })
   }
 
+  private tickEnhancedMode() {
+    if (!this.game) return
+
+    // Process commanders (Galaga Boss behavior)
+    for (const cmd of this.game.commanders ?? []) {
+      if (!cmd.alive) continue
+      // Tractor beam cooldown
+      if (cmd.tractorBeamCooldown > 0) cmd.tractorBeamCooldown--
+      // Dive logic, escort recruitment, capture mechanics would go here
+    }
+
+    // Process dive bombers (Galaxian purple dive)
+    for (const db of this.game.diveBombers ?? []) {
+      if (!db.alive) continue
+      if (db.diveState === 'diving') {
+        db.divePathProgress += 0.02
+        // Wide arc dive with mid-path reversal
+        if (db.divePathProgress >= 1) {
+          db.diveState = 'returning'
+        }
+      }
+    }
+
+    // Process transform enemies (spawned from destroyed dive bombers)
+    const expiredTransforms: string[] = []
+    for (const te of this.game.transforms ?? []) {
+      te.x += te.velocity.x
+      te.y += te.velocity.y
+      te.lifetime--
+      if (te.lifetime <= 0 || te.y > this.game.config.height) {
+        expiredTransforms.push(te.id)
+      }
+    }
+    if (this.game.transforms) {
+      this.game.transforms = this.game.transforms.filter(t => !expiredTransforms.includes(t.id))
+    }
+  }
+
   private createAlienFormation(cols: number, rows: number): Alien[] {
+    if (!this.game) return []
     const aliens: Alien[] = []
-    let id = 0
-    const types: Array<Alien['type']> = ['squid', 'crab', 'crab', 'octopus', 'octopus']
-    const points = { squid: 30, crab: 20, octopus: 10 }
     // Center the alien grid: (screenWidth - gridWidth) / 2
     const startX = Math.floor((this.game.config.width - cols * LAYOUT.ALIEN_COL_SPACING) / 2)
-    
+
     for (let row = 0; row < rows; row++) {
-      const type = types[row] || 'octopus'
+      const type = FORMATION_ROWS[row] || 'octopus'
       for (let col = 0; col < cols; col++) {
         aliens.push({
-          id: id++,
+          id: this.generateEntityId(),  // String ID from monotonic counter
           type,
           row,
           col,
           x: startX + col * LAYOUT.ALIEN_COL_SPACING,
           y: LAYOUT.ALIEN_START_Y + row * 2,
           alive: true,
-          points: points[type],
+          points: ALIEN_REGISTRY[type].points,
         })
       }
     }
