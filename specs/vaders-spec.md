@@ -2786,7 +2786,12 @@ export class GameRoom implements DurableObject {
         this.countdownInterval = null
         // Catch to prevent unhandled rejection if startGame throws
         void this.startGame().catch((err) => {
-          console.error('[GameRoom] startGame failed:', err)
+          // Log with roomId context per wide events pattern
+          console.error(JSON.stringify({
+            event: 'startGame_failed',
+            roomId: this.game?.roomId,
+            error: err instanceof Error ? err.message : String(err),
+          }))
         })
       } else {
         this.broadcast({ type: 'event', name: 'countdown_tick', data: { count: this.game.countdownRemaining } })
@@ -4410,7 +4415,8 @@ class AudioEngine {
       // const lib = dlopen('./audio.dylib', { ... })
       // this.nativeAudio = new NativeAudio(lib)
     } catch {
-      console.error('Native audio not available, falling back to terminal bell')
+      // Client-side: no roomId context needed
+      console.warn('[AudioEngine] Native audio not available, using terminal bell')
     }
   }
 
