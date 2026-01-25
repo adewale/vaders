@@ -5,6 +5,12 @@ import { spawn } from 'bun'
 import { existsSync } from 'fs'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
+import {
+  getTerminalCapabilities,
+  getTerminalDisplayNameCached,
+  getColorDepth,
+  getTerminalQuirks,
+} from './terminal'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -27,8 +33,18 @@ interface StartupReport {
  */
 export async function runStartupChecks(): Promise<StartupReport> {
   const checks: StartupCheckResult[] = []
+  const termCaps = getTerminalCapabilities()
 
-  // Check 1: Terminal size
+  // Check 1: Terminal detection
+  const terminalName = getTerminalDisplayNameCached()
+  const colorDepth = getColorDepth(termCaps)
+  checks.push({
+    name: 'Terminal',
+    passed: true, // Informational
+    message: `${terminalName} (${colorDepth} color)`,
+  })
+
+  // Check 2: Terminal size
   const cols = process.stdout.columns || 80
   const rows = process.stdout.rows || 24
   checks.push({
@@ -39,7 +55,23 @@ export async function runStartupChecks(): Promise<StartupReport> {
       : `${cols}x${rows} (need 120x36)`,
   })
 
-  // Check 2: Audio player available
+  // Check 3: Unicode support
+  checks.push({
+    name: 'Unicode',
+    passed: termCaps.supportsUnicode,
+    message: termCaps.supportsUnicode ? 'Enabled' : 'ASCII mode (set LANG=en_US.UTF-8)',
+  })
+
+  // Check 4: Keyboard protocol
+  checks.push({
+    name: 'Keyboard',
+    passed: termCaps.supportsKittyKeyboard,
+    message: termCaps.supportsKittyKeyboard
+      ? 'Kitty protocol (key release events)'
+      : 'Standard (timeout-based release)',
+  })
+
+  // Check 5: Audio player available
   const audioPlayer = process.platform === 'darwin' ? 'afplay' : 'aplay'
   let audioPlayerAvailable = false
   try {
@@ -55,7 +87,7 @@ export async function runStartupChecks(): Promise<StartupReport> {
     message: audioPlayerAvailable ? `${audioPlayer} found` : `${audioPlayer} not found`,
   })
 
-  // Check 3: Sound effects files exist
+  // Check 6: Sound effects files exist
   const soundsDir = join(__dirname, '../sounds')
   const requiredSounds = ['shoot.wav', 'alien_killed.wav', 'game_start.wav', 'game_over.wav']
   const missingSounds = requiredSounds.filter(s => !existsSync(join(soundsDir, s)))
@@ -67,7 +99,7 @@ export async function runStartupChecks(): Promise<StartupReport> {
       : `Missing: ${missingSounds.join(', ')}`,
   })
 
-  // Check 4: Background music file exists
+  // Check 7: Background music file exists
   const musicPath = join(soundsDir, 'background-music.mp3')
   const musicExists = existsSync(musicPath)
   checks.push({
@@ -76,7 +108,7 @@ export async function runStartupChecks(): Promise<StartupReport> {
     message: musicExists ? 'background-music.mp3 found' : 'background-music.mp3 missing',
   })
 
-  // Check 5: Audio playback test (actually play a short sound)
+  // Check 8: Audio playback test (actually play a short sound)
   let audioPlaybackWorks = false
   if (audioPlayerAvailable) {
     const testSound = join(soundsDir, 'menu_select.wav')
@@ -100,7 +132,7 @@ export async function runStartupChecks(): Promise<StartupReport> {
     message: audioPlaybackWorks ? 'Test sound played' : 'Playback failed (check volume)',
   })
 
-  // Check 6: SFX mute status (informational)
+  // Check 9: SFX mute status (informational)
   const { getUserConfig } = await import('./config/userConfig')
   const config = getUserConfig()
   checks.push({
@@ -109,7 +141,7 @@ export async function runStartupChecks(): Promise<StartupReport> {
     message: config.audioMuted ? 'MUTED - press M to unmute' : 'Enabled',
   })
 
-  // Check 7: Music mute status (informational)
+  // Check 10: Music mute status (informational)
   checks.push({
     name: 'Music',
     passed: !config.musicMuted,
@@ -136,6 +168,7 @@ export function printStartupReport(report: StartupReport): void {
   const red = '\x1b[31m'
   const yellow = '\x1b[33m'
   const cyan = '\x1b[36m'
+  const dim = '\x1b[90m'
   const reset = '\x1b[0m'
 
   console.log(`\n${cyan}═══ VADERS STARTUP CHECK ═══${reset}\n`)
@@ -143,6 +176,16 @@ export function printStartupReport(report: StartupReport): void {
   for (const check of report.checks) {
     const status = check.passed ? `${green}✓${reset}` : `${red}✗${reset}`
     console.log(`  ${status} ${check.name}: ${check.message}`)
+  }
+
+  // Show terminal quirks if any
+  const termCaps = getTerminalCapabilities()
+  const quirks = getTerminalQuirks(termCaps)
+  if (quirks.length > 0) {
+    console.log(`\n  ${dim}Terminal notes:${reset}`)
+    for (const quirk of quirks) {
+      console.log(`  ${dim}  - ${quirk}${reset}`)
+    }
   }
 
   console.log('')

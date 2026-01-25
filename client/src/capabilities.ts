@@ -1,26 +1,53 @@
 // client/src/capabilities.ts
-// Terminal capabilities detection
+// Terminal capabilities detection - wraps the terminal compatibility layer
 
+import {
+  TERMINAL_CAPABILITIES,
+  TERMINAL_NAME,
+  getTerminalDisplayName,
+  getColorDepth,
+  getTerminalQuirks,
+  type TerminalCapabilities as FullTerminalCapabilities,
+} from './terminal'
+
+// Re-export the full terminal capabilities for advanced usage
+export type { FullTerminalCapabilities }
+export { TERMINAL_NAME, getTerminalDisplayName, getColorDepth, getTerminalQuirks }
+
+/**
+ * Simplified capabilities interface for backwards compatibility
+ */
 export interface TerminalCapabilities {
-  trueColor: boolean    // 24-bit color support (COLORTERM=truecolor or 24bit)
-  color256: boolean     // 256-color support (TERM includes 256color)
+  trueColor: boolean    // 24-bit color support
+  color256: boolean     // 256-color support
   unicode: boolean      // Unicode character support
   asciiMode: boolean    // Use ASCII-only symbols (safer for alignment)
   width: number         // Terminal width
   height: number        // Terminal height
+  // New fields from terminal compatibility layer
+  terminal: string      // Terminal name
+  supportsKittyKeyboard: boolean
+  supportsWideCharacters: boolean
+  insideMultiplexer: boolean
 }
 
+/**
+ * Detect terminal capabilities using the compatibility layer
+ */
 export function detectCapabilities(): TerminalCapabilities {
-  const colorTerm = process.env.COLORTERM
-  const term = process.env.TERM
+  const caps = TERMINAL_CAPABILITIES
 
   return {
-    trueColor: colorTerm === 'truecolor' || colorTerm === '24bit',
-    color256: term?.includes('256color') ?? false,
-    unicode: process.env.LANG?.includes('UTF-8') ?? true,
-    asciiMode: process.env.VADERS_ASCII === '1' || !(process.env.LANG?.includes('UTF-8')),
+    trueColor: caps.supportsTrueColor,
+    color256: caps.supports256Color,
+    unicode: caps.supportsUnicode,
+    asciiMode: !caps.supportsUnicode,
     width: process.stdout.columns ?? 80,
     height: process.stdout.rows ?? 24,
+    terminal: caps.terminal,
+    supportsKittyKeyboard: caps.supportsKittyKeyboard,
+    supportsWideCharacters: caps.supportsWideCharacters,
+    insideMultiplexer: caps.insideMultiplexer,
   }
 }
 

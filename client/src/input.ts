@@ -1,7 +1,9 @@
 // client/src/input.ts
 // Input adapter - normalizes OpenTUI KeyEvent to stable VadersKey type
+// Uses terminal compatibility layer for keyboard protocol detection
 
 import type { KeyEvent } from '@opentui/core'
+import { getTerminalCapabilities, needsKeyReleaseTimeout } from './terminal'
 
 // ─── Internal Key Type (stable, not tied to OpenTUI) ──────────────────────────
 
@@ -46,11 +48,16 @@ export interface HeldKeys {
 // Set longer than typical key repeat interval (~30-50ms) to allow continuous movement
 const KEY_RELEASE_TIMEOUT_MS = 200
 
+// Check terminal capabilities once at module load
+const termCaps = getTerminalCapabilities()
+const useTimeoutFallback = needsKeyReleaseTimeout(termCaps)
+
 export function createHeldKeysTracker(): {
   held: HeldKeys
   onPress: (key: VadersKey) => boolean  // Returns true if held state changed
   onRelease: (key: VadersKey) => boolean
   cleanup: () => void  // Call to clear timeouts
+  usesTimeoutFallback: boolean  // Whether timeout-based release is used
 } {
   const held: HeldKeys = { left: false, right: false }
   const timeouts: { left: ReturnType<typeof setTimeout> | null; right: ReturnType<typeof setTimeout> | null } = {
@@ -66,6 +73,10 @@ export function createHeldKeysTracker(): {
   }
 
   function setKeyTimeout(key: 'left' | 'right') {
+    // Only use timeout fallback for terminals without Kitty keyboard protocol
+    // (e.g., Apple Terminal, iTerm2)
+    if (!useTimeoutFallback) return
+
     clearKeyTimeout(key)
     timeouts[key] = setTimeout(() => {
       // Auto-release if no new press or release event received
@@ -81,12 +92,12 @@ export function createHeldKeysTracker(): {
     if (key.key === 'left') {
       if (!held.left) changed = true
       held.left = true
-      setKeyTimeout('left')  // Reset timeout on each press
+      setKeyTimeout('left')  // Reset timeout on each press (if fallback enabled)
     }
     if (key.key === 'right') {
       if (!held.right) changed = true
       held.right = true
-      setKeyTimeout('right')  // Reset timeout on each press
+      setKeyTimeout('right')  // Reset timeout on each press (if fallback enabled)
     }
     return changed
   }
@@ -113,5 +124,5 @@ export function createHeldKeysTracker(): {
     clearKeyTimeout('right')
   }
 
-  return { held, onPress, onRelease, cleanup }
+  return { held, onPress, onRelease, cleanup, usesTimeoutFallback: useTimeoutFallback }
 }

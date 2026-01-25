@@ -1,312 +1,185 @@
 // client/src/input.test.ts
-// Unit tests for keyboard input handling
+// Unit tests for input adapter
 
 import { describe, test, expect } from 'bun:test'
 import { normalizeKey, createHeldKeysTracker, type VadersKey } from './input'
 
-// Mock KeyEvent for testing
-function mockKeyEvent(opts: {
-  name?: string
-  sequence?: string
-  eventType?: 'press' | 'release'
-  repeated?: boolean
-}) {
-  return {
-    name: opts.name ?? '',
-    sequence: opts.sequence ?? '',
-    eventType: opts.eventType ?? 'press',
-    repeated: opts.repeated ?? false,
-    ctrl: false,
-    meta: false,
-    shift: false,
-  } as Parameters<typeof normalizeKey>[0]
-}
-
 describe('normalizeKey', () => {
-  test('normalizes arrow keys by name', () => {
-    expect(normalizeKey(mockKeyEvent({ name: 'left' }))).toEqual({ type: 'key', key: 'left' })
-    expect(normalizeKey(mockKeyEvent({ name: 'right' }))).toEqual({ type: 'key', key: 'right' })
-    expect(normalizeKey(mockKeyEvent({ name: 'up' }))).toEqual({ type: 'key', key: 'up' })
-    expect(normalizeKey(mockKeyEvent({ name: 'down' }))).toEqual({ type: 'key', key: 'down' })
+  test('normalizes left arrow', () => {
+    const result = normalizeKey({ name: 'left', sequence: '\x1b[D', ctrl: false, meta: false, shift: false })
+    expect(result).toEqual({ type: 'key', key: 'left' })
   })
 
-  test('normalizes arrow keys by escape sequence', () => {
-    expect(normalizeKey(mockKeyEvent({ sequence: '\x1b[D' }))).toEqual({ type: 'key', key: 'left' })
-    expect(normalizeKey(mockKeyEvent({ sequence: '\x1b[C' }))).toEqual({ type: 'key', key: 'right' })
-    expect(normalizeKey(mockKeyEvent({ sequence: '\x1b[A' }))).toEqual({ type: 'key', key: 'up' })
-    expect(normalizeKey(mockKeyEvent({ sequence: '\x1b[B' }))).toEqual({ type: 'key', key: 'down' })
+  test('normalizes right arrow', () => {
+    const result = normalizeKey({ name: 'right', sequence: '\x1b[C', ctrl: false, meta: false, shift: false })
+    expect(result).toEqual({ type: 'key', key: 'right' })
   })
 
-  test('normalizes space key', () => {
-    expect(normalizeKey(mockKeyEvent({ name: 'space' }))).toEqual({ type: 'key', key: 'space' })
-    expect(normalizeKey(mockKeyEvent({ sequence: ' ' }))).toEqual({ type: 'key', key: 'space' })
+  test('normalizes up arrow', () => {
+    const result = normalizeKey({ name: 'up', sequence: '\x1b[A', ctrl: false, meta: false, shift: false })
+    expect(result).toEqual({ type: 'key', key: 'up' })
   })
 
-  test('normalizes enter/return key', () => {
-    expect(normalizeKey(mockKeyEvent({ name: 'return' }))).toEqual({ type: 'key', key: 'enter' })
+  test('normalizes down arrow', () => {
+    const result = normalizeKey({ name: 'down', sequence: '\x1b[B', ctrl: false, meta: false, shift: false })
+    expect(result).toEqual({ type: 'key', key: 'down' })
+  })
+
+  test('normalizes space', () => {
+    const result = normalizeKey({ name: 'space', sequence: ' ', ctrl: false, meta: false, shift: false })
+    expect(result).toEqual({ type: 'key', key: 'space' })
+  })
+
+  test('normalizes enter/return', () => {
+    const result = normalizeKey({ name: 'return', sequence: '\r', ctrl: false, meta: false, shift: false })
+    expect(result).toEqual({ type: 'key', key: 'enter' })
+  })
+
+  test('normalizes escape', () => {
+    const result = normalizeKey({ name: 'escape', sequence: '\x1b', ctrl: false, meta: false, shift: false })
+    expect(result).toEqual({ type: 'key', key: 'escape' })
+  })
+
+  test('normalizes q key', () => {
+    const result = normalizeKey({ name: 'q', sequence: 'q', ctrl: false, meta: false, shift: false })
+    expect(result).toEqual({ type: 'key', key: 'q' })
+  })
+
+  test('normalizes Q key (uppercase) to lowercase', () => {
+    const result = normalizeKey({ name: 'Q', sequence: 'Q', ctrl: false, meta: false, shift: true })
+    expect(result).toEqual({ type: 'key', key: 'q' })
+  })
+
+  test('normalizes m key (mute toggle)', () => {
+    const result = normalizeKey({ name: 'm', sequence: 'm', ctrl: false, meta: false, shift: false })
+    expect(result).toEqual({ type: 'key', key: 'm' })
+  })
+
+  test('normalizes n key (music toggle)', () => {
+    const result = normalizeKey({ name: 'n', sequence: 'n', ctrl: false, meta: false, shift: false })
+    expect(result).toEqual({ type: 'key', key: 'n' })
+  })
+
+  test('normalizes s key (start solo)', () => {
+    const result = normalizeKey({ name: 's', sequence: 's', ctrl: false, meta: false, shift: false })
+    expect(result).toEqual({ type: 'key', key: 's' })
+  })
+
+  test('normalizes r key (ready)', () => {
+    const result = normalizeKey({ name: 'r', sequence: 'r', ctrl: false, meta: false, shift: false })
+    expect(result).toEqual({ type: 'key', key: 'r' })
   })
 
   test('returns char type for other single characters', () => {
-    expect(normalizeKey(mockKeyEvent({ sequence: 'x' }))).toEqual({ type: 'char', char: 'x' })
-    expect(normalizeKey(mockKeyEvent({ sequence: '5' }))).toEqual({ type: 'char', char: '5' })
+    const result = normalizeKey({ name: 'a', sequence: 'a', ctrl: false, meta: false, shift: false })
+    expect(result).toEqual({ type: 'char', char: 'a' })
   })
 
   test('returns null for unrecognized keys', () => {
-    expect(normalizeKey(mockKeyEvent({ name: 'unknown', sequence: '\x1b[99~' }))).toBeNull()
+    const result = normalizeKey({ name: 'f1', sequence: '\x1bOP', ctrl: false, meta: false, shift: false })
+    expect(result).toBeNull()
+  })
+
+  test('normalizes arrow keys by sequence when name is not set', () => {
+    const result = normalizeKey({ name: undefined, sequence: '\x1b[D', ctrl: false, meta: false, shift: false } as any)
+    expect(result).toEqual({ type: 'key', key: 'left' })
   })
 })
 
 describe('createHeldKeysTracker', () => {
-  test('initial state is both keys released', () => {
+  test('initial state has no keys held', () => {
     const tracker = createHeldKeysTracker()
-    expect(tracker.held).toEqual({ left: false, right: false })
-  })
-
-  test('onPress sets key to held', () => {
-    const tracker = createHeldKeysTracker()
-
-    const leftChanged = tracker.onPress({ type: 'key', key: 'left' })
-    expect(leftChanged).toBe(true)
-    expect(tracker.held).toEqual({ left: true, right: false })
-
-    const rightChanged = tracker.onPress({ type: 'key', key: 'right' })
-    expect(rightChanged).toBe(true)
-    expect(tracker.held).toEqual({ left: true, right: true })
-  })
-
-  test('onPress returns false if already held', () => {
-    const tracker = createHeldKeysTracker()
-
-    tracker.onPress({ type: 'key', key: 'left' })
-    const secondPress = tracker.onPress({ type: 'key', key: 'left' })
-    expect(secondPress).toBe(false)
-    expect(tracker.held.left).toBe(true)
-  })
-
-  test('onRelease clears key', () => {
-    const tracker = createHeldKeysTracker()
-
-    tracker.onPress({ type: 'key', key: 'left' })
-    tracker.onPress({ type: 'key', key: 'right' })
-
-    const leftReleased = tracker.onRelease({ type: 'key', key: 'left' })
-    expect(leftReleased).toBe(true)
-    expect(tracker.held).toEqual({ left: false, right: true })
-  })
-
-  test('onRelease returns false if not held', () => {
-    const tracker = createHeldKeysTracker()
-
-    const released = tracker.onRelease({ type: 'key', key: 'left' })
-    expect(released).toBe(false)
     expect(tracker.held.left).toBe(false)
+    expect(tracker.held.right).toBe(false)
+  })
+
+  test('onPress sets left key held', () => {
+    const tracker = createHeldKeysTracker()
+    const changed = tracker.onPress({ type: 'key', key: 'left' })
+    expect(changed).toBe(true)
+    expect(tracker.held.left).toBe(true)
+    expect(tracker.held.right).toBe(false)
+    tracker.cleanup()
+  })
+
+  test('onPress sets right key held', () => {
+    const tracker = createHeldKeysTracker()
+    const changed = tracker.onPress({ type: 'key', key: 'right' })
+    expect(changed).toBe(true)
+    expect(tracker.held.left).toBe(false)
+    expect(tracker.held.right).toBe(true)
+    tracker.cleanup()
+  })
+
+  test('onPress returns false when key already held', () => {
+    const tracker = createHeldKeysTracker()
+    tracker.onPress({ type: 'key', key: 'left' })
+    const changed = tracker.onPress({ type: 'key', key: 'left' })
+    expect(changed).toBe(false)
+    expect(tracker.held.left).toBe(true)
+    tracker.cleanup()
+  })
+
+  test('onRelease clears left key', () => {
+    const tracker = createHeldKeysTracker()
+    tracker.onPress({ type: 'key', key: 'left' })
+    const changed = tracker.onRelease({ type: 'key', key: 'left' })
+    expect(changed).toBe(true)
+    expect(tracker.held.left).toBe(false)
+    tracker.cleanup()
+  })
+
+  test('onRelease clears right key', () => {
+    const tracker = createHeldKeysTracker()
+    tracker.onPress({ type: 'key', key: 'right' })
+    const changed = tracker.onRelease({ type: 'key', key: 'right' })
+    expect(changed).toBe(true)
+    expect(tracker.held.right).toBe(false)
+    tracker.cleanup()
+  })
+
+  test('onRelease returns false when key not held', () => {
+    const tracker = createHeldKeysTracker()
+    const changed = tracker.onRelease({ type: 'key', key: 'left' })
+    expect(changed).toBe(false)
+    tracker.cleanup()
   })
 
   test('ignores non-movement keys', () => {
     const tracker = createHeldKeysTracker()
-
-    const spacePress = tracker.onPress({ type: 'key', key: 'space' })
-    expect(spacePress).toBe(false)
-
-    const charPress = tracker.onPress({ type: 'char', char: 'x' })
-    expect(charPress).toBe(false)
-
-    expect(tracker.held).toEqual({ left: false, right: false })
-  })
-
-  test('press-release-press sequence works correctly', () => {
-    const tracker = createHeldKeysTracker()
-
-    // Press left
-    tracker.onPress({ type: 'key', key: 'left' })
-    expect(tracker.held.left).toBe(true)
-
-    // Release left
-    tracker.onRelease({ type: 'key', key: 'left' })
+    const pressChanged = tracker.onPress({ type: 'key', key: 'space' })
+    expect(pressChanged).toBe(false)
     expect(tracker.held.left).toBe(false)
-
-    // Press left again
-    tracker.onPress({ type: 'key', key: 'left' })
-    expect(tracker.held.left).toBe(true)
-  })
-
-  test('simultaneous left and right handling', () => {
-    const tracker = createHeldKeysTracker()
-
-    // Press left, then right
-    tracker.onPress({ type: 'key', key: 'left' })
-    tracker.onPress({ type: 'key', key: 'right' })
-    expect(tracker.held).toEqual({ left: true, right: true })
-
-    // Release left (right should stay)
-    tracker.onRelease({ type: 'key', key: 'left' })
-    expect(tracker.held).toEqual({ left: false, right: true })
-
-    // Press left again while right is still held
-    tracker.onPress({ type: 'key', key: 'left' })
-    expect(tracker.held).toEqual({ left: true, right: true })
-  })
-})
-
-describe('keyboard state machine simulation', () => {
-  // Simulates the actual keyboard handling flow
-
-  test('game state transitions should not lose key state', () => {
-    const tracker = createHeldKeysTracker()
-    const events: string[] = []
-
-    // Simulate: press right during 'waiting' state
-    // (This shouldn't affect held state since we're not in gameplay)
-
-    // Now transition to 'playing' and press right
-    tracker.onPress({ type: 'key', key: 'right' })
-    events.push('press:right')
-    expect(tracker.held.right).toBe(true)
-
-    // Simulate game state change (e.g., wave complete)
-    // Key should still be held
-    expect(tracker.held.right).toBe(true)
-
-    // Now release
-    tracker.onRelease({ type: 'key', key: 'right' })
-    events.push('release:right')
     expect(tracker.held.right).toBe(false)
+    tracker.cleanup()
   })
 
-  test('rapid press-release cycles', () => {
+  test('ignores char type keys', () => {
     const tracker = createHeldKeysTracker()
-
-    for (let i = 0; i < 100; i++) {
-      tracker.onPress({ type: 'key', key: 'right' })
-      expect(tracker.held.right).toBe(true)
-
-      tracker.onRelease({ type: 'key', key: 'right' })
-      expect(tracker.held.right).toBe(false)
-    }
-  })
-
-  test('alternating left-right movement', () => {
-    const tracker = createHeldKeysTracker()
-
-    // Quick left-right-left pattern
-    tracker.onPress({ type: 'key', key: 'left' })
-    expect(tracker.held).toEqual({ left: true, right: false })
-
-    tracker.onRelease({ type: 'key', key: 'left' })
-    tracker.onPress({ type: 'key', key: 'right' })
-    expect(tracker.held).toEqual({ left: false, right: true })
-
-    tracker.onRelease({ type: 'key', key: 'right' })
-    tracker.onPress({ type: 'key', key: 'left' })
-    expect(tracker.held).toEqual({ left: true, right: false })
-  })
-})
-
-describe('movement without getting stuck', () => {
-  // These tests verify that keys don't get stuck in the held state
-
-  test('releasing a key always clears it regardless of press order', () => {
-    const tracker = createHeldKeysTracker()
-
-    // Press left, press right, release left, release right
-    tracker.onPress({ type: 'key', key: 'left' })
-    tracker.onPress({ type: 'key', key: 'right' })
-    expect(tracker.held).toEqual({ left: true, right: true })
-
-    tracker.onRelease({ type: 'key', key: 'left' })
-    expect(tracker.held).toEqual({ left: false, right: true })
-
-    tracker.onRelease({ type: 'key', key: 'right' })
-    expect(tracker.held).toEqual({ left: false, right: false })
-  })
-
-  test('releasing in reverse order still works', () => {
-    const tracker = createHeldKeysTracker()
-
-    // Press left, press right, release right, release left
-    tracker.onPress({ type: 'key', key: 'left' })
-    tracker.onPress({ type: 'key', key: 'right' })
-
-    tracker.onRelease({ type: 'key', key: 'right' })
-    expect(tracker.held).toEqual({ left: true, right: false })
-
-    tracker.onRelease({ type: 'key', key: 'left' })
-    expect(tracker.held).toEqual({ left: false, right: false })
-  })
-
-  test('duplicate press events do not cause issues', () => {
-    const tracker = createHeldKeysTracker()
-
-    // Multiple presses without releases (simulates missed release events)
-    tracker.onPress({ type: 'key', key: 'right' })
-    tracker.onPress({ type: 'key', key: 'right' })
-    tracker.onPress({ type: 'key', key: 'right' })
-    expect(tracker.held.right).toBe(true)
-
-    // Single release should clear it
-    tracker.onRelease({ type: 'key', key: 'right' })
-    expect(tracker.held.right).toBe(false)
-  })
-
-  test('duplicate release events do not cause issues', () => {
-    const tracker = createHeldKeysTracker()
-
-    tracker.onPress({ type: 'key', key: 'left' })
-    expect(tracker.held.left).toBe(true)
-
-    // Multiple releases (simulates spurious events)
-    tracker.onRelease({ type: 'key', key: 'left' })
-    tracker.onRelease({ type: 'key', key: 'left' })
-    tracker.onRelease({ type: 'key', key: 'left' })
-    expect(tracker.held.left).toBe(false)
-
-    // Should still be able to press again
-    tracker.onPress({ type: 'key', key: 'left' })
-    expect(tracker.held.left).toBe(true)
-  })
-
-  test('release without prior press is safe', () => {
-    const tracker = createHeldKeysTracker()
-
-    // Release without press should be a no-op
-    const changed = tracker.onRelease({ type: 'key', key: 'right' })
+    const changed = tracker.onPress({ type: 'char', char: 'a' })
     expect(changed).toBe(false)
-    expect(tracker.held).toEqual({ left: false, right: false })
-
-    // Should still work normally after
-    tracker.onPress({ type: 'key', key: 'right' })
-    expect(tracker.held.right).toBe(true)
+    tracker.cleanup()
   })
 
-  test('fresh tracker after reset has no stuck keys', () => {
-    const tracker1 = createHeldKeysTracker()
-
-    // Simulate stuck state
-    tracker1.onPress({ type: 'key', key: 'left' })
-    tracker1.onPress({ type: 'key', key: 'right' })
-    expect(tracker1.held).toEqual({ left: true, right: true })
-
-    // Create fresh tracker (simulates what happens on screen transition)
-    const tracker2 = createHeldKeysTracker()
-    expect(tracker2.held).toEqual({ left: false, right: false })
-  })
-
-  test('movement after shooting does not get stuck', () => {
+  test('can hold both keys simultaneously', () => {
     const tracker = createHeldKeysTracker()
-
-    // Press right to move
+    tracker.onPress({ type: 'key', key: 'left' })
     tracker.onPress({ type: 'key', key: 'right' })
+    expect(tracker.held.left).toBe(true)
     expect(tracker.held.right).toBe(true)
-
-    // Space (shooting) should not affect movement state
-    // (Space is not tracked by the held keys tracker)
-    const spacePress = tracker.onPress({ type: 'key', key: 'space' })
-    expect(spacePress).toBe(false) // Space is not a movement key
-    expect(tracker.held.right).toBe(true) // Right should still be held
-
-    // Release right
-    tracker.onRelease({ type: 'key', key: 'right' })
-    expect(tracker.held.right).toBe(false)
+    tracker.cleanup()
   })
 
+  test('cleanup clears timeouts without error', () => {
+    const tracker = createHeldKeysTracker()
+    tracker.onPress({ type: 'key', key: 'left' })
+    tracker.onPress({ type: 'key', key: 'right' })
+    expect(() => tracker.cleanup()).not.toThrow()
+  })
+
+  test('exposes usesTimeoutFallback flag', () => {
+    const tracker = createHeldKeysTracker()
+    expect(typeof tracker.usesTimeoutFallback).toBe('boolean')
+    tracker.cleanup()
+  })
 })

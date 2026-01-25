@@ -1,9 +1,12 @@
 // client/src/sprites.ts
 // Game sprites for 120x36 standard size - 2-line sprites for larger display
 
-// Standard game dimensions
-export const STANDARD_WIDTH = 120
-export const STANDARD_HEIGHT = 36
+// Import standard dimensions from shared (single source of truth)
+import { STANDARD_WIDTH, STANDARD_HEIGHT } from '../../shared/types'
+export { STANDARD_WIDTH, STANDARD_HEIGHT }
+
+// Import terminal capabilities for sprite selection
+import { getTerminalCapabilities } from './terminal'
 
 export const SPRITES = {
   // Classic alien sprites (2 lines each, 5 chars wide)
@@ -55,7 +58,6 @@ export const SPRITES = {
       healthy: ['◄════►', '╚════╝'],
       damaged: ['◄────►', '╚────╝'],
     },
-    dive_bomber: ['◆', '╳'],
     transform: {
       scorpion: ['∿∿', '╰╯'],
       stingray: ['◇◇', '╲╱'],
@@ -102,7 +104,6 @@ export const COLORS = {
   },
   enhanced: {
     commander: '#ff0000',     // Red - boss enemy
-    dive_bomber: '#ff55ff',   // Magenta - aggressive enemy
     transform: '#00ffff',     // Cyan - special enemy
   },
   // UI Colors for consistency across screens
@@ -141,6 +142,84 @@ export const ALIEN_PARADE = [
   '╔═══╗  /°°°\\  (╭ö╮)',
   '╚═╦═╝  ╚═══╝  (╰─╯)',
 ]
+
+// ─── ASCII Fallback Sprites ──────────────────────────────────────────────────
+// Used for terminals without Unicode support (e.g., Linux console)
+
+export const ASCII_SPRITES = {
+  alien: {
+    squid: [
+      '+===+',
+      '+-+-+',
+    ],
+    crab: [
+      '/ooo\\',
+      '+===+',
+    ],
+    octopus: [
+      '(o^o)',
+      '(---)',
+    ],
+  },
+  player: [
+    ' /A\\ ',
+    '|===|',
+  ],
+  ufo: [
+    '+-o-+',
+    '+===+',
+  ],
+  bullet: {
+    player: '|',
+    alien: 'v',
+  },
+  barrier: {
+    4: ['##', '##'],
+    3: ['%%', '%%'],
+    2: ['::','::'],
+    1: ['..', '..'],
+    0: ['  ', '  '],
+  },
+  enhanced: {
+    commander: {
+      healthy: ['<====>','+=====+'],
+      damaged: ['<---->','+-----+'],
+    },
+    transform: {
+      scorpion: ['~~', 'vv'],
+      stingray: ['<>', '\\/',],
+      mini_commander: ['<>','++'],
+    },
+    tractorBeam: ['||||', '||||'],
+  },
+} as const
+
+// ASCII logo for non-Unicode terminals
+export const ASCII_LOGO = `
+ _   _____  ___  ___ ___  ___
+| | / / _ |/ _ \\/ __| _ \\/ __|
+| |/ / __ / / / / _|| / \\__ \\
+|___/_/ |_/_/|_/|___|_|\\_|___/
+`.trim()
+
+// ─── Sprite Selection Based on Terminal Capabilities ─────────────────────────
+
+/**
+ * Get the appropriate sprites based on terminal capabilities.
+ * Returns Unicode sprites for modern terminals, ASCII for limited ones.
+ */
+export function getSprites() {
+  const caps = getTerminalCapabilities()
+  return caps.supportsUnicode ? SPRITES : ASCII_SPRITES
+}
+
+/**
+ * Get the appropriate logo based on terminal capabilities.
+ */
+export function getLogo() {
+  const caps = getTerminalCapabilities()
+  return caps.supportsUnicode ? LOGO_ASCII : ASCII_LOGO
+}
 
 // ─── Helper Functions ─────────────────────────────────────────────────────────
 
