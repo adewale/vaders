@@ -5,6 +5,18 @@ import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest'
 import { GameRoom, type Env } from './GameRoom'
 import type { ClientMessage, ServerMessage, GameState } from '../../shared/types'
 
+// Response type helpers
+interface RoomInfoResponse {
+  roomCode: string
+  playerCount: number
+  status: string
+}
+
+interface ErrorResponse {
+  code: string
+  message: string
+}
+
 // ============================================================================
 // Mock Cloudflare Durable Object Environment
 // ============================================================================
@@ -191,7 +203,7 @@ describe('HTTP Endpoints', () => {
 
       const request = new Request('https://internal/info')
       const response = await gameRoom.fetch(request)
-      const result = await response.json()
+      const result = await response.json() as RoomInfoResponse
 
       expect(response.status).toBe(200)
       expect(result.roomCode).toBe('INFO01')
@@ -225,7 +237,7 @@ describe('HTTP Endpoints', () => {
       const response = await gameRoom.fetch(request)
 
       expect(response.status).toBe(404)
-      const result = await response.json()
+      const result = await response.json() as ErrorResponse
       expect(result.code).toBe('invalid_room')
     })
 
@@ -251,7 +263,7 @@ describe('HTTP Endpoints', () => {
       const response = await gameRoom.fetch(request)
 
       expect(response.status).toBe(429)
-      const result = await response.json()
+      const result = await response.json() as ErrorResponse
       expect(result.code).toBe('room_full')
     })
 
@@ -273,7 +285,7 @@ describe('HTTP Endpoints', () => {
       const response = await gameRoom2.fetch(request)
 
       expect(response.status).toBe(409)
-      const result = await response.json()
+      const result = await response.json() as ErrorResponse
       expect(result.code).toBe('game_in_progress')
     })
 

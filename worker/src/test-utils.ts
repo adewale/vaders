@@ -293,19 +293,30 @@ export function createMockDurableObjectState(): {
  * Helper to check if an event was emitted
  */
 export function hasEvent(
-  events: Array<{ type: string; name?: string }>,
+  events: unknown[],
   name: string
 ): boolean {
-  return events.some(e => e.type === 'event' && e.name === name)
+  return events.some(e =>
+    typeof e === 'object' && e !== null &&
+    'type' in e && e.type === 'event' &&
+    'name' in e && e.name === name
+  )
 }
 
 /**
  * Helper to get event data
  */
-export function getEventData<T>(
-  events: Array<{ type: string; name?: string; data?: T }>,
+export function getEventData<T = unknown>(
+  events: unknown[],
   name: string
 ): T | undefined {
-  const event = events.find(e => e.type === 'event' && e.name === name)
-  return event?.data
+  const event = events.find(e =>
+    typeof e === 'object' && e !== null &&
+    'type' in e && e.type === 'event' &&
+    'name' in e && e.name === name
+  )
+  if (event && typeof event === 'object' && 'data' in event) {
+    return event.data as T
+  }
+  return undefined
 }

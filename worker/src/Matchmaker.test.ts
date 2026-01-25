@@ -62,6 +62,19 @@ function createRequest(method: string, path: string, body?: object): Request {
   return new Request(url, options)
 }
 
+// Type for find response
+interface FindResponse {
+  roomCode: string | null
+}
+
+// Type for info response
+interface InfoResponse {
+  roomCode: string
+  playerCount: number
+  status: string
+  updatedAt: number
+}
+
 // ============================================================================
 // Room Registration Tests (POST /register)
 // ============================================================================
@@ -121,7 +134,7 @@ describe('POST /register', () => {
 
     // Verify by finding the room
     const findResponse = await matchmaker.fetch(createRequest('GET', '/find'))
-    const findResult = await findResponse.json()
+    const findResult = await findResponse.json() as FindResponse as FindResponse
 
     expect(findResult.roomCode).toBe('OPEN01')
   })
@@ -133,7 +146,7 @@ describe('POST /register', () => {
 
     // First verify it's findable
     let findResponse = await matchmaker.fetch(createRequest('GET', '/find'))
-    let findResult = await findResponse.json()
+    let findResult = await findResponse.json() as FindResponse as FindResponse
     expect(findResult.roomCode).toBe('PLAY01')
 
     // Update to playing status
@@ -147,7 +160,7 @@ describe('POST /register', () => {
 
     // Should no longer be findable
     findResponse = await matchmaker.fetch(createRequest('GET', '/find'))
-    findResult = await findResponse.json()
+    findResult = await findResponse.json() as FindResponse
     expect(findResult.roomCode).toBeNull()
   })
 
@@ -167,7 +180,7 @@ describe('POST /register', () => {
 
     // Should no longer be findable
     const findResponse = await matchmaker.fetch(createRequest('GET', '/find'))
-    const findResult = await findResponse.json()
+    const findResult = await findResponse.json() as FindResponse as FindResponse
     expect(findResult.roomCode).toBeNull()
   })
 })
@@ -199,7 +212,7 @@ describe('POST /unregister', () => {
 
     // Verify it's findable first
     let findResponse = await matchmaker.fetch(createRequest('GET', '/find'))
-    let findResult = await findResponse.json()
+    let findResult = await findResponse.json() as FindResponse as FindResponse
     expect(findResult.roomCode).toBe('DEL002')
 
     // Unregister
@@ -211,7 +224,7 @@ describe('POST /unregister', () => {
 
     // Should no longer be findable
     findResponse = await matchmaker.fetch(createRequest('GET', '/find'))
-    findResult = await findResponse.json()
+    findResult = await findResponse.json() as FindResponse
     expect(findResult.roomCode).toBeNull()
   })
 
@@ -241,7 +254,7 @@ describe('GET /find', () => {
     })
 
     const response = await matchmaker.fetch(createRequest('GET', '/find'))
-    const result = await response.json()
+    const result = await response.json() as InfoResponse
 
     expect(response.status).toBe(200)
     expect(result.roomCode).toBeDefined()
@@ -252,7 +265,7 @@ describe('GET /find', () => {
     const { matchmaker } = await createMatchmaker()
 
     const response = await matchmaker.fetch(createRequest('GET', '/find'))
-    const result = await response.json()
+    const result = await response.json() as InfoResponse
 
     expect(response.status).toBe(200)
     expect(result.roomCode).toBeNull()
@@ -267,7 +280,7 @@ describe('GET /find', () => {
     })
 
     const response = await matchmaker.fetch(createRequest('GET', '/find'))
-    const result = await response.json()
+    const result = await response.json() as InfoResponse
 
     expect(result.roomCode).toBe('FRESH1')
 
@@ -285,7 +298,7 @@ describe('GET /find', () => {
     })
 
     const response = await matchmaker.fetch(createRequest('GET', '/find'))
-    const result = await response.json()
+    const result = await response.json() as InfoResponse
 
     expect(result.roomCode).toBeNull()
   })
@@ -296,7 +309,7 @@ describe('GET /find', () => {
     })
 
     const response = await matchmaker.fetch(createRequest('GET', '/find'))
-    const result = await response.json()
+    const result = await response.json() as InfoResponse
 
     expect(result.roomCode).toBeNull()
   })
@@ -307,7 +320,7 @@ describe('GET /find', () => {
     })
 
     const response = await matchmaker.fetch(createRequest('GET', '/find'))
-    const result = await response.json()
+    const result = await response.json() as InfoResponse
 
     expect(result.roomCode).toBeNull()
   })
@@ -325,7 +338,7 @@ describe('GET /info/:roomCode', () => {
     })
 
     const response = await matchmaker.fetch(createRequest('GET', '/info/INFO01'))
-    const result = await response.json()
+    const result = await response.json() as InfoResponse
 
     expect(response.status).toBe(200)
     expect(result.roomCode).toBe('INFO01')
@@ -389,7 +402,7 @@ describe('state restoration', () => {
 
     // Should be able to find the restored room
     const findResponse = await matchmaker.fetch(createRequest('GET', '/find'))
-    const findResult = await findResponse.json()
+    const findResult = await findResponse.json() as FindResponse as FindResponse
     expect(findResult.roomCode).toBe('RESTORED')
   })
 
@@ -402,7 +415,7 @@ describe('state restoration', () => {
 
     // Only OPEN should be findable
     const findResponse = await matchmaker.fetch(createRequest('GET', '/find'))
-    const findResult = await findResponse.json()
+    const findResult = await findResponse.json() as FindResponse as FindResponse
     expect(findResult.roomCode).toBe('OPEN')
   })
 })
