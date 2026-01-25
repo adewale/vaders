@@ -26,7 +26,6 @@ The launch screen provides all options:
 - **Create Room** - Get a room code to share with friends
 - **Join Room** - Enter a friend's room code
 - **Matchmaking** - Auto-join an open game
-- **Enhanced Mode** - Toggle Galaga/Galaxian style enemies
 
 ## Command-Line Options
 

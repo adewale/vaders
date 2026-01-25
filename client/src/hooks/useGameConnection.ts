@@ -21,8 +21,7 @@ interface ConnectionState {
 
 export function useGameConnection(
   roomUrl: string,
-  playerName: string,
-  enhanced: boolean
+  playerName: string
 ) {
   const [state, setState] = useState<ConnectionState>({
     serverState: null,
@@ -53,7 +52,6 @@ export function useGameConnection(
           ws.send(JSON.stringify({
             type: 'join',
             name: playerName,
-            enhancedMode: enhanced,
           } satisfies ClientMessage))
 
           // Start ping interval
@@ -123,7 +121,7 @@ export function useGameConnection(
         clearInterval(pingIntervalRef.current)
       }
     }
-  }, [roomUrl, playerName, enhanced])
+  }, [roomUrl, playerName])
 
   // Send a message
   const send = useCallback((msg: ClientMessage) => {

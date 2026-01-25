@@ -5,15 +5,9 @@ import type {
   GameState,
   GameStatus,
   Player,
-  Entity,
   AlienEntity,
   BulletEntity,
-  BarrierEntity,
   UFOEntity,
-  CommanderEntity,
-  DiveBomberEntity,
-  TransformEntity,
-  TransformType,
   ServerEvent,
   InputState,
 } from '../../../shared/types'
@@ -23,13 +17,9 @@ import {
   getBullets,
   getBarriers,
   getUFOs,
-  getCommanders,
-  getDiveBombers,
-  getTransforms,
   seededRandom,
 } from '../../../shared/types'
 import { getScaledConfig } from './scaling'
-import { getEnhancedWaveParams, isChallengingStage, enhancedMode } from './modes'
 
 // ─── Game Actions ─────────────────────────────────────────────────────────────
 
@@ -41,7 +31,7 @@ export type GameAction =
   | { type: 'PLAYER_SHOOT'; playerId: string }
   | { type: 'PLAYER_READY'; playerId: string }
   | { type: 'PLAYER_UNREADY'; playerId: string }
-  | { type: 'START_SOLO'; enhancedMode: boolean }
+  | { type: 'START_SOLO' }
   | { type: 'START_COUNTDOWN' }
   | { type: 'COUNTDOWN_TICK' }
   | { type: 'COUNTDOWN_CANCEL'; reason: string }
@@ -113,7 +103,7 @@ export function gameReducer(state: GameState, action: GameAction): ReducerResult
     case 'PLAYER_UNREADY':
       return unreadyReducer(state, action.playerId)
     case 'START_SOLO':
-      return startSoloReducer(state, action.enhancedMode)
+      return startSoloReducer(state)
     case 'START_COUNTDOWN':
       return startCountdownReducer(state)
     case 'COUNTDOWN_TICK':
@@ -230,7 +220,7 @@ function unreadyReducer(state: GameState, playerId: string): ReducerResult {
   }
 }
 
-function startSoloReducer(state: GameState, enhancedMode: boolean): ReducerResult {
+function startSoloReducer(state: GameState): ReducerResult {
   if (Object.keys(state.players).length !== 1) {
     return { state, events: [], persist: false }
   }
@@ -238,7 +228,6 @@ function startSoloReducer(state: GameState, enhancedMode: boolean): ReducerResul
   const next = structuredClone(state)
   next.status = 'playing'
   next.mode = 'solo'
-  next.enhancedMode = enhancedMode
   next.lives = 3
   next.tick = 0
 
@@ -501,38 +490,33 @@ function tickReducer(state: GameState): ReducerResult {
   }
 
   // 5. Alien shooting (seeded RNG)
-  // NOTE: In Challenging Stages (Enhanced Mode bonus rounds), aliens do NOT shoot
-  const isChallenging = next.enhancedMode && isChallengingStage(next.wave)
+  const liveAliens = aliens.filter(a => a.alive)
 
-  if (!isChallenging) {
-    const liveAliens = aliens.filter(a => a.alive)
-
-    // Find bottom-row aliens (can shoot)
-    const bottomAliens: AlienEntity[] = []
-    const colToBottomAlien = new Map<number, AlienEntity>()
-    for (const alien of liveAliens) {
-      const existing = colToBottomAlien.get(alien.col)
-      if (!existing || alien.row > existing.row) {
-        colToBottomAlien.set(alien.col, alien)
-      }
+  // Find bottom-row aliens (can shoot)
+  const bottomAliens: AlienEntity[] = []
+  const colToBottomAlien = new Map<number, AlienEntity>()
+  for (const alien of liveAliens) {
+    const existing = colToBottomAlien.get(alien.col)
+    if (!existing || alien.row > existing.row) {
+      colToBottomAlien.set(alien.col, alien)
     }
-    for (const alien of colToBottomAlien.values()) {
-      bottomAliens.push(alien)
-    }
+  }
+  for (const alien of colToBottomAlien.values()) {
+    bottomAliens.push(alien)
+  }
 
-    // Each bottom alien has a chance to shoot
-    for (const alien of bottomAliens) {
-      if (seededRandom(next) < scaled.alienShootProbability) {
-        const bullet: BulletEntity = {
-          kind: 'bullet',
-          id: `ab_${next.tick}_${alien.id}`,
-          x: alien.x + Math.floor(LAYOUT.ALIEN_WIDTH / 2),  // Center of alien sprite
-          y: alien.y + LAYOUT.ALIEN_HEIGHT,  // Below alien sprite
-          ownerId: null,  // Alien bullet
-          dy: 1,  // Moving down
-        }
-        next.entities.push(bullet)
+  // Each bottom alien has a chance to shoot
+  for (const alien of bottomAliens) {
+    if (seededRandom(next) < scaled.alienShootProbability) {
+      const bullet: BulletEntity = {
+        kind: 'bullet',
+        id: `ab_${next.tick}_${alien.id}`,
+        x: alien.x + Math.floor(LAYOUT.ALIEN_WIDTH / 2),  // Center of alien sprite
+        y: alien.y + LAYOUT.ALIEN_HEIGHT,  // Below alien sprite
+        ownerId: null,  // Alien bullet
+        dy: 1,  // Moving down
       }
+      next.entities.push(bullet)
     }
   }
 
@@ -571,50 +555,16 @@ function tickReducer(state: GameState): ReducerResult {
   // Remove dead UFOs
   next.entities = next.entities.filter(e => e.kind !== 'ufo' || e.alive)
 
-  // ─── Enhanced Mode Systems ─────────────────────────────────────────────────
-  if (next.enhancedMode) {
-    // Process Commanders
-    processCommanders(next, events)
-
-    // Process Dive Bombers
-    processDiveBombers(next, events)
-
-    // Process Transform enemies
-    processTransforms(next, events)
-
-    // Enhanced mode collisions (Commanders, Dive Bombers)
-    processEnhancedCollisions(next, events, getBullets(next.entities))
-  }
-
   // 7. Check end conditions
-  // For enhanced mode, also check commanders and dive bombers
   const allLiveAliens = getAliens(next.entities).filter(a => a.alive)
-  const liveCommanders = getCommanders(next.entities).filter(c => c.alive)
-  const liveDiveBombers = getDiveBombers(next.entities).filter(d => d.alive)
-  const liveTransforms = getTransforms(next.entities)
-
-  const allAliensKilled = allLiveAliens.length === 0 &&
-    liveCommanders.length === 0 &&
-    liveDiveBombers.length === 0 &&
-    liveTransforms.length === 0
+  const allAliensKilled = allLiveAliens.length === 0
 
   // Check if any enemy reached bottom
-  const aliensReachedBottom = allLiveAliens.some(a => a.y >= LAYOUT.GAME_OVER_Y) ||
-    liveCommanders.some(c => c.y >= LAYOUT.GAME_OVER_Y) ||
-    liveDiveBombers.some(d => d.y >= LAYOUT.GAME_OVER_Y)
+  const aliensReachedBottom = allLiveAliens.some(a => a.y >= LAYOUT.GAME_OVER_Y)
   // Game over when all players are dead AND have no lives remaining
   const allPlayersOutOfLives = Object.values(next.players).every(p => !p.alive && p.lives <= 0)
 
   if (allAliensKilled) {
-    // Challenging Stage bonus: 10,000 points for completing all 40 enemies
-    if (next.enhancedMode && isChallengingStage(next.wave)) {
-      next.score += 10000
-      events.push({
-        type: 'event',
-        name: 'score_awarded',
-        data: { playerId: null, points: 10000, source: 'wave_bonus' },
-      })
-    }
     events.push({ type: 'event', name: 'wave_complete', data: { wave: next.wave } })
     // Wave transition handled by shell
   } else if (aliensReachedBottom || allPlayersOutOfLives) {
@@ -626,377 +576,5 @@ function tickReducer(state: GameState): ReducerResult {
     state: next,
     events,
     persist: false,  // Only persist on key transitions
-  }
-}
-
-// ─── Enhanced Mode: Commander Processing ────────────────────────────────────────
-
-function processCommanders(state: GameState, events: ServerEvent[]) {
-  const commanders = getCommanders(state.entities)
-  const waveParams = getEnhancedWaveParams(state.wave)
-
-  for (const commander of commanders) {
-    if (!commander.alive) continue
-
-    // Commanders move with the alien formation when in formation
-    // Move at the same rate as regular aliens
-    const playerCount = Object.keys(state.players).length
-    const scaled = getScaledConfig(playerCount, state.config)
-
-    if (state.tick % scaled.alienMoveIntervalTicks === 0) {
-      // Check if formation would hit wall
-      const aliens = getAliens(state.entities).filter(a => a.alive)
-      const allEntities = [...aliens, ...commanders.filter(c => c.alive)]
-
-      let hitWall = false
-      for (const entity of allEntities) {
-        const nextX = entity.x + state.alienDirection * 2
-        if (nextX <= LAYOUT.ALIEN_MIN_X || nextX >= LAYOUT.ALIEN_MAX_X) {
-          hitWall = true
-          break
-        }
-      }
-
-      if (!hitWall) {
-        commander.x += state.alienDirection * 2
-      } else {
-        commander.y += 1
-      }
-    }
-
-    // Tractor beam behavior (wave 7+)
-    if (waveParams.canTractorBeam && !commander.capturedPlayerId) {
-      processTractorBeam(state, commander, events)
-    }
-
-    // Dive behavior - commanders can dive occasionally
-    if (seededRandom(state) < 0.0005 && !commander.tractorBeamActive) {
-      commanderDive(state, commander, events)
-    }
-  }
-}
-
-function processTractorBeam(state: GameState, commander: CommanderEntity, events: ServerEvent[]) {
-  // Cooldown check
-  if (commander.tractorBeamCooldown > 0) {
-    commander.tractorBeamCooldown--
-    return
-  }
-
-  // Random chance to activate tractor beam
-  if (seededRandom(state) < 0.001) {
-    commander.tractorBeamActive = true
-    commander.tractorBeamCooldown = 300  // 10 seconds at 30Hz
-
-    // Check for players in capture zone (3 chars wide below commander)
-    const beamX = commander.x + 2  // Center of commander
-    const beamY = commander.y + 2
-
-    for (const player of Object.values(state.players)) {
-      if (!player.alive) continue
-
-      // Player is captured if within beam range
-      if (Math.abs(player.x - beamX) < 3 && LAYOUT.PLAYER_Y > beamY) {
-        commander.capturedPlayerId = player.id
-        player.alive = false  // Captured player is temporarily disabled
-        player.respawnAtTick = state.tick + 150  // 5 seconds capture time
-        events.push({ type: 'event', name: 'player_died', data: { playerId: player.id } })
-        break
-      }
-    }
-  }
-
-  // Deactivate beam after brief period if no capture
-  if (commander.tractorBeamActive && !commander.capturedPlayerId) {
-    if (seededRandom(state) < 0.05) {
-      commander.tractorBeamActive = false
-    }
-  }
-}
-
-function commanderDive(state: GameState, commander: CommanderEntity, events: ServerEvent[]) {
-  // Commanders dive straight down toward players
-  // This is a simplified dive - the full Galaga dive is more complex
-  commander.y += 2
-}
-
-// ─── Enhanced Mode: Dive Bomber Processing ──────────────────────────────────────
-
-function processDiveBombers(state: GameState, events: ServerEvent[]) {
-  const diveBombers = getDiveBombers(state.entities)
-  const playerCount = Object.keys(state.players).length
-  const scaled = getScaledConfig(playerCount, state.config)
-
-  for (const bomber of diveBombers) {
-    if (!bomber.alive) continue
-
-    switch (bomber.diveState) {
-      case 'formation':
-        // Move with alien formation
-        if (state.tick % scaled.alienMoveIntervalTicks === 0) {
-          bomber.x += state.alienDirection * 2
-
-          // Check wall collision
-          if (bomber.x <= LAYOUT.ALIEN_MIN_X || bomber.x >= LAYOUT.ALIEN_MAX_X) {
-            bomber.y += 1
-          }
-        }
-
-        // Random chance to start diving
-        if (seededRandom(state) < 0.002) {
-          bomber.diveState = 'diving'
-          bomber.divePathProgress = 0
-          bomber.diveDirection = seededRandom(state) < 0.5 ? 1 : -1
-        }
-        break
-
-      case 'diving':
-        // Dive pattern: move down and sideways in a wide arc
-        bomber.divePathProgress++
-
-        // Galaxian-style dive: sweep across, then reverse at midpoint
-        const divePhase = bomber.divePathProgress / 100  // 0 to 1+ over dive
-
-        if (divePhase < 0.5) {
-          // First half: sweep to one side
-          bomber.x += bomber.diveDirection * 2
-          bomber.y += 1
-        } else if (divePhase < 0.6) {
-          // Midpoint: reverse direction (signature Galaxian move)
-          bomber.diveDirection = (bomber.diveDirection * -1) as 1 | -1
-          bomber.y += 1
-        } else {
-          // Second half: sweep to other side while diving
-          bomber.x += bomber.diveDirection * 2
-          bomber.y += 1
-        }
-
-        // Fire shots during dive (4 total: 2 before turn, 2 after)
-        if (bomber.divePathProgress === 20 || bomber.divePathProgress === 40 ||
-            bomber.divePathProgress === 70 || bomber.divePathProgress === 90) {
-          const bullet: BulletEntity = {
-            kind: 'bullet',
-            id: `db_${state.tick}_${bomber.id}`,
-            x: bomber.x + 1,
-            y: bomber.y + 2,
-            ownerId: null,
-            dy: 1,
-          }
-          state.entities.push(bullet)
-        }
-
-        // If reached bottom, start returning
-        if (bomber.y >= state.config.height - 2) {
-          bomber.diveState = 'returning'
-        }
-        break
-
-      case 'returning':
-        // Return to formation from bottom (fly back up off-screen then reappear at top)
-        bomber.y -= 2
-        bomber.x += (bomber.col * LAYOUT.ALIEN_COL_SPACING - bomber.x) * 0.1  // Drift toward formation position
-
-        if (bomber.y <= LAYOUT.ALIEN_START_Y + bomber.row * LAYOUT.ALIEN_ROW_SPACING) {
-          bomber.diveState = 'formation'
-          bomber.divePathProgress = 0
-        }
-        break
-    }
-  }
-}
-
-// ─── Enhanced Mode: Transform Processing ────────────────────────────────────────
-
-function processTransforms(state: GameState, events: ServerEvent[]) {
-  const transforms = getTransforms(state.entities)
-
-  for (const transform of transforms) {
-    // Transform enemies dive rapidly and exit
-    transform.x += transform.velocity.x
-    transform.y += transform.velocity.y
-    transform.lifetime--
-
-    // Remove if off-screen or lifetime expired
-    if (transform.y > state.config.height || transform.y < 0 ||
-        transform.x < 0 || transform.x > state.config.width ||
-        transform.lifetime <= 0) {
-      // Mark for removal by setting to invalid position
-      transform.y = -1000
-    }
-  }
-
-  // Remove expired transforms
-  state.entities = state.entities.filter(e =>
-    e.kind !== 'transform' || e.y > -100
-  )
-}
-
-// ─── Enhanced Mode: Collision Processing ────────────────────────────────────────
-
-function processEnhancedCollisions(state: GameState, events: ServerEvent[], bullets: BulletEntity[]) {
-  const waveParams = getEnhancedWaveParams(state.wave)
-
-  // Player bullets vs Commanders
-  const commanders = getCommanders(state.entities)
-  for (const bullet of bullets) {
-    if (bullet.dy !== -1) continue  // Only player bullets
-
-    for (const commander of commanders) {
-      if (!commander.alive) continue
-
-      // Commander is wider than regular aliens (6 chars)
-      if (
-        Math.abs(bullet.x - commander.x - 3) < 4 &&
-        Math.abs(bullet.y - commander.y) < LAYOUT.COLLISION_V
-      ) {
-        bullet.y = -100  // Mark for removal
-
-        // Commander takes 2 hits
-        commander.health = (commander.health - 1) as 1 | 2
-        if (commander.health <= 0) {
-          commander.alive = false
-
-          // Calculate points (150 formation, 400 solo dive, 800 with escort, 1600 with 2)
-          const isDiving = commander.y > LAYOUT.ALIEN_START_Y + 6
-          const escortCount = commander.escorts.length
-          let points = 150
-          if (isDiving) {
-            points = escortCount >= 2 ? 1600 : escortCount >= 1 ? 800 : 400
-          }
-
-          // Free captured player bonus
-          if (commander.capturedPlayerId) {
-            const captured = state.players[commander.capturedPlayerId]
-            if (captured) {
-              captured.alive = true
-              captured.respawnAtTick = null
-              points += 500  // Bonus for freeing player
-            }
-            commander.capturedPlayerId = null
-          }
-
-          state.score += points
-          if (bullet.ownerId && state.players[bullet.ownerId]) {
-            state.players[bullet.ownerId].kills++
-          }
-
-          events.push({
-            type: 'event',
-            name: 'alien_killed',
-            data: { alienId: commander.id, playerId: bullet.ownerId },
-          })
-          events.push({
-            type: 'event',
-            name: 'score_awarded',
-            data: { playerId: bullet.ownerId, points, source: 'commander' },
-          })
-        }
-        break
-      }
-    }
-  }
-
-  // Player bullets vs Dive Bombers
-  const diveBombers = getDiveBombers(state.entities)
-  for (const bullet of bullets) {
-    if (bullet.dy !== -1) continue
-
-    for (const bomber of diveBombers) {
-      if (!bomber.alive) continue
-
-      if (
-        Math.abs(bullet.x - bomber.x - 1) < LAYOUT.COLLISION_H &&
-        Math.abs(bullet.y - bomber.y) < LAYOUT.COLLISION_V
-      ) {
-        bomber.alive = false
-        bullet.y = -100
-
-        // Points: 80 formation, 160 diving
-        const isDiving = bomber.diveState === 'diving'
-        const points = isDiving ? 160 : 80
-
-        state.score += points
-        if (bullet.ownerId && state.players[bullet.ownerId]) {
-          state.players[bullet.ownerId].kills++
-        }
-
-        events.push({
-          type: 'event',
-          name: 'alien_killed',
-          data: { alienId: bomber.id, playerId: bullet.ownerId },
-        })
-        events.push({
-          type: 'event',
-          name: 'score_awarded',
-          data: { playerId: bullet.ownerId, points, source: 'alien' },
-        })
-
-        // Transform on death (wave 4+, 20% chance)
-        if (waveParams.canTransform && seededRandom(state) < 0.2) {
-          spawnTransforms(state, bomber, events)
-        }
-        break
-      }
-    }
-  }
-
-  // Player bullets vs Transforms
-  const transforms = getTransforms(state.entities)
-  for (const bullet of bullets) {
-    if (bullet.dy !== -1) continue
-
-    for (const transform of transforms) {
-      if (
-        Math.abs(bullet.x - transform.x) < 2 &&
-        Math.abs(bullet.y - transform.y) < 2
-      ) {
-        transform.y = -1000  // Mark for removal
-        bullet.y = -100
-
-        // Transform points based on wave
-        let points = 333  // 1000 / 3 for scorpion
-        if (state.wave >= 7) points = 666  // 2000 / 3 for stingray
-        if (state.wave >= 10) points = 1000  // 3000 / 3 for mini commander
-
-        state.score += points
-        if (bullet.ownerId && state.players[bullet.ownerId]) {
-          state.players[bullet.ownerId].kills++
-        }
-
-        events.push({
-          type: 'event',
-          name: 'score_awarded',
-          data: { playerId: bullet.ownerId, points, source: 'alien' },
-        })
-        break
-      }
-    }
-  }
-}
-
-function spawnTransforms(state: GameState, source: DiveBomberEntity, events: ServerEvent[]) {
-  // Determine transform type based on wave
-  let transformType: TransformType = 'scorpion'
-  if (state.wave >= 10) transformType = 'mini_commander'
-  else if (state.wave >= 7) transformType = 'stingray'
-
-  // Spawn 3 transforms in different directions
-  const directions = [
-    { x: -2, y: 1 },
-    { x: 0, y: 2 },
-    { x: 2, y: 1 },
-  ]
-
-  for (let i = 0; i < 3; i++) {
-    const transform: TransformEntity = {
-      kind: 'transform',
-      id: `tr_${state.tick}_${i}`,
-      x: source.x,
-      y: source.y,
-      type: transformType,
-      velocity: directions[i],
-      lifetime: 150,  // 5 seconds at 30Hz
-    }
-    state.entities.push(transform)
   }
 }
