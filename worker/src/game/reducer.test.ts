@@ -1327,7 +1327,7 @@ describe('barrier segment damage progression', () => {
     expect(updatedBarrier.segments[0].health).toBe(0)
   })
 
-  it('does not decrement below 0', () => {
+  it('does not decrement below 0 and bullet passes through destroyed segment', () => {
     const { state, players } = createTestPlayingState(1)
     const barrier = createTestBarrier('barrier1', 50)
     barrier.segments[0].health = 0
@@ -1336,10 +1336,16 @@ describe('barrier segment damage progression', () => {
 
     const result = gameReducer(state, { type: 'TICK' })
 
-    // Bullet should pass through destroyed segment
+    // Bullet should pass through destroyed segment (health=0)
     const bullets = getBullets(result.state.entities)
-    // Bullet with health=0 segment should pass through (no collision with destroyed segment)
-    // The bullet will continue moving
+    // The bullet continues moving upward (was not absorbed by destroyed segment)
+    const movedBullet = bullets.find(b => b.id === 'b1')
+    expect(movedBullet).toBeDefined()
+    expect(movedBullet!.y).toBe(LAYOUT.BARRIER_Y) // Moved up by 1
+
+    // Segment health stays at 0
+    const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as any
+    expect(updatedBarrier.segments[0].health).toBe(0)
   })
 
   it('alien bullets also damage barriers', () => {
@@ -1563,5 +1569,373 @@ describe('state immutability', () => {
     const result = gameReducer(state, { type: 'PLAYER_READY', playerId: 'p1' })
 
     expect(result.state).not.toBe(state)
+  })
+})
+
+// ============================================================================
+// 4-Player Game Tests
+// ============================================================================
+
+describe('4-player game scenarios', () => {
+  it('allows all 4 players to shoot simultaneously', () => {
+    const { state, players } = createTestPlayingState(4)
+    const [p1, p2, p3, p4] = players
+
+    // Position players across the screen
+    p1.x = 20
+    p2.x = 40
+    p3.x = 60
+    p4.x = 80
+    p1.lastShotTick = 0
+    p2.lastShotTick = 0
+    p3.lastShotTick = 0
+    p4.lastShotTick = 0
+    state.tick = 10
+    state.players[p1.id] = p1
+    state.players[p2.id] = p2
+    state.players[p3.id] = p3
+    state.players[p4.id] = p4
+
+    // All 4 players shoot
+    let result = gameReducer(state, { type: 'PLAYER_SHOOT', playerId: p1.id })
+    result = gameReducer(result.state, { type: 'PLAYER_SHOOT', playerId: p2.id })
+    result = gameReducer(result.state, { type: 'PLAYER_SHOOT', playerId: p3.id })
+    result = gameReducer(result.state, { type: 'PLAYER_SHOOT', playerId: p4.id })
+
+    const bullets = getBullets(result.state.entities)
+    expect(bullets.length).toBe(4)
+
+    // Each bullet should be owned by a different player
+    const ownerIds = bullets.map(b => b.ownerId).sort()
+    const playerIds = [p1.id, p2.id, p3.id, p4.id].sort()
+    expect(ownerIds).toEqual(playerIds)
+  })
+
+  it('all 4 players can kill different aliens on the same tick', () => {
+    const { state, players } = createTestPlayingState(4)
+    const [p1, p2, p3, p4] = players
+
+    // Create 4 aliens at different positions
+    const aliens = [
+      createTestAlien('alien1', 20, 10, { points: 10 }),
+      createTestAlien('alien2', 40, 10, { points: 20 }),
+      createTestAlien('alien3', 60, 10, { points: 30 }),
+      createTestAlien('alien4', 80, 10, { points: 10 }),
+    ]
+
+    // Create bullets from each player aimed at different aliens
+    const bullets = [
+      createTestBullet('b1', 21, 10, p1.id, -1),
+      createTestBullet('b2', 41, 10, p2.id, -1),
+      createTestBullet('b3', 61, 10, p3.id, -1),
+      createTestBullet('b4', 81, 10, p4.id, -1),
+    ]
+
+    state.entities = [...aliens, ...bullets]
+    state.score = 0
+    p1.kills = 0
+    p2.kills = 0
+    p3.kills = 0
+    p4.kills = 0
+    state.players[p1.id] = p1
+    state.players[p2.id] = p2
+    state.players[p3.id] = p3
+    state.players[p4.id] = p4
+
+    const result = gameReducer(state, { type: 'TICK' })
+
+    // All 4 aliens should be killed
+    const remainingAliens = getAliens(result.state.entities)
+    const liveAliens = remainingAliens.filter(a => a.alive)
+    expect(liveAliens.length).toBe(0)
+
+    // Total score should be 10+20+30+10 = 70
+    expect(result.state.score).toBe(70)
+
+    // Each player should have 1 kill
+    expect(result.state.players[p1.id].kills).toBe(1)
+    expect(result.state.players[p2.id].kills).toBe(1)
+    expect(result.state.players[p3.id].kills).toBe(1)
+    expect(result.state.players[p4.id].kills).toBe(1)
+
+    // Should emit 4 alien_killed events and 4 score_awarded events
+    const alienKilledEvents = result.events.filter(
+      e => e.type === 'event' && e.name === 'alien_killed'
+    )
+    const scoreEvents = result.events.filter(
+      e => e.type === 'event' && e.name === 'score_awarded'
+    )
+    expect(alienKilledEvents.length).toBe(4)
+    expect(scoreEvents.length).toBe(4)
+  })
+
+  it('uses 5 shared lives in 4-player mode', () => {
+    const { state, players } = createTestPlayingState(4)
+
+    // Verify shared lives are set to 5 for coop
+    expect(state.lives).toBe(5)
+  })
+})
+
+// ============================================================================
+// Game Over Conditions - Additional Tests
+// ============================================================================
+
+describe('game over by all players dying with no lives', () => {
+  it('triggers game over when last player dies with 0 lives (solo)', () => {
+    const { state, players } = createTestPlayingState(1, {
+      aliens: [createTestAlien('alien1', 50, 10)],
+    })
+    const player = players[0]
+    player.alive = false
+    player.lives = 0
+    player.respawnAtTick = null
+    state.players[player.id] = player
+
+    const result = gameReducer(state, { type: 'TICK' })
+
+    expect(result.state.status).toBe('game_over')
+    expect(hasEvent(result.events, 'game_over')).toBe(true)
+    const data = getEventData<{ result: string }>(result.events, 'game_over')
+    expect(data?.result).toBe('defeat')
+  })
+
+  it('triggers game over when all players die with 0 lives (coop)', () => {
+    const { state, players } = createTestPlayingState(2, {
+      aliens: [createTestAlien('alien1', 50, 10)],
+    })
+    const [p1, p2] = players
+
+    // Both players dead with no lives
+    p1.alive = false
+    p1.lives = 0
+    p1.respawnAtTick = null
+    p2.alive = false
+    p2.lives = 0
+    p2.respawnAtTick = null
+    state.players[p1.id] = p1
+    state.players[p2.id] = p2
+
+    const result = gameReducer(state, { type: 'TICK' })
+
+    expect(result.state.status).toBe('game_over')
+    expect(hasEvent(result.events, 'game_over')).toBe(true)
+  })
+
+  it('does NOT trigger game over if one player has lives remaining (coop)', () => {
+    const { state, players } = createTestPlayingState(2, {
+      aliens: [createTestAlien('alien1', 50, 10)],
+    })
+    const [p1, p2] = players
+
+    // Player 1 dead with no lives, Player 2 dead but has lives
+    p1.alive = false
+    p1.lives = 0
+    p1.respawnAtTick = null
+    p2.alive = false
+    p2.lives = 2
+    p2.respawnAtTick = state.tick + 100
+    state.players[p1.id] = p1
+    state.players[p2.id] = p2
+
+    const result = gameReducer(state, { type: 'TICK' })
+
+    expect(result.state.status).toBe('playing')
+  })
+
+  it('does NOT trigger game over if one player is still alive (coop)', () => {
+    const { state, players } = createTestPlayingState(2, {
+      aliens: [createTestAlien('alien1', 50, 10)],
+    })
+    const [p1, p2] = players
+
+    // Player 1 dead with no lives, Player 2 still alive
+    p1.alive = false
+    p1.lives = 0
+    p1.respawnAtTick = null
+    p2.alive = true
+    p2.lives = 1
+    state.players[p1.id] = p1
+    state.players[p2.id] = p2
+
+    const result = gameReducer(state, { type: 'TICK' })
+
+    expect(result.state.status).toBe('playing')
+  })
+})
+
+// ============================================================================
+// Multiple Simultaneous Events Tests
+// ============================================================================
+
+describe('multiple simultaneous events in one tick', () => {
+  it('handles multiple aliens killed by the same bullet (edge case)', () => {
+    // This tests that a bullet can only kill one alien per tick
+    const { state, players } = createTestPlayingState(1)
+    const player = players[0]
+
+    // Create two aliens at the exact same position
+    const alien1 = createTestAlien('alien1', 50, 10, { points: 10 })
+    const alien2 = createTestAlien('alien2', 50, 10, { points: 20 })
+    const bullet = createTestBullet('b1', 51, 10, player.id, -1)
+
+    state.entities = [alien1, alien2, bullet]
+    state.score = 0
+    player.kills = 0
+    state.players[player.id] = player
+
+    const result = gameReducer(state, { type: 'TICK' })
+
+    // Only one alien should be killed (first one checked)
+    const deadAliens = getAliens(result.state.entities).filter(a => !a.alive)
+    expect(deadAliens.length).toBe(1)
+    expect(result.state.players[player.id].kills).toBe(1)
+  })
+
+  it('handles player death and alien kill on the same tick', () => {
+    const { state, players } = createTestPlayingState(1)
+    const player = players[0]
+    player.x = 50
+    player.lives = 3
+    player.kills = 0
+    state.players[player.id] = player
+
+    // Player bullet kills alien while alien bullet kills player
+    const alien = createTestAlien('alien1', 30, 10, { points: 10 })
+    const playerBullet = createTestBullet('pb1', 31, 10, player.id, -1)
+    const alienBullet = createTestBullet('ab1', 51, LAYOUT.PLAYER_Y, null, 1)
+
+    state.entities = [alien, playerBullet, alienBullet]
+    state.score = 0
+
+    const result = gameReducer(state, { type: 'TICK' })
+
+    // Both events should occur
+    expect(hasEvent(result.events, 'alien_killed')).toBe(true)
+    expect(hasEvent(result.events, 'player_died')).toBe(true)
+
+    // Score should be awarded
+    expect(result.state.score).toBe(10)
+
+    // Player should be dead but have kills credited
+    expect(result.state.players[player.id].alive).toBe(false)
+    expect(result.state.players[player.id].kills).toBe(1)
+    expect(result.state.players[player.id].lives).toBe(2)
+  })
+
+  it('handles wave completion with UFO destruction on the same tick', () => {
+    const { state, players } = createTestPlayingState(1)
+    const player = players[0]
+
+    // Last alien (dead) and a UFO that gets killed
+    const lastAlien = createTestAlien('alien1', 30, 10, { alive: false })
+    const ufo = createTestUFO('ufo1', 50, { points: 200 })
+    const bullet = createTestBullet('b1', 51, 1, player.id, -1)
+
+    state.entities = [lastAlien, ufo, bullet]
+    state.score = 0
+    player.kills = 0
+    state.players[player.id] = player
+
+    const result = gameReducer(state, { type: 'TICK' })
+
+    // Both wave_complete and score_awarded should be emitted
+    expect(hasEvent(result.events, 'wave_complete')).toBe(true)
+    expect(hasEvent(result.events, 'score_awarded')).toBe(true)
+    expect(result.state.score).toBe(200)
+  })
+})
+
+// ============================================================================
+// Shared Lives Tests (Coop Mode)
+// ============================================================================
+
+describe('shared lives in coop mode', () => {
+  it('both players share the same lives pool', () => {
+    const { state, players } = createTestPlayingState(2)
+    expect(state.lives).toBe(5) // Coop uses 5 shared lives
+  })
+
+  it('player death decrements their individual lives, not shared pool', () => {
+    const { state, players } = createTestPlayingState(2, {
+      aliens: [createTestAlien('alien1', 20, 10)],
+    })
+    const [p1, p2] = players
+    p1.x = 50
+    p1.lives = 3
+    p2.lives = 3
+    state.players[p1.id] = p1
+    state.players[p2.id] = p2
+
+    // Alien bullet hits player 1
+    const bullet = createTestBullet('ab1', 51, LAYOUT.PLAYER_Y, null, 1)
+    state.entities.push(bullet)
+
+    const result = gameReducer(state, { type: 'TICK' })
+
+    // Player 1 loses a life
+    expect(result.state.players[p1.id].lives).toBe(2)
+    // Player 2 keeps their lives
+    expect(result.state.players[p2.id].lives).toBe(3)
+  })
+})
+
+// ============================================================================
+// Edge Cases: Shooting at Boundaries
+// ============================================================================
+
+describe('shooting at screen boundaries', () => {
+  it('bullet created at left boundary moves correctly', () => {
+    const { state, players } = createTestPlayingState(1)
+    const player = players[0]
+    player.x = LAYOUT.PLAYER_MIN_X
+    player.lastShotTick = 0
+    state.tick = 10
+    state.players[player.id] = player
+
+    const result = gameReducer(state, { type: 'PLAYER_SHOOT', playerId: player.id })
+
+    const bullets = getBullets(result.state.entities)
+    expect(bullets.length).toBe(1)
+    expect(bullets[0].x).toBe(LAYOUT.PLAYER_MIN_X + Math.floor(LAYOUT.PLAYER_WIDTH / 2))
+  })
+
+  it('bullet created at right boundary moves correctly', () => {
+    const { state, players } = createTestPlayingState(1)
+    const player = players[0]
+    player.x = LAYOUT.PLAYER_MAX_X
+    player.lastShotTick = 0
+    state.tick = 10
+    state.players[player.id] = player
+
+    const result = gameReducer(state, { type: 'PLAYER_SHOOT', playerId: player.id })
+
+    const bullets = getBullets(result.state.entities)
+    expect(bullets.length).toBe(1)
+    expect(bullets[0].x).toBe(LAYOUT.PLAYER_MAX_X + Math.floor(LAYOUT.PLAYER_WIDTH / 2))
+  })
+
+  it('player cannot move past left boundary while shooting', () => {
+    const { state, players } = createTestPlayingState(1)
+    const player = players[0]
+    player.x = LAYOUT.PLAYER_MIN_X
+    player.inputState = { left: true, right: false }
+    state.players[player.id] = player
+
+    const result = gameReducer(state, { type: 'TICK' })
+
+    expect(result.state.players[player.id].x).toBe(LAYOUT.PLAYER_MIN_X)
+  })
+
+  it('player cannot move past right boundary while shooting', () => {
+    const { state, players } = createTestPlayingState(1)
+    const player = players[0]
+    player.x = LAYOUT.PLAYER_MAX_X
+    player.inputState = { left: false, right: true }
+    state.players[player.id] = player
+
+    const result = gameReducer(state, { type: 'TICK' })
+
+    expect(result.state.players[player.id].x).toBe(LAYOUT.PLAYER_MAX_X)
   })
 })

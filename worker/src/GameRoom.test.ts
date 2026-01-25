@@ -1012,3 +1012,214 @@ describe('Wave Transition', () => {
     expect(finalBarrierCount).toBe(initialBarrierCount)
   })
 })
+
+// ============================================================================
+// WebSocket Error Handler Tests
+// ============================================================================
+
+describe('WebSocket Error Handling', () => {
+  it('treats WebSocket error same as close', async () => {
+    const { gameRoom, ctx } = await createInitializedGameRoom()
+    const ws = createMockWebSocket()
+    ctx._webSockets.push(ws)
+
+    await joinPlayer(gameRoom, ws, 'Player')
+
+    // Get player ID
+    const syncCall = ws.send.mock.calls.find((call: unknown[]) => {
+      const msg = JSON.parse(call[0] as string)
+      return msg.type === 'sync' && msg.playerId
+    })
+    const playerId = JSON.parse(syncCall![0]).playerId
+
+    // Simulate WebSocket error
+    await gameRoom.webSocketError(ws as any, new Error('Connection reset'))
+
+    // Player should be removed (player_left event broadcast)
+    const leftCall = ws.send.mock.calls.find((call: unknown[]) => {
+      const msg = JSON.parse(call[0] as string)
+      return msg.type === 'event' && msg.name === 'player_left' && msg.data.playerId === playerId
+    })
+    expect(leftCall).toBeDefined()
+  })
+})
+
+// ============================================================================
+// Player Disconnect During Active Gameplay Tests
+// ============================================================================
+
+describe('Player Disconnect During Active Gameplay', () => {
+  it('removes player from active game when they disconnect', async () => {
+    const { gameRoom, ctx } = await createInitializedGameRoom()
+    const ws1 = createMockWebSocket()
+    ctx._webSockets.push(ws1)
+
+    await joinPlayer(gameRoom, ws1, 'Player1')
+    await gameRoom.webSocketMessage(ws1 as any, JSON.stringify({ type: 'start_solo' }))
+
+    // Verify game is playing
+    let state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+    expect(state.status).toBe('playing')
+    expect(Object.keys(state.players).length).toBe(1)
+
+    // Player disconnects during gameplay
+    await gameRoom.webSocketClose(ws1 as any, 1000, 'Closed', true)
+
+    // Game should end (no players left)
+    state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+    expect(Object.keys(state.players).length).toBe(0)
+    expect(state.status).toBe('game_over')
+  })
+
+  it('game continues when one player disconnects but others remain (coop)', async () => {
+    const { gameRoom, ctx } = await createInitializedGameRoom()
+    const ws1 = createMockWebSocket()
+    const ws2 = createMockWebSocket()
+    ctx._webSockets.push(ws1, ws2)
+
+    await joinPlayer(gameRoom, ws1, 'Player1')
+    await joinPlayer(gameRoom, ws2, 'Player2')
+
+    // Both players ready up and start game
+    await gameRoom.webSocketMessage(ws1 as any, JSON.stringify({ type: 'ready' }))
+    await gameRoom.webSocketMessage(ws2 as any, JSON.stringify({ type: 'ready' }))
+
+    // Countdown through to game start
+    await gameRoom.alarm() // 2
+    await gameRoom.alarm() // 1
+    await gameRoom.alarm() // game start
+
+    // Verify game is playing
+    let state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+    expect(state.status).toBe('playing')
+    expect(Object.keys(state.players).length).toBe(2)
+
+    // Player 1 disconnects during gameplay
+    await gameRoom.webSocketClose(ws1 as any, 1000, 'Closed', true)
+
+    // Game should continue with Player 2
+    state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+    expect(Object.keys(state.players).length).toBe(1)
+    expect(state.status).toBe('playing')
+
+    // player_left event should be broadcast
+    const leftCall = ws2.send.mock.calls.find((call: unknown[]) => {
+      const msg = JSON.parse(call[0] as string)
+      return msg.type === 'event' && msg.name === 'player_left'
+    })
+    expect(leftCall).toBeDefined()
+  })
+
+  it('broadcasts player_left event to remaining players', async () => {
+    const { gameRoom, ctx } = await createInitializedGameRoom()
+    const ws1 = createMockWebSocket()
+    const ws2 = createMockWebSocket()
+    ctx._webSockets.push(ws1, ws2)
+
+    await joinPlayer(gameRoom, ws1, 'Player1')
+    await joinPlayer(gameRoom, ws2, 'Player2')
+
+    // Get player 1's ID
+    const syncCall = ws1.send.mock.calls.find((call: unknown[]) => {
+      const msg = JSON.parse(call[0] as string)
+      return msg.type === 'sync' && msg.playerId
+    })
+    const player1Id = JSON.parse(syncCall![0]).playerId
+
+    ws2.send.mockClear()
+
+    // Player 1 disconnects
+    await gameRoom.webSocketClose(ws1 as any, 1000, 'Closed', true)
+
+    // Player 2 should receive player_left event
+    const leftCall = ws2.send.mock.calls.find((call: unknown[]) => {
+      const msg = JSON.parse(call[0] as string)
+      return msg.type === 'event' && msg.name === 'player_left' && msg.data.playerId === player1Id
+    })
+    expect(leftCall).toBeDefined()
+  })
+})
+
+// ============================================================================
+// 4-Player Room Full Scenario Tests
+// ============================================================================
+
+describe('4-Player Room Full Scenario', () => {
+  it('room correctly reports full after 4 players join', async () => {
+    const { gameRoom, ctx } = await createInitializedGameRoom()
+
+    // Join 4 players
+    for (let i = 0; i < 4; i++) {
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+      await joinPlayer(gameRoom, ws, `Player${i + 1}`)
+    }
+
+    // Verify room is full
+    const state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+    expect(Object.keys(state.players).length).toBe(4)
+  })
+
+  it('all 4 players can ready up and start countdown', async () => {
+    const { gameRoom, ctx } = await createInitializedGameRoom()
+    const webSockets: MockWebSocket[] = []
+
+    // Join 4 players
+    for (let i = 0; i < 4; i++) {
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+      webSockets.push(ws)
+      await joinPlayer(gameRoom, ws, `Player${i + 1}`)
+    }
+
+    // All 4 players ready up
+    for (const ws of webSockets) {
+      await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'ready' }))
+    }
+
+    // Countdown should start
+    const countdownCall = webSockets[0].send.mock.calls.find((call: unknown[]) => {
+      const msg = JSON.parse(call[0] as string)
+      return msg.type === 'event' && msg.name === 'countdown_tick'
+    })
+    expect(countdownCall).toBeDefined()
+
+    const state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+    expect(state.status).toBe('countdown')
+    expect(state.readyPlayerIds.length).toBe(4)
+  })
+
+  it('4-player game uses correct scaling configuration', async () => {
+    const { gameRoom, ctx } = await createInitializedGameRoom()
+    const webSockets: MockWebSocket[] = []
+
+    // Join 4 players
+    for (let i = 0; i < 4; i++) {
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+      webSockets.push(ws)
+      await joinPlayer(gameRoom, ws, `Player${i + 1}`)
+    }
+
+    // All ready and start countdown
+    for (const ws of webSockets) {
+      await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'ready' }))
+    }
+
+    // Complete countdown: 3 -> 2 -> 1 -> start
+    await gameRoom.alarm() // 2
+    await gameRoom.alarm() // 1
+    await gameRoom.alarm() // game start
+
+    // Verify game is playing with 4-player scaling
+    const state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+    expect(state.status).toBe('playing')
+
+    // 4-player config should have 15 columns and 6 rows of aliens (15*6 = 90 aliens)
+    const aliens = state.entities.filter(e => e.kind === 'alien')
+    expect(aliens.length).toBe(90) // 15 cols * 6 rows
+
+    // Should have 5 shared lives (coop mode)
+    expect(state.lives).toBe(5)
+  })
+})
