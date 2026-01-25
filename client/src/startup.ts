@@ -71,6 +71,15 @@ export async function runStartupChecks(): Promise<StartupReport> {
       : 'Standard (timeout-based release)',
   })
 
+  // Check 4b: True color support
+  checks.push({
+    name: 'Colors',
+    passed: termCaps.supportsTrueColor,
+    message: termCaps.supportsTrueColor
+      ? '24-bit true color'
+      : '256-color mode (colors may look different)',
+  })
+
   // Check 5: Audio player available
   const audioPlayer = process.platform === 'darwin' ? 'afplay' : 'aplay'
   let audioPlayerAvailable = false
@@ -195,6 +204,20 @@ export function printStartupReport(report: StartupReport): void {
     console.log(`  ${yellow}Some checks failed, but audio works${reset}`)
   } else {
     console.log(`  ${yellow}Audio unavailable - check volume/drivers${reset}`)
+  }
+
+  // Show terminal recommendation for limited terminals
+  if (termCaps.terminal === 'apple-terminal') {
+    console.log('')
+    console.log(`  ${yellow}╭─────────────────────────────────────────────────╮${reset}`)
+    console.log(`  ${yellow}│${reset} ${cyan}TIP:${reset} For the best Vaders experience, try:      ${yellow}│${reset}`)
+    console.log(`  ${yellow}│${reset}   • ${green}Ghostty${reset} - ghostty.org                      ${yellow}│${reset}`)
+    console.log(`  ${yellow}│${reset}   • ${green}iTerm2${reset}  - iterm2.com                       ${yellow}│${reset}`)
+    console.log(`  ${yellow}│${reset}   • ${green}Kitty${reset}   - sw.kovidgoyal.net/kitty          ${yellow}│${reset}`)
+    console.log(`  ${yellow}│${reset}                                                 ${yellow}│${reset}`)
+    console.log(`  ${yellow}│${reset} ${dim}These terminals offer better colors and${reset}        ${yellow}│${reset}`)
+    console.log(`  ${yellow}│${reset} ${dim}instant key response (no input lag).${reset}          ${yellow}│${reset}`)
+    console.log(`  ${yellow}╰─────────────────────────────────────────────────╯${reset}`)
   }
   console.log('')
 }
