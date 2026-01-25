@@ -53,6 +53,7 @@ export function GameScreen({ state, currentPlayerId, isMuted = false, isMusicMut
   const playerCount = Object.keys(players).length
   const currentPlayer = players[currentPlayerId]
   const myLives = currentPlayer?.lives ?? 0
+  const maxLives = mode === 'solo' ? 3 : 5
 
   // Check if this is a Challenging Stage (waves 3, 7, 11, 15...)
   const isChallengingStage = enhancedMode && wave >= 3 && (wave - 3) % 4 === 0
@@ -89,7 +90,7 @@ export function GameScreen({ state, currentPlayerId, isMuted = false, isMusicMut
           <box width={2} />
           <text fg={COLORS.ui.lives}>
             {SYM.heart.repeat(myLives)}
-            <span fg={COLORS.ui.livesEmpty}>{SYM.heartEmpty.repeat(Math.max(0, 5 - myLives))}</span>
+            <span fg={COLORS.ui.livesEmpty}>{SYM.heartEmpty.repeat(Math.max(0, maxLives - myLives))}</span>
           </text>
         </box>
 
