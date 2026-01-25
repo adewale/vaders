@@ -584,19 +584,19 @@ export function getTerminalQuirks(caps: TerminalCapabilities): string[] {
 
   switch (caps.terminal) {
     case 'apple-terminal':
-      quirks.push('No true color support - using 256-color palette')
-      quirks.push('No Kitty keyboard protocol - using timeout-based key release')
-      quirks.push('Emoji may cause alignment issues')
+      quirks.push('No true color - colors may look muted')
+      quirks.push('No key release events - slight input delay when stopping')
+      quirks.push('Consider Ghostty for best experience')
       break
 
     case 'iterm2':
       quirks.push('Some emoji may render at incorrect width')
-      quirks.push('No Kitty keyboard protocol - using timeout-based key release')
+      quirks.push('No key release events - slight input delay when stopping')
       break
 
     case 'tmux':
       quirks.push('Running inside tmux - some features may need passthrough')
-      quirks.push('No Kitty keyboard protocol - using timeout-based key release')
+      quirks.push('No key release events - slight input delay when stopping')
       break
 
     case 'screen':

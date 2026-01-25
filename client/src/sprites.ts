@@ -5,8 +5,8 @@
 import { STANDARD_WIDTH, STANDARD_HEIGHT } from '../../shared/types'
 export { STANDARD_WIDTH, STANDARD_HEIGHT }
 
-// Import terminal capabilities for sprite selection
-import { getTerminalCapabilities } from './terminal'
+// Import terminal capabilities for sprite selection and color conversion
+import { getTerminalCapabilities, hexTo256Color } from './terminal'
 
 export const SPRITES = {
   // Classic alien sprites (2 lines each, 5 chars wide)
@@ -231,4 +231,72 @@ import type { PlayerSlot } from '../../shared/types'
  */
 export function getPlayerColor(slot: PlayerSlot, fallbackColor?: string): string {
   return COLORS.player[slot] ?? fallbackColor ?? COLORS.player[1]
+}
+
+// ─── Terminal-Aware Color Conversion ──────────────────────────────────────────
+
+/**
+ * Convert a hex color to terminal-appropriate format.
+ * - True color terminals: returns hex as-is (e.g., "#ff5555")
+ * - 256-color terminals: returns ANSI 256 format (e.g., "color256:196")
+ *
+ * Note: OpenTUI may need to handle the "color256:N" format specially,
+ * or we fall back to closest approximation the terminal can render.
+ */
+function convertColor(hex: string): string {
+  const caps = getTerminalCapabilities()
+  if (caps.supportsTrueColor) {
+    return hex
+  }
+  // For 256-color terminals, return the 256-color index
+  // OpenTUI should interpret this as \x1b[38;5;Nm
+  const idx = hexTo256Color(hex)
+  return `ansi256:${idx}`
+}
+
+/**
+ * Deep convert all color values in a color object.
+ * Recursively processes nested objects to convert all hex strings.
+ */
+function convertColorObject<T>(obj: T): T {
+  if (typeof obj === 'string') {
+    // It's a hex color string
+    return convertColor(obj) as T
+  }
+  if (typeof obj === 'object' && obj !== null) {
+    const result: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(obj)) {
+      result[key] = convertColorObject(value)
+    }
+    return result as T
+  }
+  return obj
+}
+
+// Cache the converted colors (computed once at module load)
+const _termCaps = getTerminalCapabilities()
+const _needsConversion = !_termCaps.supportsTrueColor
+
+/**
+ * Get colors appropriate for the current terminal.
+ * For true color terminals, returns original hex colors.
+ * For 256-color terminals (Apple Terminal), returns converted colors.
+ *
+ * Usage: Replace `COLORS.alien.squid` with `getColors().alien.squid`
+ */
+export function getColors(): typeof COLORS {
+  if (!_needsConversion) {
+    return COLORS
+  }
+  // Return converted colors for 256-color terminals
+  return convertColorObject(COLORS)
+}
+
+/**
+ * Get a terminal-appropriate color for a player slot.
+ * This is the terminal-aware version of getPlayerColor.
+ */
+export function getTerminalPlayerColor(slot: PlayerSlot, fallbackColor?: string): string {
+  const colors = getColors()
+  return colors.player[slot] ?? fallbackColor ?? colors.player[1]
 }

@@ -45,8 +45,10 @@ export interface HeldKeys {
 }
 
 // Timeout for auto-releasing keys (fallback for terminals without release events)
-// Set longer than typical key repeat interval (~30-50ms) to allow continuous movement
-const KEY_RELEASE_TIMEOUT_MS = 200
+// Balance: Must be longer than key repeat interval (~30ms) to avoid false releases,
+// but short enough to feel responsive. 100ms = ~3 key repeats of buffer.
+// (Previously 200ms caused noticeable "skating" on Apple Terminal)
+const KEY_RELEASE_TIMEOUT_MS = 100
 
 // Check terminal capabilities once at module load
 const termCaps = getTerminalCapabilities()
