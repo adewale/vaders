@@ -14,10 +14,10 @@ export interface InputState {
 // ─── Client → Server Messages ─────────────────────────────────────────────────
 
 export type ClientMessage =
-  | { type: 'join'; name: string; enhancedMode?: boolean }
+  | { type: 'join'; name: string }
   | { type: 'ready' }
   | { type: 'unready' }
-  | { type: 'start_solo'; enhancedMode?: boolean }
+  | { type: 'start_solo' }
   | { type: 'input'; held: InputState }               // Held-state networking (no seq needed)
   | { type: 'shoot' }                                  // Discrete action (rate-limited server-side)
   | { type: 'ping' }

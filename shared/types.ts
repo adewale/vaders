@@ -255,15 +255,11 @@ export interface ScaledConfig {
   lives: number                     // Shared lives (3 solo, 5 coop)
 }
 
-/** Wave configuration for Enhanced mode progression */
+/** Wave configuration for progression */
 export interface WaveConfig {
   alienCols: number
   alienRows: number
   speedMult: number
-  hasCommanders: boolean
-  hasDiveBombers: boolean
-  hasTransforms: boolean
-  isChallenging: boolean            // Bonus wave with no shooting
 }
 
 /** Event names that can be emitted during gameplay (matches ServerEvent.name) */
@@ -292,7 +288,6 @@ export interface GameState {
   mode: 'solo' | 'coop'
   status: GameStatus
   tick: number
-  enhancedMode: boolean             // TODO: Enhanced mode (Galaga-style) planned for future release
   rngSeed: number                   // Seeded RNG state for determinism
 
   // Countdown state (only valid when status === 'countdown')

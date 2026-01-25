@@ -9,14 +9,14 @@ import { COLORS } from '../sprites'
 import { useTerminalSize } from '../hooks/useTerminalSize'
 
 interface LaunchScreenProps {
-  onStartSolo: (enhanced: boolean) => void
-  onCreateRoom: (enhanced: boolean) => void
-  onJoinRoom: (code: string, enhanced: boolean) => void
-  onMatchmake: (enhanced: boolean) => void
+  onStartSolo: () => void
+  onCreateRoom: () => void
+  onJoinRoom: (code: string) => void
+  onMatchmake: () => void
   version: string
 }
 
-const MENU_ITEMS = ['solo', 'create', 'join', 'matchmake', 'enhanced'] as const
+const MENU_ITEMS = ['solo', 'create', 'join', 'matchmake'] as const
 type MenuItem = typeof MENU_ITEMS[number]
 
 export function LaunchScreen({
@@ -27,7 +27,6 @@ export function LaunchScreen({
   version
 }: LaunchScreenProps) {
   const renderer = useRenderer()
-  const [enhanced, setEnhanced] = useState(false)
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [joinMode, setJoinMode] = useState(false)
   const [roomCode, setRoomCode] = useState('')
@@ -36,22 +35,19 @@ export function LaunchScreen({
     const item = MENU_ITEMS[selectedIndex]
     switch (item) {
       case 'solo':
-        onStartSolo(enhanced)
+        onStartSolo()
         break
       case 'create':
-        onCreateRoom(enhanced)
+        onCreateRoom()
         break
       case 'join':
         setJoinMode(true)
         break
       case 'matchmake':
-        onMatchmake(enhanced)
-        break
-      case 'enhanced':
-        setEnhanced(e => !e)
+        onMatchmake()
         break
     }
-  }, [selectedIndex, enhanced, onStartSolo, onCreateRoom, onMatchmake])
+  }, [selectedIndex, onStartSolo, onCreateRoom, onMatchmake])
 
   const handleKeyInput = useCallback((event: Parameters<Parameters<typeof useKeyboard>[0]>[0]) => {
     // Only process key press events, not releases or repeats
@@ -68,7 +64,7 @@ export function LaunchScreen({
         return
       }
       if (key.type === 'key' && key.key === 'enter' && roomCode.length === 6) {
-        onJoinRoom(roomCode, enhanced)
+        onJoinRoom(roomCode)
         return
       }
       if (event.name === 'backspace') {
@@ -104,20 +100,16 @@ export function LaunchScreen({
     if (key.type === 'char') {
       switch (key.char) {
         case '1':
-          onStartSolo(enhanced)
+          onStartSolo()
           break
         case '2':
-          onCreateRoom(enhanced)
+          onCreateRoom()
           break
         case '3':
           setJoinMode(true)
           break
         case '4':
-          onMatchmake(enhanced)
-          break
-        case 'e':
-        case 'E':
-          setEnhanced(e => !e)
+          onMatchmake()
           break
         case 'q':
         case 'Q':
@@ -126,7 +118,7 @@ export function LaunchScreen({
           break
       }
     }
-  }, [joinMode, roomCode, enhanced, onStartSolo, onCreateRoom, onJoinRoom, onMatchmake, renderer, handleSelect])
+  }, [joinMode, roomCode, onStartSolo, onCreateRoom, onJoinRoom, onMatchmake, renderer, handleSelect])
 
   useKeyboard(handleKeyInput)
 
@@ -177,14 +169,6 @@ export function LaunchScreen({
           desc="Auto-join an open game"
           selected={selectedIndex === 3}
         />
-        <box height={1} />
-        <box>
-          <text fg={selectedIndex === 4 ? COLORS.ui.selected : COLORS.ui.unselected}>{selectedIndex === 4 ? '▶ ' : '  '}</text>
-          <text fg={COLORS.ui.hotkey}>[E]</text>
-          <text fg={COLORS.ui.selectedText}> ENHANCED MODE  </text>
-          <text fg={enhanced ? COLORS.ui.success : COLORS.ui.dim}>{enhanced ? 'ON ' : 'OFF'}</text>
-          <text fg={COLORS.ui.dim}>  Galaga/Galaxian enemies</text>
-        </box>
       </box>
 
       <box height={1} />
