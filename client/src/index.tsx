@@ -6,9 +6,18 @@ import { createCliRenderer } from '@opentui/core'
 import { createRoot } from '@opentui/react'
 import { App } from './App'
 import { TerminalSizeProvider } from './hooks/useTerminalSize'
+import { runStartupChecks, printStartupReport, playStartupSound } from './startup'
+import { MusicManager } from './audio'
 
-// Parse CLI flags: --room ABC123 --name Alice --matchmake --enhanced --solo
-function parseArgs(): { room?: string; name: string; matchmake: boolean; enhanced: boolean; solo: boolean } {
+// Parse CLI flags: --room ABC123 --name Alice --matchmake --solo --check --no-audio-check
+function parseArgs(): {
+  room?: string
+  name: string
+  matchmake: boolean
+  solo: boolean
+  check: boolean
+  skipAudioCheck: boolean
+} {
   const args = process.argv.slice(2)
   const flags: Record<string, string | boolean> = {}
 
@@ -19,25 +28,30 @@ function parseArgs(): { room?: string; name: string; matchmake: boolean; enhance
       flags.name = args[++i]
     } else if (args[i] === '--matchmake') {
       flags.matchmake = true
-    } else if (args[i] === '--enhanced') {
-      flags.enhanced = true
     } else if (args[i] === '--solo') {
       flags.solo = true
+    } else if (args[i] === '--check') {
+      flags.check = true
+    } else if (args[i] === '--no-audio-check') {
+      flags.skipAudioCheck = true
     } else if (args[i] === '--help' || args[i] === '-h') {
       console.log(`
 Vaders - Multiplayer TUI Space Invaders
 
 Usage:
-  vaders                     Start solo game (default)
+  vaders                     Show launch menu (default)
   vaders --room ABC123       Join specific room
   vaders --matchmake         Auto-join open game
   vaders --name "Alice"      Set player name
-  vaders --enhanced          Enable enhanced mode
+  vaders --solo              Start solo game immediately
+  vaders --check             Run system diagnostics only
+  vaders --no-audio-check    Skip startup audio verification
 
 Controls:
-  Arrow keys or A/D   Move left/right
+  Arrow keys         Move left/right
   SPACE              Shoot
-  ENTER              Ready up (lobby)
+  M                  Toggle mute
+  ENTER              Ready up / Select
   S                  Start solo (when alone)
   Q                  Quit
 `)
@@ -49,13 +63,37 @@ Controls:
     room: flags.room as string | undefined,
     name: (flags.name as string) || `Player${Math.floor(Math.random() * 1000)}`,
     matchmake: !!flags.matchmake,
-    enhanced: !!flags.enhanced,
     solo: !!flags.solo,
+    check: !!flags.check,
+    skipAudioCheck: !!flags.skipAudioCheck,
   }
 }
 
 async function main() {
-  const { room, name, matchmake, enhanced, solo } = parseArgs()
+  const { room, name, matchmake, solo, check, skipAudioCheck } = parseArgs()
+
+  // Run startup checks
+  if (!skipAudioCheck || check) {
+    const report = await runStartupChecks()
+
+    if (check) {
+      // Just print diagnostics and exit
+      printStartupReport(report)
+      process.exit(report.allPassed ? 0 : 1)
+    }
+
+    // Play startup sound to verify audio works
+    if (report.audioAvailable) {
+      await playStartupSound()
+    }
+
+    // Warn if audio isn't available (but continue anyway)
+    if (!report.audioAvailable) {
+      console.log('\x1b[33m⚠ Audio unavailable - game will run without sound\x1b[0m')
+      console.log('  Run "vaders --check" for diagnostics\n')
+      await new Promise(r => setTimeout(r, 1500))
+    }
+  }
 
   // Initialize OpenTUI renderer with Kitty keyboard protocol for key release events
   // This enables proper detection of when keys are released (required for smooth movement)
@@ -72,24 +110,21 @@ async function main() {
         roomCode={room}
         playerName={name}
         matchmake={matchmake}
-        enhanced={enhanced}
         solo={solo}
       />
     </TerminalSizeProvider>
   )
 
   // Handle graceful shutdown
-  process.on('SIGINT', () => {
+  const shutdown = () => {
+    MusicManager.getInstance().stop()
     root.unmount()
     renderer.destroy()
     process.exit(0)
-  })
+  }
 
-  process.on('SIGTERM', () => {
-    root.unmount()
-    renderer.destroy()
-    process.exit(0)
-  })
+  process.on('SIGINT', shutdown)
+  process.on('SIGTERM', shutdown)
 }
 
 main().catch((err) => {

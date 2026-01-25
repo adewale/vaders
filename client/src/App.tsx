@@ -11,6 +11,8 @@ import { GameOverScreen, getGameOverMenuItemCount } from './components/GameOverS
 import { normalizeKey, createHeldKeysTracker } from './input'
 import { debugLog, clearDebugLog } from './debug'
 import { useTerminalSize, STANDARD_WIDTH, STANDARD_HEIGHT } from './hooks/useTerminalSize'
+import { useGameAudio, playShootSound, playMenuNavigateSound, playMenuSelectSound } from './hooks/useGameAudio'
+import { AudioManager, MusicManager } from './audio'
 
 const VERSION = '1.0.0'
 const SERVER_URL = process.env.VADERS_SERVER ?? 'http://localhost:8787'
@@ -26,7 +28,6 @@ interface AppState {
   screen: AppScreen
   roomUrl: string | null
   playerName: string
-  enhanced: boolean
   error: string | null
   autoStartSolo?: boolean
 }
@@ -35,13 +36,11 @@ export function App({
   roomCode: initialRoomCode,
   playerName: initialPlayerName,
   matchmake: initialMatchmake,
-  enhanced: initialEnhanced,
   solo: initialSolo,
 }: {
   roomCode?: string
   playerName: string
   matchmake: boolean
-  enhanced: boolean
   solo: boolean
 }) {
   const renderer = useRenderer()
@@ -50,7 +49,6 @@ export function App({
     screen: initialRoomCode || initialMatchmake || initialSolo ? 'connecting' : 'launch',
     roomUrl: null,
     playerName: initialPlayerName,
-    enhanced: initialEnhanced,
     error: null,
   })
 
@@ -81,8 +79,8 @@ export function App({
   }, [initialRoomCode, initialMatchmake, initialSolo])
 
   // Handle launch screen actions
-  const handleStartSolo = useCallback((enhanced: boolean) => {
-    setAppState(s => ({ ...s, screen: 'connecting', enhanced }))
+  const handleStartSolo = useCallback(() => {
+    setAppState(s => ({ ...s, screen: 'connecting' }))
     fetch(`${SERVER_URL}/room`, { method: 'POST' })
       .then(res => res.json())
       .then(({ roomCode }: { roomCode: string }) => {
@@ -93,8 +91,8 @@ export function App({
       })
   }, [])
 
-  const handleCreateRoom = useCallback((enhanced: boolean) => {
-    setAppState(s => ({ ...s, screen: 'connecting', enhanced }))
+  const handleCreateRoom = useCallback(() => {
+    setAppState(s => ({ ...s, screen: 'connecting' }))
     fetch(`${SERVER_URL}/room`, { method: 'POST' })
       .then(res => res.json())
       .then(({ roomCode }: { roomCode: string }) => {
@@ -105,12 +103,12 @@ export function App({
       })
   }, [])
 
-  const handleJoinRoom = useCallback((code: string, enhanced: boolean) => {
-    setAppState(s => ({ ...s, screen: 'game', roomUrl: getRoomWsUrl(code), enhanced }))
+  const handleJoinRoom = useCallback((code: string) => {
+    setAppState(s => ({ ...s, screen: 'game', roomUrl: getRoomWsUrl(code) }))
   }, [])
 
-  const handleMatchmake = useCallback((enhanced: boolean) => {
-    setAppState(s => ({ ...s, screen: 'connecting', enhanced }))
+  const handleMatchmake = useCallback(() => {
+    setAppState(s => ({ ...s, screen: 'connecting' }))
     fetch(`${SERVER_URL}/matchmake`)
       .then(res => res.json())
       .then(({ roomCode }: { roomCode: string }) => {
@@ -180,7 +178,6 @@ export function App({
     <GameContainer
       roomUrl={appState.roomUrl}
       playerName={appState.playerName}
-      enhanced={appState.enhanced}
       autoStartSolo={appState.autoStartSolo ?? false}
       onPlayAgain={handlePlayAgain}
       onMainMenu={handleMainMenu}
@@ -192,14 +189,12 @@ export function App({
 function GameContainer({
   roomUrl,
   playerName,
-  enhanced,
   autoStartSolo,
   onPlayAgain,
   onMainMenu,
 }: {
   roomUrl: string
   playerName: string
-  enhanced: boolean
   autoStartSolo: boolean
   onPlayAgain: () => void
   onMainMenu: () => void
@@ -207,8 +202,7 @@ function GameContainer({
   const renderer = useRenderer()
   const { getRenderState, playerId, send, connected, updateInput, shoot } = useGameConnection(
     roomUrl,
-    playerName,
-    enhanced
+    playerName
   )
 
   // Clear debug log on mount
@@ -223,6 +217,10 @@ function GameContainer({
 
   // Menu selection state for lobby and game over screens
   const [menuIndex, setMenuIndex] = useState(0)
+
+  // Audio mute states (separate for SFX and music)
+  const [isMuted, setIsMuted] = useState(() => AudioManager.getInstance().isMuted())
+  const [isMusicMuted, setIsMusicMuted] = useState(() => MusicManager.getInstance().isMuted())
 
   // Get current game state
   const state = getRenderState()
@@ -246,6 +244,9 @@ function GameContainer({
 
   // Track previous status to detect transitions
   const prevStatusRef = useRef(gameStatus)
+
+  // Audio hook - triggers sounds on state changes
+  useGameAudio(state, playerId)
 
   // Reset menu index when screen changes, only reset keys when LEAVING gameplay
   useEffect(() => {
@@ -274,9 +275,9 @@ function GameContainer({
   useEffect(() => {
     if (autoStartSolo && connected && state?.status === 'waiting' && !autoStartSent.current) {
       autoStartSent.current = true
-      send({ type: 'start_solo', enhancedMode: enhanced })
+      send({ type: 'start_solo' })
     }
-  }, [autoStartSolo, connected, state?.status, send, enhanced])
+  }, [autoStartSolo, connected, state?.status, send])
 
   // Note: Movement is now discrete (one step per key press/repeat)
   // No continuous interval needed - each keyboard event triggers movement
@@ -304,14 +305,14 @@ function GameContainer({
         else send({ type: 'ready' })
       } else if (index === 1) {
         // Start Solo
-        send({ type: 'start_solo', enhancedMode: enhanced })
+        send({ type: 'start_solo' })
       }
     } else {
       // Only ready/unready option
       if (isReadyRef.current) send({ type: 'unready' })
       else send({ type: 'ready' })
     }
-  }, [send, enhanced])
+  }, [send])
 
   // Handle menu selection for game over
   const handleGameOverSelect = useCallback((index: number) => {
@@ -323,6 +324,7 @@ function GameContainer({
         onMainMenu()
         break
       case 2:  // Quit
+        MusicManager.getInstance().stop()
         renderer.destroy()
         process.exit(0)
         break
@@ -357,8 +359,29 @@ function GameContainer({
 
       // Handle Q to quit from any screen (non-repeated only)
       if (key.type === 'key' && key.key === 'q' && isPress && !isRepeated) {
+        MusicManager.getInstance().stop()
         renderer.destroy()
         process.exit(0)
+      }
+
+      // Handle M to toggle sound effects mute (skip in game_over - M is Main Menu hotkey)
+      if (key.type === 'key' && key.key === 'm' && isPress && !isRepeated) {
+        if (currentStatus !== 'game_over') {
+          const muted = AudioManager.getInstance().toggleMute()
+          setIsMuted(muted)
+          return
+        }
+      }
+
+      // Handle N to toggle music mute from any screen
+      if (key.type === 'key' && key.key === 'n' && isPress && !isRepeated) {
+        const musicMuted = MusicManager.getInstance().toggleMute()
+        setIsMusicMuted(musicMuted)
+        // If unmuting and game is playing, restart music
+        if (!musicMuted && (currentStatus === 'playing' || currentStatus === 'countdown')) {
+          MusicManager.getInstance().start()
+        }
+        return
       }
 
     // IMPORTANT: Always process key releases for movement keys, regardless of game status
@@ -402,6 +425,7 @@ function GameContainer({
       // Shoot on press only (non-repeated)
       if (key.type === 'key' && key.key === 'space' && isPress && !isRepeated) {
         shoot()
+        playShootSound()
         return
       }
     }
@@ -417,12 +441,15 @@ function GameContainer({
         switch (key.key) {
           case 'up':
             setMenuIndex(i => (i - 1 + itemCount) % itemCount)
+            playMenuNavigateSound()
             break
           case 'down':
             setMenuIndex(i => (i + 1) % itemCount)
+            playMenuNavigateSound()
             break
           case 'enter':
           case 'space':
+            playMenuSelectSound()
             if (currentStatus === 'waiting') {
               handleLobbySelect(currentMenuIndex)
             } else if (currentStatus === 'game_over') {
@@ -445,7 +472,7 @@ function GameContainer({
 
       // Hotkey: S for solo start
       if (key.type === 'key' && key.key === 's' && currentStatus === 'waiting' && currentPlayerCount === 1) {
-        send({ type: 'start_solo', enhancedMode: enhanced })
+        send({ type: 'start_solo' })
       }
     }
     } catch (err) {
@@ -476,12 +503,12 @@ function GameContainer({
           selectedIndex={menuIndex}
           onReady={() => send({ type: 'ready' })}
           onUnready={() => send({ type: 'unready' })}
-          onStartSolo={() => send({ type: 'start_solo', enhancedMode: enhanced })}
+          onStartSolo={() => send({ type: 'start_solo' })}
         />
       )
     case 'countdown':
     case 'playing':
-      return <GameScreen state={state} currentPlayerId={playerId} />
+      return <GameScreen state={state} currentPlayerId={playerId} isMuted={isMuted} isMusicMuted={isMusicMuted} />
     case 'game_over':
       return (
         <GameOverScreen

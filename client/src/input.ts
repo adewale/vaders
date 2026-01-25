@@ -6,7 +6,7 @@ import type { KeyEvent } from '@opentui/core'
 // ─── Internal Key Type (stable, not tied to OpenTUI) ──────────────────────────
 
 export type VadersKey =
-  | { type: 'key'; key: 'left' | 'right' | 'up' | 'down' | 'space' | 'enter' | 'escape' | 'q' | 'm' | 's' | 'r' }
+  | { type: 'key'; key: 'left' | 'right' | 'up' | 'down' | 'space' | 'enter' | 'escape' | 'q' | 'm' | 'n' | 's' | 'r' }
   | { type: 'char'; char: string }  // For text input (room codes, names)
 
 // ─── Normalize OpenTUI KeyEvent → VadersKey ───────────────────────────────────
@@ -26,6 +26,7 @@ export function normalizeKey(event: KeyEvent): VadersKey | null {
     const char = event.sequence.toLowerCase()
     if (char === 'q') return { type: 'key', key: 'q' }
     if (char === 'm') return { type: 'key', key: 'm' }
+    if (char === 'n') return { type: 'key', key: 'n' }
     if (char === 's') return { type: 'key', key: 's' }
     if (char === 'r') return { type: 'key', key: 'r' }
     return { type: 'char', char: event.sequence }

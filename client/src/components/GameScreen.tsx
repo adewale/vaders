@@ -1,5 +1,5 @@
 // client/src/components/GameScreen.tsx
-// Main game screen rendering with 2-line sprites
+// Main game screen rendering with 2-line sprites and color cycling effects
 
 import type {
   GameState,
@@ -7,7 +7,6 @@ import type {
   BarrierEntity,
   ClassicAlienType,
   CommanderEntity,
-  DiveBomberEntity,
   TransformEntity,
   UFOEntity,
 } from '../../../shared/types'
@@ -17,7 +16,6 @@ import {
   getBullets,
   getBarriers,
   getCommanders,
-  getDiveBombers,
   getTransforms,
   getUFOs,
 } from '../../../shared/types'
@@ -25,12 +23,24 @@ import { SPRITES, SPRITE_SIZE, COLORS, getPlayerColor } from '../sprites'
 import { SYMBOLS as SYM } from '../capabilities'
 import { useTerminalSize } from '../hooks/useTerminalSize'
 
+// Terminal-compatible color cycling effects
+import {
+  getTractorBeamColor,
+  getCommanderShieldColor,
+  getTransformColor,
+  getPlayerRespawnColor,
+  getUFOColor,
+  getBonusColor,
+} from '../effects'
+
 interface GameScreenProps {
   state: GameState
   currentPlayerId: string
+  isMuted?: boolean
+  isMusicMuted?: boolean
 }
 
-export function GameScreen({ state, currentPlayerId }: GameScreenProps) {
+export function GameScreen({ state, currentPlayerId, isMuted = false, isMusicMuted = false }: GameScreenProps) {
   const { terminalWidth, terminalHeight, gameWidth, gameHeight, offsetX, offsetY, isTooSmall } = useTerminalSize()
 
   const { entities, players, score, wave, mode, status, enhancedMode } = state
@@ -38,7 +48,6 @@ export function GameScreen({ state, currentPlayerId }: GameScreenProps) {
   const bullets = getBullets(entities)
   const barriers = getBarriers(entities)
   const commanders = getCommanders(entities)
-  const diveBombers = getDiveBombers(entities)
   const transforms = getTransforms(entities)
   const ufos = getUFOs(entities)
   const playerCount = Object.keys(players).length
@@ -54,8 +63,8 @@ export function GameScreen({ state, currentPlayerId }: GameScreenProps) {
       <box width={terminalWidth} height={terminalHeight} justifyContent="center" alignItems="center" flexDirection="column">
         <text fg={COLORS.ui.error}><b>Terminal Too Small</b></text>
         <box height={1} />
-        <text fg={COLORS.ui.selectedText}>Required: {gameWidth}×{gameHeight}</text>
-        <text fg={COLORS.ui.dim}>Current: {terminalWidth}×{terminalHeight}</text>
+        <text fg={COLORS.ui.selectedText}>Required: {gameWidth}x{gameHeight}</text>
+        <text fg={COLORS.ui.dim}>Current: {terminalWidth}x{terminalHeight}</text>
         <box height={1} />
         <text fg={COLORS.ui.unselected}>Please resize your terminal.</text>
       </box>
@@ -74,7 +83,7 @@ export function GameScreen({ state, currentPlayerId }: GameScreenProps) {
           <box width={2} />
           <text fg={COLORS.ui.score}>SCORE:{score.toString().padStart(6, '0')}</text>
           <box width={2} />
-          <text fg={isChallengingStage ? COLORS.ui.warning : COLORS.ui.wave}>
+          <text fg={isChallengingStage ? getBonusColor(state.tick) : COLORS.ui.wave}>
             {isChallengingStage ? 'CHALLENGE!' : `WAVE:${wave}`}
           </text>
           <box width={2} />
@@ -99,7 +108,7 @@ export function GameScreen({ state, currentPlayerId }: GameScreenProps) {
         <box flexGrow={1} position="relative" borderStyle="single" borderColor={COLORS.ui.border}>
           {/* UFOs - top of screen */}
           {ufos.filter(u => u.alive).map(ufo => (
-            <UFOSprite key={`ufo-${ufo.id}`} ufo={ufo} tick={state.tick} />
+            <UFOSprite key={`ufo-${ufo.id}`} ufo={ufo} tick={state.tick} enhanced={enhancedMode} />
           ))}
 
           {/* Commanders (Enhanced Mode) - 2 line sprites */}
@@ -111,11 +120,6 @@ export function GameScreen({ state, currentPlayerId }: GameScreenProps) {
             />
           ))}
 
-          {/* Dive Bombers (Enhanced Mode) - 2 line sprites */}
-          {diveBombers.filter(d => d.alive).map(bomber => (
-            <DiveBomberSprite key={`bomber-${bomber.id}`} bomber={bomber} />
-          ))}
-
           {/* Aliens - 2 line sprites */}
           {aliens.filter(a => a.alive).map(alien => (
             <AlienSprite key={`alien-${alien.id}`} x={alien.x} y={alien.y} type={alien.type} />
@@ -123,7 +127,12 @@ export function GameScreen({ state, currentPlayerId }: GameScreenProps) {
 
           {/* Transform enemies (Enhanced Mode) */}
           {transforms.map(transform => (
-            <TransformSprite key={`transform-${transform.id}`} transform={transform} tick={state.tick} />
+            <TransformSprite
+              key={`transform-${transform.id}`}
+              transform={transform}
+              tick={state.tick}
+              enhanced={enhancedMode}
+            />
           ))}
 
           {/* Bullets */}
@@ -151,20 +160,25 @@ export function GameScreen({ state, currentPlayerId }: GameScreenProps) {
               player={player}
               isCurrentPlayer={player.id === currentPlayerId}
               tick={state.tick}
+              enhanced={enhancedMode}
             />
           ))}
         </box>
 
         {/* Status Bar */}
         <box height={1} paddingLeft={1} paddingRight={1}>
-          <text fg={COLORS.ui.unselected}>Arrow Keys Move  SPACE Shoot  Q Quit</text>
+          <text fg={COLORS.ui.unselected}>Arrows Move  SPACE Shoot  M Mute  N Music  Q Quit</text>
           <box flexGrow={1} />
+          {isMuted && <text fg={COLORS.ui.dim}>[SFX OFF] </text>}
+          {isMusicMuted && <text fg={COLORS.ui.dim}>[MUSIC OFF] </text>}
           <PlayerScores players={players} currentPlayerId={currentPlayerId} />
         </box>
       </box>
     </box>
   )
 }
+
+// ─── Game Sprites ──────────────────────────────────────────────────────────────
 
 // 2-line alien sprite
 function AlienSprite({ x, y, type }: { x: number; y: number; type: ClassicAlienType }) {
@@ -178,15 +192,17 @@ function AlienSprite({ x, y, type }: { x: number; y: number; type: ClassicAlienT
   )
 }
 
-// 2-line player sprite
+// 2-line player sprite with optional respawn color cycling
 function PlayerShip({
   player,
   isCurrentPlayer,
-  tick
+  tick,
+  enhanced
 }: {
   player: Player
   isCurrentPlayer: boolean
   tick: number
+  enhanced: boolean
 }) {
   // Don't render dead players unless respawning
   if (!player.alive) {
@@ -195,7 +211,17 @@ function PlayerShip({
     if (Math.floor(tick / 10) % 2 === 0) return null
   }
 
-  const playerColor = getPlayerColor(player.slot)
+  const basePlayerColor = getPlayerColor(player.slot)
+
+  // Use color cycling for respawn effect in enhanced mode
+  let playerColor = basePlayerColor
+  if (enhanced && player.respawnAtTick && tick < player.respawnAtTick) {
+    // Calculate respawn start tick (approximate - actual would need to be stored)
+    const respawnDuration = 180  // ~3 seconds at 60fps
+    const respawnStartTick = player.respawnAtTick - respawnDuration
+    playerColor = getPlayerRespawnColor(tick, respawnStartTick, basePlayerColor)
+  }
+
   // Center the 5-wide sprite on player.x
   const spriteX = player.x - Math.floor(SPRITE_SIZE.player.width / 2)
 
@@ -263,12 +289,13 @@ function Barrier({ barrier }: { barrier: BarrierEntity }) {
 
 // ─── Enhanced Mode Sprites ────────────────────────────────────────────────────
 
-// UFO sprite - mystery ship at top of screen
-function UFOSprite({ ufo, tick }: { ufo: UFOEntity; tick: number }) {
-  // Color cycling effect for UFO
-  const colors = ['#ff0000', '#ff8800', '#ffff00', '#00ff00', '#00ffff', '#ff00ff']
-  const colorIndex = Math.floor(tick / 5) % colors.length
-  const color = colors[colorIndex]
+// UFO sprite - mystery ship at top of screen with Amiga color cycling
+function UFOSprite({ ufo, tick, enhanced }: { ufo: UFOEntity; tick: number; enhanced: boolean }) {
+  // Use Amiga-style color cycling when enhanced mode is on
+  const color = enhanced ? getUFOColor(tick) : (() => {
+    const colors = ['#ff0000', '#ff8800', '#ffff00', '#00ff00', '#00ffff', '#ff00ff']
+    return colors[Math.floor(tick / 5) % colors.length]
+  })()
 
   return (
     <box position="absolute" top={ufo.y} left={ufo.x} flexDirection="column">
@@ -282,7 +309,9 @@ function UFOSprite({ ufo, tick }: { ufo: UFOEntity; tick: number }) {
 function CommanderSprite({ commander, tick }: { commander: CommanderEntity; tick: number }) {
   const isHealthy = commander.health === 2
   const sprite = isHealthy ? SPRITES.enhanced.commander.healthy : SPRITES.enhanced.commander.damaged
-  const color = COLORS.enhanced.commander
+
+  // Use commander shield color cycling for damaged commanders
+  const color = isHealthy ? COLORS.enhanced.commander : getCommanderShieldColor(tick)
 
   // Tractor beam visual
   const showTractorBeam = commander.tractorBeamActive
@@ -303,12 +332,10 @@ function CommanderSprite({ commander, tick }: { commander: CommanderEntity; tick
   )
 }
 
-// Tractor beam animation
+// Tractor beam animation with Amiga color cycling
 function TractorBeamEffect({ tick }: { tick: number }) {
-  // Color cycling for tractor beam
-  const beamColors = ['#0033ff', '#0066ff', '#0099ff', '#00ccff', '#00ffff', '#66ffff', '#ffffff']
-  const colorIndex = Math.floor(tick / 3) % beamColors.length
-  const color = beamColors[colorIndex]
+  // Use the Amiga-style tractor beam color cycling
+  const color = getTractorBeamColor(tick)
 
   return (
     <>
@@ -321,27 +348,23 @@ function TractorBeamEffect({ tick }: { tick: number }) {
   )
 }
 
-// Dive Bomber sprite (Galaxian purple enemy)
-function DiveBomberSprite({ bomber }: { bomber: DiveBomberEntity }) {
-  const sprite = SPRITES.enhanced.dive_bomber
-  const color = bomber.diveState === 'diving' ? '#ff00ff' : COLORS.enhanced.dive_bomber
-
-  return (
-    <box position="absolute" top={bomber.y} left={bomber.x} flexDirection="column">
-      <text fg={color}>{sprite[0]}</text>
-      <text fg={color}>{sprite[1]}</text>
-    </box>
-  )
-}
-
-// Transform enemy sprite (spawned when dive bombers die)
-function TransformSprite({ transform, tick }: { transform: TransformEntity; tick: number }) {
+// Transform enemy sprite with Amiga rainbow cycling
+function TransformSprite({
+  transform,
+  tick,
+  enhanced
+}: {
+  transform: TransformEntity
+  tick: number
+  enhanced: boolean
+}) {
   const sprite = SPRITES.enhanced.transform[transform.type]
 
-  // Rainbow color cycling for transforms
-  const colors = ['#ff0000', '#ff8800', '#ffff00', '#00ff00', '#00ffff', '#0088ff', '#ff00ff']
-  const colorIndex = Math.floor(tick / 4) % colors.length
-  const color = colors[colorIndex]
+  // Use Amiga-style rainbow color cycling when enhanced mode is on
+  const color = enhanced ? getTransformColor(tick) : (() => {
+    const colors = ['#ff0000', '#ff8800', '#ffff00', '#00ff00', '#00ffff', '#0088ff', '#ff00ff']
+    return colors[Math.floor(tick / 4) % colors.length]
+  })()
 
   return (
     <box position="absolute" top={transform.y} left={transform.x} flexDirection="column">
