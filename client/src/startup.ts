@@ -212,11 +212,8 @@ export function printStartupReport(report: StartupReport): void {
     console.log(`  ${yellow}╭─────────────────────────────────────────────────╮${reset}`)
     console.log(`  ${yellow}│${reset} ${cyan}TIP:${reset} For the best Vaders experience, try:      ${yellow}│${reset}`)
     console.log(`  ${yellow}│${reset}   • ${green}Ghostty${reset} - ghostty.org                      ${yellow}│${reset}`)
-    console.log(`  ${yellow}│${reset}   • ${green}iTerm2${reset}  - iterm2.com                       ${yellow}│${reset}`)
-    console.log(`  ${yellow}│${reset}   • ${green}Kitty${reset}   - sw.kovidgoyal.net/kitty          ${yellow}│${reset}`)
     console.log(`  ${yellow}│${reset}                                                 ${yellow}│${reset}`)
-    console.log(`  ${yellow}│${reset} ${dim}These terminals offer better colors and${reset}        ${yellow}│${reset}`)
-    console.log(`  ${yellow}│${reset} ${dim}instant key response (no input lag).${reset}          ${yellow}│${reset}`)
+    console.log(`  ${yellow}│${reset} ${dim}Better colors and instant key response.${reset}        ${yellow}│${reset}`)
     console.log(`  ${yellow}╰─────────────────────────────────────────────────╯${reset}`)
   }
   console.log('')

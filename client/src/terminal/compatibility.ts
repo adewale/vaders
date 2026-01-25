@@ -586,7 +586,7 @@ export function getTerminalQuirks(caps: TerminalCapabilities): string[] {
     case 'apple-terminal':
       quirks.push('No true color - colors may look muted')
       quirks.push('No key release events - slight input delay when stopping')
-      quirks.push('Consider Ghostty/iTerm2/Kitty for best experience')
+      quirks.push('Consider Ghostty for best experience')
       break
 
     case 'iterm2':
