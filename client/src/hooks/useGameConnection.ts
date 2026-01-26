@@ -143,6 +143,11 @@ export function useGameConnection(
     send({ type: 'shoot' })
   }, [send])
 
+  // Discrete move (one step per call) - for terminals without key release events
+  const move = useCallback((direction: 'left' | 'right') => {
+    send({ type: 'move', direction })
+  }, [send])
+
   // Get interpolated render state with local prediction
   const getRenderState = useCallback((): GameState | null => {
     const { serverState, prevState, lastSyncTime, playerId } = state
@@ -205,6 +210,7 @@ export function useGameConnection(
     error: state.error,
     send,
     updateInput,
+    move,
     shoot,
   }
 }

@@ -28,6 +28,7 @@ export type GameAction =
   | { type: 'PLAYER_JOIN'; player: Player }
   | { type: 'PLAYER_LEAVE'; playerId: string }
   | { type: 'PLAYER_INPUT'; playerId: string; input: InputState }
+  | { type: 'PLAYER_MOVE'; playerId: string; direction: 'left' | 'right' }  // Discrete movement (one step)
   | { type: 'PLAYER_SHOOT'; playerId: string }
   | { type: 'PLAYER_READY'; playerId: string }
   | { type: 'PLAYER_UNREADY'; playerId: string }
@@ -62,10 +63,12 @@ const TRANSITIONS: Record<GameStatus, Partial<Record<GameAction['type'], GameSta
     COUNTDOWN_CANCEL: 'waiting',
     PLAYER_LEAVE: 'waiting',
     PLAYER_INPUT: 'countdown',
+    PLAYER_MOVE: 'countdown',
   },
   playing: {
     TICK: 'playing',
     PLAYER_INPUT: 'playing',
+    PLAYER_MOVE: 'playing',
     PLAYER_SHOOT: 'playing',
     PLAYER_LEAVE: 'playing',
   },
@@ -96,6 +99,8 @@ export function gameReducer(state: GameState, action: GameAction): ReducerResult
       return playerLeaveReducer(state, action.playerId)
     case 'PLAYER_INPUT':
       return inputReducer(state, action.playerId, action.input)
+    case 'PLAYER_MOVE':
+      return moveReducer(state, action.playerId, action.direction)
     case 'PLAYER_SHOOT':
       return shootReducer(state, action.playerId)
     case 'PLAYER_READY':
@@ -163,6 +168,36 @@ function inputReducer(state: GameState, playerId: string, input: InputState): Re
   return { state: next, events: [], persist: false }
 }
 
+/**
+ * Discrete movement reducer - moves player immediately.
+ * Used by terminals without Kitty keyboard protocol (no key release events).
+ * Each key press/repeat moves, eliminating "skating" on release.
+ *
+ * Moves 2 cells per press to compensate for key repeat rate (~30ms)
+ * being slower than continuous movement (1 cell per 33ms tick).
+ */
+const DISCRETE_MOVE_SPEED = 2
+
+function moveReducer(state: GameState, playerId: string, direction: 'left' | 'right'): ReducerResult {
+  const player = state.players[playerId]
+  if (!player) return { state, events: [], persist: false }
+
+  // Ignore input while dead or respawning
+  if (!player.alive) return { state, events: [], persist: false }
+
+  const next = structuredClone(state)
+  const nextPlayer = next.players[playerId]
+
+  // Move immediately (2 cells per press for snappy feel)
+  if (direction === 'left') {
+    nextPlayer.x = Math.max(LAYOUT.PLAYER_MIN_X, nextPlayer.x - DISCRETE_MOVE_SPEED)
+  } else {
+    nextPlayer.x = Math.min(LAYOUT.PLAYER_MAX_X, nextPlayer.x + DISCRETE_MOVE_SPEED)
+  }
+
+  return { state: next, events: [], persist: false }
+}
+
 function shootReducer(state: GameState, playerId: string): ReducerResult {
   const player = state.players[playerId]
   if (!player || !player.alive) return { state, events: [], persist: false }
@@ -176,10 +211,13 @@ function shootReducer(state: GameState, playerId: string): ReducerResult {
   next.players[playerId].lastShotTick = next.tick
 
   // Create bullet - ID will be assigned by shell
+  // NOTE: player.x is the CENTER of the sprite (not left edge)
+  // The client renders sprites with: leftEdge = player.x - SPRITE_WIDTH/2
+  // So bullet.x = player.x places the bullet at the visual center
   const bullet: BulletEntity = {
     kind: 'bullet',
     id: `b_${next.tick}_${playerId}`,  // Unique bullet ID
-    x: player.x + Math.floor(LAYOUT.PLAYER_WIDTH / 2),  // Center of player sprite
+    x: player.x,  // player.x IS the center, no offset needed
     y: LAYOUT.PLAYER_Y - LAYOUT.BULLET_SPAWN_OFFSET,
     ownerId: playerId,
     dy: -1,  // Moving up
@@ -506,12 +544,14 @@ function tickReducer(state: GameState): ReducerResult {
   }
 
   // Each bottom alien has a chance to shoot
+  // NOTE: Unlike players, alien.x IS the left edge (aliens use left-edge coordinates)
+  // So we DO need to add ALIEN_WIDTH/2 to get the center for bullet spawning
   for (const alien of bottomAliens) {
     if (seededRandom(next) < scaled.alienShootProbability) {
       const bullet: BulletEntity = {
         kind: 'bullet',
         id: `ab_${next.tick}_${alien.id}`,
-        x: alien.x + Math.floor(LAYOUT.ALIEN_WIDTH / 2),  // Center of alien sprite
+        x: alien.x + Math.floor(LAYOUT.ALIEN_WIDTH / 2),  // Left edge + offset = center
         y: alien.y + LAYOUT.ALIEN_HEIGHT,  // Below alien sprite
         ownerId: null,  // Alien bullet
         dy: 1,  // Moving down

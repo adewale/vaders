@@ -442,6 +442,82 @@ export function needsKeyReleaseTimeout(caps: TerminalCapabilities): boolean {
   return !caps.supportsKittyKeyboard
 }
 
+// ─── Keyboard Configuration ─────────────────────────────────────────────────
+
+/**
+ * Default key release timeout in milliseconds.
+ * Used for terminals without Kitty keyboard protocol (no native key release events).
+ *
+ * Balance:
+ * - Must be longer than key repeat interval (~30ms) to avoid false releases
+ * - Must be short enough to feel responsive
+ * - 40ms = ~1 key repeat of buffer (aggressive)
+ *
+ * History: Originally 200ms → 100ms → 50ms → 40ms to minimize "skating".
+ */
+const DEFAULT_KEY_RELEASE_TIMEOUT_MS = 40
+
+/**
+ * Per-terminal key release timeout overrides.
+ * Some terminals may need different values based on their key repeat behavior.
+ */
+const KEY_RELEASE_TIMEOUTS: Partial<Record<TerminalName, number>> = {
+  // VS Code terminal can have variable latency
+  'vscode': 80,
+}
+
+/**
+ * Get the appropriate key release timeout for the current terminal.
+ * Returns 0 for terminals with native key release support (Kitty protocol).
+ *
+ * @param caps - Terminal capabilities (uses cached if not provided)
+ * @returns Timeout in milliseconds, or 0 if no timeout needed
+ */
+export function getKeyReleaseTimeoutMs(caps?: TerminalCapabilities): number {
+  const termCaps = caps ?? TERMINAL_CAPABILITIES
+
+  // Terminals with Kitty keyboard protocol don't need timeout
+  if (termCaps.supportsKittyKeyboard) {
+    return 0
+  }
+
+  // Check for terminal-specific override
+  const override = KEY_RELEASE_TIMEOUTS[termCaps.terminal]
+  if (override !== undefined) {
+    return override
+  }
+
+  return DEFAULT_KEY_RELEASE_TIMEOUT_MS
+}
+
+/**
+ * Check if Kitty keyboard protocol should be enabled for the renderer.
+ * Even for terminals that don't fully support it, enabling it is safe
+ * as OpenTUI handles fallback gracefully.
+ */
+export function shouldEnableKittyKeyboard(): boolean {
+  // Always try to enable - OpenTUI handles unsupported terminals gracefully
+  // This allows terminals with partial support to work better
+  return true
+}
+
+/**
+ * Check if the terminal should use discrete movement (one step per key press).
+ *
+ * Terminals without Kitty keyboard protocol can't detect key releases reliably,
+ * causing "skating" (ship continues moving after key release). Discrete movement
+ * eliminates this by moving one step per key press/repeat instead of continuous
+ * movement while held.
+ *
+ * @param caps - Terminal capabilities (uses cached if not provided)
+ * @returns true if discrete movement should be used
+ */
+export function usesDiscreteMovement(caps?: TerminalCapabilities): boolean {
+  const termCaps = caps ?? TERMINAL_CAPABILITIES
+  // Use discrete movement for terminals without native key release events
+  return !termCaps.supportsKittyKeyboard
+}
+
 /**
  * Check if escape sequence passthrough is needed.
  * Required when running inside tmux/screen to send certain escape sequences
@@ -625,6 +701,134 @@ export function getTerminalQuirks(caps: TerminalCapabilities): string[] {
   }
 
   return quirks
+}
+
+// ─── Platform Detection ─────────────────────────────────────────────────────
+
+/**
+ * Get the system audio player command for the current platform.
+ * - macOS: afplay
+ * - Linux: aplay
+ * - Windows: (not supported, returns empty string)
+ */
+export function getAudioPlayer(): string {
+  switch (process.platform) {
+    case 'darwin':
+      return 'afplay'
+    case 'linux':
+      return 'aplay'
+    default:
+      return ''
+  }
+}
+
+/**
+ * Check if audio playback is supported on this platform.
+ */
+export function isAudioSupported(): boolean {
+  return getAudioPlayer() !== ''
+}
+
+// ─── Color Conversion Utilities ─────────────────────────────────────────────
+
+/**
+ * Convert a hex color to terminal-appropriate format string.
+ * - True color terminals: returns hex as-is (e.g., "#ff5555")
+ * - 256-color terminals: returns "ansi256:N" format
+ *
+ * @param hex - Hex color string
+ * @param caps - Terminal capabilities (uses cached if not provided)
+ */
+export function convertColorForTerminal(hex: string, caps?: TerminalCapabilities): string {
+  const termCaps = caps ?? TERMINAL_CAPABILITIES
+  if (termCaps.supportsTrueColor) {
+    return hex
+  }
+  const idx = hexTo256Color(hex)
+  return `ansi256:${idx}`
+}
+
+/**
+ * Deep convert all color values in an object to terminal-appropriate format.
+ * Recursively processes nested objects to convert all hex color strings.
+ *
+ * @param obj - Object containing hex color strings
+ * @param caps - Terminal capabilities (uses cached if not provided)
+ */
+export function convertColorObject<T>(obj: T, caps?: TerminalCapabilities): T {
+  const termCaps = caps ?? TERMINAL_CAPABILITIES
+
+  if (typeof obj === 'string') {
+    return convertColorForTerminal(obj, termCaps) as T
+  }
+  if (typeof obj === 'object' && obj !== null) {
+    const result: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(obj)) {
+      result[key] = convertColorObject(value, termCaps)
+    }
+    return result as T
+  }
+  return obj
+}
+
+// ─── Terminal Recommendations ───────────────────────────────────────────────
+
+/**
+ * Terminal recommendation for better experience.
+ */
+export interface TerminalRecommendation {
+  name: string
+  url: string
+  reason: string
+}
+
+/**
+ * Get terminal recommendations for the current terminal.
+ * Returns null if the current terminal is already optimal.
+ */
+export function getTerminalRecommendation(caps?: TerminalCapabilities): TerminalRecommendation | null {
+  const termCaps = caps ?? TERMINAL_CAPABILITIES
+
+  switch (termCaps.terminal) {
+    case 'apple-terminal':
+      return {
+        name: 'Ghostty',
+        url: 'ghostty.org',
+        reason: 'Better colors and instant key response',
+      }
+    case 'linux-console':
+      return {
+        name: 'a graphical terminal',
+        url: '',
+        reason: 'Full color and Unicode support',
+      }
+    default:
+      return null
+  }
+}
+
+/**
+ * Check if the current terminal has significant limitations
+ * that warrant showing a recommendation.
+ */
+export function shouldShowTerminalRecommendation(caps?: TerminalCapabilities): boolean {
+  return getTerminalRecommendation(caps) !== null
+}
+
+// ─── Terminal Bell ──────────────────────────────────────────────────────────
+
+/**
+ * Play terminal bell (BEL character).
+ * Used as audio fallback when sound files aren't available.
+ *
+ * @param count - Number of beeps (spaced 100ms apart)
+ */
+export function playTerminalBell(count: number = 1): void {
+  for (let i = 0; i < count; i++) {
+    setTimeout(() => {
+      process.stdout.write('\x07')
+    }, i * 100)
+  }
 }
 
 // ─── Singleton Instance ──────────────────────────────────────────────────────

@@ -3,7 +3,7 @@
 // Uses terminal compatibility layer for keyboard protocol detection
 
 import type { KeyEvent } from '@opentui/core'
-import { getTerminalCapabilities, needsKeyReleaseTimeout } from './terminal'
+import { getKeyReleaseTimeoutMs } from './terminal'
 
 // ─── Internal Key Type (stable, not tied to OpenTUI) ──────────────────────────
 
@@ -44,15 +44,11 @@ export interface HeldKeys {
   right: boolean
 }
 
-// Timeout for auto-releasing keys (fallback for terminals without release events)
-// Balance: Must be longer than key repeat interval (~30ms) to avoid false releases,
-// but short enough to feel responsive. 100ms = ~3 key repeats of buffer.
-// (Previously 200ms caused noticeable "skating" on Apple Terminal)
-const KEY_RELEASE_TIMEOUT_MS = 100
-
-// Check terminal capabilities once at module load
-const termCaps = getTerminalCapabilities()
-const useTimeoutFallback = needsKeyReleaseTimeout(termCaps)
+// Get key release timeout from terminal compatibility layer
+// Returns 0 for terminals with native key release support (Kitty protocol)
+// Returns timeout in ms for terminals that need timeout-based detection
+const KEY_RELEASE_TIMEOUT_MS = getKeyReleaseTimeoutMs()
+const useTimeoutFallback = KEY_RELEASE_TIMEOUT_MS > 0
 
 export function createHeldKeysTracker(): {
   held: HeldKeys

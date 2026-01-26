@@ -8,6 +8,9 @@ import {
   getTerminalDisplayName,
   getColorDepth,
   needsKeyReleaseTimeout,
+  getKeyReleaseTimeoutMs,
+  shouldEnableKittyKeyboard,
+  usesDiscreteMovement,
   needsEscapePassthrough,
   wrapForPassthrough,
   hexTo256Color,
@@ -265,6 +268,70 @@ describe('needsKeyReleaseTimeout', () => {
   test('returns true without Kitty keyboard protocol', () => {
     const caps = { supportsKittyKeyboard: false } as TerminalCapabilities
     expect(needsKeyReleaseTimeout(caps)).toBe(true)
+  })
+})
+
+describe('getKeyReleaseTimeoutMs', () => {
+  test('returns 0 for terminals with Kitty keyboard protocol', () => {
+    const caps = { supportsKittyKeyboard: true, terminal: 'kitty' } as TerminalCapabilities
+    expect(getKeyReleaseTimeoutMs(caps)).toBe(0)
+  })
+
+  test('returns 0 for Ghostty', () => {
+    const caps = { supportsKittyKeyboard: true, terminal: 'ghostty' } as TerminalCapabilities
+    expect(getKeyReleaseTimeoutMs(caps)).toBe(0)
+  })
+
+  test('returns positive timeout for Apple Terminal', () => {
+    const caps = { supportsKittyKeyboard: false, terminal: 'apple-terminal' } as TerminalCapabilities
+    const timeout = getKeyReleaseTimeoutMs(caps)
+    expect(timeout).toBeGreaterThan(0)
+    expect(timeout).toBeLessThanOrEqual(200) // Should be reasonable
+  })
+
+  test('returns positive timeout for iTerm2', () => {
+    const caps = { supportsKittyKeyboard: false, terminal: 'iterm2' } as TerminalCapabilities
+    const timeout = getKeyReleaseTimeoutMs(caps)
+    expect(timeout).toBeGreaterThan(0)
+  })
+
+  test('returns positive timeout for unknown terminals without Kitty protocol', () => {
+    const caps = { supportsKittyKeyboard: false, terminal: 'unknown' } as TerminalCapabilities
+    const timeout = getKeyReleaseTimeoutMs(caps)
+    expect(timeout).toBeGreaterThan(0)
+  })
+})
+
+describe('shouldEnableKittyKeyboard', () => {
+  test('returns true (always try to enable)', () => {
+    expect(shouldEnableKittyKeyboard()).toBe(true)
+  })
+})
+
+describe('usesDiscreteMovement', () => {
+  test('returns false for terminals with Kitty keyboard protocol (smooth movement)', () => {
+    const caps = { supportsKittyKeyboard: true, terminal: 'kitty' } as TerminalCapabilities
+    expect(usesDiscreteMovement(caps)).toBe(false)
+  })
+
+  test('returns false for Ghostty (smooth movement)', () => {
+    const caps = { supportsKittyKeyboard: true, terminal: 'ghostty' } as TerminalCapabilities
+    expect(usesDiscreteMovement(caps)).toBe(false)
+  })
+
+  test('returns true for Apple Terminal (discrete movement, no skating)', () => {
+    const caps = { supportsKittyKeyboard: false, terminal: 'apple-terminal' } as TerminalCapabilities
+    expect(usesDiscreteMovement(caps)).toBe(true)
+  })
+
+  test('returns true for iTerm2 (discrete movement)', () => {
+    const caps = { supportsKittyKeyboard: false, terminal: 'iterm2' } as TerminalCapabilities
+    expect(usesDiscreteMovement(caps)).toBe(true)
+  })
+
+  test('returns true for unknown terminals without Kitty protocol', () => {
+    const caps = { supportsKittyKeyboard: false, terminal: 'unknown' } as TerminalCapabilities
+    expect(usesDiscreteMovement(caps)).toBe(true)
   })
 })
 

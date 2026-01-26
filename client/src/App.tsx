@@ -9,6 +9,7 @@ import { LobbyScreen, getLobbyMenuItemCount } from './components/LobbyScreen'
 import { GameScreen } from './components/GameScreen'
 import { GameOverScreen, getGameOverMenuItemCount } from './components/GameOverScreen'
 import { normalizeKey, createHeldKeysTracker } from './input'
+import { usesDiscreteMovement } from './terminal'
 import { debugLog, clearDebugLog } from './debug'
 import { useTerminalSize, STANDARD_WIDTH, STANDARD_HEIGHT } from './hooks/useTerminalSize'
 import { useGameAudio, playShootSound, playMenuNavigateSound, playMenuSelectSound } from './hooks/useGameAudio'
@@ -200,10 +201,13 @@ function GameContainer({
   onMainMenu: () => void
 }) {
   const renderer = useRenderer()
-  const { getRenderState, playerId, send, connected, updateInput, shoot } = useGameConnection(
+  const { getRenderState, playerId, send, connected, updateInput, move, shoot } = useGameConnection(
     roomUrl,
     playerName
   )
+
+  // Check if we should use discrete movement (for terminals without key release events)
+  const discreteMovement = usesDiscreteMovement()
 
   // Clear debug log on mount
   useEffect(() => {
@@ -408,15 +412,22 @@ function GameContainer({
 
     // During gameplay: handle movement and shooting
     if (currentStatus === 'playing' || currentStatus === 'countdown') {
-      // Movement keys - track held state (allow repeated for continuous movement)
+      // Movement keys
       if (key.type === 'key' && (key.key === 'left' || key.key === 'right')) {
         if (isPress) {
-          keyTracker.current.onPress(key)
-          debugLog('press', 'Movement key pressed', {
-            key: key.key,
-            held: { ...keyTracker.current.held },
-          })
-          updateInput(keyTracker.current.held)
+          if (discreteMovement) {
+            // Discrete mode: each press/repeat moves one step (no skating on release)
+            move(key.key)
+            debugLog('press', 'Discrete move', { key: key.key })
+          } else {
+            // Held state mode: track held state for continuous movement
+            keyTracker.current.onPress(key)
+            debugLog('press', 'Movement key pressed', {
+              key: key.key,
+              held: { ...keyTracker.current.held },
+            })
+            updateInput(keyTracker.current.held)
+          }
         }
         // Note: releases are handled above before the status check
         return

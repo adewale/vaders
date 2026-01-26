@@ -26,10 +26,29 @@ export {
   needsEscapePassthrough,
   wrapForPassthrough,
 
+  // Keyboard configuration
+  getKeyReleaseTimeoutMs,
+  shouldEnableKittyKeyboard,
+  usesDiscreteMovement,
+
   // Color conversion utilities
   hexTo256Color,
   hexTo16Color,
   formatColor,
+  convertColorForTerminal,
+  convertColorObject,
+
+  // Platform utilities
+  getAudioPlayer,
+  isAudioSupported,
+
+  // Terminal recommendations
+  getTerminalRecommendation,
+  shouldShowTerminalRecommendation,
+  type TerminalRecommendation,
+
+  // Terminal bell
+  playTerminalBell,
 
   // Diagnostics
   getTerminalQuirks,
@@ -47,6 +66,7 @@ import {
   detectTerminal,
   detectCapabilities,
   getTerminalDisplayName as _getDisplayName,
+  getKeyReleaseTimeoutMs,
 } from './compatibility'
 
 /**

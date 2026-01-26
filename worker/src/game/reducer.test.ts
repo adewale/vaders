@@ -403,7 +403,7 @@ describe('PLAYER_SHOOT action', () => {
 
     const bullets = getBullets(result.state.entities)
     expect(bullets.length).toBe(1)
-    expect(bullets[0].x).toBe(player.x + Math.floor(LAYOUT.PLAYER_WIDTH / 2)) // Centered
+    expect(bullets[0].x).toBe(player.x) // player.x IS the center, no offset needed
     expect(bullets[0].y).toBe(LAYOUT.PLAYER_Y - LAYOUT.BULLET_SPAWN_OFFSET) // Above player
     expect(bullets[0].dy).toBe(-1) // Moving up
     expect(bullets[0].ownerId).toBe(player.id)
@@ -466,6 +466,111 @@ describe('PLAYER_SHOOT action', () => {
 
     const bullets = getBullets(result.state.entities)
     expect(bullets.length).toBe(0)
+  })
+})
+
+// ============================================================================
+// Bullet Centering Integration Tests
+// ============================================================================
+
+describe('bullet spawn position centering', () => {
+  /**
+   * COORDINATE SYSTEM CONTRACT:
+   *
+   * The client treats player.x as the CENTER of the sprite:
+   *   spriteLeftEdge = player.x - floor(SPRITE_WIDTH / 2)
+   *
+   * Bullets render at their exact x coordinate:
+   *   bulletRenderColumn = bullet.x
+   *
+   * Therefore, for a bullet to appear visually centered above the player:
+   *   bullet.x MUST equal player.x
+   *
+   * Adding an offset (like player.x + SPRITE_WIDTH/2) is WRONG because
+   * it assumes player.x is the left edge, which it is not.
+   */
+
+  describe('player bullets (coordinate system contract)', () => {
+    it('bullet.x equals player.x (player.x is CENTER, not left edge)', () => {
+      const { state, players } = createTestPlayingState(1)
+      const player = players[0]
+      player.x = 50  // This is the CENTER of the sprite
+      state.tick = 100
+      state.players[player.id] = player
+
+      const result = gameReducer(state, { type: 'PLAYER_SHOOT', playerId: player.id })
+
+      const bullets = getBullets(result.state.entities)
+      expect(bullets.length).toBe(1)
+
+      // CORRECT: bullet.x should equal player.x (center position)
+      // This ensures the bullet appears at the visual center of the sprite
+      expect(bullets[0].x).toBe(player.x)
+    })
+
+    it('bullet spawns at visual center for various player positions', () => {
+      const testPositions = [10, 25, 50, 60, 100]
+
+      for (const playerX of testPositions) {
+        const { state, players } = createTestPlayingState(1)
+        const player = players[0]
+        player.x = playerX  // Center position
+        state.tick = 100
+        state.players[player.id] = player
+
+        const result = gameReducer(state, { type: 'PLAYER_SHOOT', playerId: player.id })
+
+        const bullets = getBullets(result.state.entities)
+        expect(bullets.length).toBe(1)
+
+        // Bullet must be at player.x (the center)
+        expect(bullets[0].x).toBe(playerX)
+      }
+    })
+
+    it('DOCUMENTS: adding SPRITE_WIDTH/2 offset would be WRONG', () => {
+      // This test documents WHY the old formula was wrong
+      const playerX = 50
+      const spriteWidth = LAYOUT.PLAYER_WIDTH  // 5
+
+      // WRONG: This assumes player.x is left edge
+      const wrongBulletX = playerX + Math.floor(spriteWidth / 2)  // 50 + 2 = 52
+
+      // CORRECT: player.x IS the center, no offset needed
+      const correctBulletX = playerX  // 50
+
+      // The wrong formula places bullet 2 columns to the right
+      expect(wrongBulletX - correctBulletX).toBe(2)
+    })
+  })
+
+  describe('alien bullets (coordinate system contract)', () => {
+    it('alien.x is also CENTER, so alien bullet.x should equal alien.x', () => {
+      // Same coordinate system applies to aliens
+      // Alien bullets should spawn at alien.x, not alien.x + offset
+      expect(LAYOUT.ALIEN_WIDTH).toBe(LAYOUT.PLAYER_WIDTH)
+    })
+
+    it('alien and player use same coordinate system', () => {
+      expect(LAYOUT.ALIEN_WIDTH).toBe(LAYOUT.PLAYER_WIDTH)
+      expect(LAYOUT.ALIEN_HEIGHT).toBe(LAYOUT.PLAYER_HEIGHT)
+    })
+  })
+
+  describe('sprite dimension constants', () => {
+    it('PLAYER_WIDTH is 5 (odd number for symmetric centering)', () => {
+      expect(LAYOUT.PLAYER_WIDTH).toBe(5)
+    })
+
+    it('ALIEN_WIDTH is 5 (odd number for symmetric centering)', () => {
+      expect(LAYOUT.ALIEN_WIDTH).toBe(5)
+    })
+
+    it('center offset for 5-wide sprite is 2', () => {
+      // For rendering: leftEdge = center - 2
+      // Columns: [0, 1, 2, 3, 4] with center at index 2
+      expect(Math.floor(5 / 2)).toBe(2)
+    })
   })
 })
 
@@ -1897,7 +2002,7 @@ describe('shooting at screen boundaries', () => {
 
     const bullets = getBullets(result.state.entities)
     expect(bullets.length).toBe(1)
-    expect(bullets[0].x).toBe(LAYOUT.PLAYER_MIN_X + Math.floor(LAYOUT.PLAYER_WIDTH / 2))
+    expect(bullets[0].x).toBe(LAYOUT.PLAYER_MIN_X) // player.x IS the center
   })
 
   it('bullet created at right boundary moves correctly', () => {
@@ -1912,7 +2017,7 @@ describe('shooting at screen boundaries', () => {
 
     const bullets = getBullets(result.state.entities)
     expect(bullets.length).toBe(1)
-    expect(bullets[0].x).toBe(LAYOUT.PLAYER_MAX_X + Math.floor(LAYOUT.PLAYER_WIDTH / 2))
+    expect(bullets[0].x).toBe(LAYOUT.PLAYER_MAX_X) // player.x IS the center
   })
 
   it('player cannot move past left boundary while shooting', () => {

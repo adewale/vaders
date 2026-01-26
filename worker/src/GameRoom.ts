@@ -276,6 +276,14 @@ export class GameRoom extends DurableObject<Env> {
           break
         }
 
+        case 'move': {
+          // Discrete movement - one step per message (for terminals without key release events)
+          if (playerId && this.game.players[playerId] && (this.game.status === 'playing' || this.game.status === 'countdown')) {
+            this.inputQueue.push({ type: 'PLAYER_MOVE', playerId, direction: msg.direction })
+          }
+          break
+        }
+
         case 'shoot': {
           if (playerId && this.game.players[playerId] && this.game.status === 'playing') {
             this.inputQueue.push({ type: 'PLAYER_SHOOT', playerId })
