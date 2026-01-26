@@ -189,7 +189,7 @@ async function main() {
   const finalClientArgs = [...clientArgs]
 
   // Run the client
-  const serverUrl = localMode ? workerUrl : (process.env.VADERS_SERVER ?? 'https://vaders.workers.dev')
+  const serverUrl = localMode ? workerUrl : (process.env.VADERS_SERVER ?? 'https://vaders.adewale-883.workers.dev')
   const clientProcess = spawn({
     cmd: ['bun', 'run', 'src/index.tsx', ...finalClientArgs],
     cwd: join(projectRoot, 'client'),
