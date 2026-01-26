@@ -17,7 +17,7 @@ The project has three main parts:
 ## Quick Start
 
 ```bash
-# From project root - starts server and client, shows launch menu
+# From project root - connects to remote server, shows launch menu
 bun run vaders
 ```
 
@@ -30,18 +30,21 @@ The launch screen provides all options:
 ## Command-Line Options
 
 ```bash
-bun run vaders                     # Show launch menu (default)
+bun run vaders                     # Show launch menu (connects to remote server)
 bun run vaders -- --room ABC123    # Join room directly
 bun run vaders -- --matchmake      # Auto-matchmake directly
 bun run vaders -- --name "Alice"   # Set player name
-bun run vaders -- --remote         # Use deployed server instead of local
+bun run vaders -- --local          # Run local server for development
 ```
 
 ## Development Commands
 
 ```bash
-# Run game (unified - starts worker and client together)
-bun run vaders                 # Solo mode by default
+# Run game (connects to deployed remote server by default)
+bun run vaders
+
+# Run with local server for development
+bun run vaders -- --local
 
 # Run components separately
 bun run dev:client             # Client only (needs worker running)
@@ -53,10 +56,12 @@ cd worker && bunx wrangler deploy
 
 ## Key Technical Details
 
-- **Game tick rate**: 60ms intervals in Durable Object
+- **Game tick rate**: 33ms intervals (~30Hz) in Durable Object
 - **State sync**: Full sync on join, delta updates on each tick
-- **Screen size**: Fixed 80×24 terminal grid
-- **Player colors**: green (P1), cyan (P2), yellow (P3), magenta (P4)
+- **Screen size**: Fixed 120×36 terminal grid
+- **Sprites**: 2-line tall, 5-character wide for all entities
+- **Player colors**: cyan (P1), orange (P2), magenta (P3), lime (P4)
+- **Movement**: Space Invaders-style (1 cell/tick, no inertia)
 
 ### Scaling by Player Count
 

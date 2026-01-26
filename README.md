@@ -44,7 +44,8 @@ shared/     TypeScript types and protocol definitions
 ## Development
 
 ```bash
-bun run vaders              # Start game (local server + client)
+bun run vaders              # Start game (connects to remote server)
+bun run vaders -- --local   # Start game with local server
 bun run vaders -- --check   # Run system diagnostics
 bun run dev:worker          # Worker only
 bun run dev:client          # Client only
