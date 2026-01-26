@@ -17,11 +17,11 @@ const WORKER_READY_TIMEOUT = 30000 // 30 seconds
 
 // Parse arguments - pass through to client except our own flags
 const args = process.argv.slice(2)
-const localMode = !args.includes('--remote')
+const localMode = args.includes('--local')
 const helpMode = args.includes('--help') || args.includes('-h')
 
 // Remove our own flags from client args
-const clientArgs = args.filter(arg => arg !== '--remote')
+const clientArgs = args.filter(arg => arg !== '--local')
 
 if (helpMode) {
   console.log(`
@@ -32,7 +32,7 @@ Usage:
   vaders --room ABC123       Join specific room directly
   vaders --matchmake         Auto-join open game
   vaders --name "Alice"      Set player name
-  vaders --remote            Connect to deployed server (default: local)
+  vaders --local             Run local server (default: remote)
 
 Controls:
   Arrow keys or A/D   Move left/right
