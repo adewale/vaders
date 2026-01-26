@@ -154,9 +154,9 @@ export default {
       })
     }
 
-    // Health check
+    // Health check with game identifier
     if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ status: 'ok' }), {
+      return new Response(JSON.stringify({ status: 'ok', game: 'vaders', version: '1.0.0' }), {
         headers: { 'Content-Type': 'application/json', ...corsHeaders }
       })
     }

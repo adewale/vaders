@@ -14,6 +14,8 @@ interface LaunchScreenProps {
   onJoinRoom: (code: string) => void
   onMatchmake: () => void
   version: string
+  serverUrl: string
+  logPath: string
 }
 
 const MENU_ITEMS = ['solo', 'create', 'join', 'matchmake'] as const
@@ -24,7 +26,9 @@ export function LaunchScreen({
   onCreateRoom,
   onJoinRoom,
   onMatchmake,
-  version
+  version,
+  serverUrl,
+  logPath,
 }: LaunchScreenProps) {
   const renderer = useRenderer()
   const [selectedIndex, setSelectedIndex] = useState(0)
@@ -176,10 +180,16 @@ export function LaunchScreen({
         {'  '}↑/↓ Navigate   ENTER Select   Q Quit
       </text>
       <box flexGrow={1} />
-      <box>
-        <text fg={COLORS.ui.dim}>v{version}</text>
-        <box flexGrow={1} />
-        <text fg={COLORS.ui.dim}>1-4 Players  OpenTUI + Bun</text>
+      <box flexDirection="column">
+        <box>
+          <text fg={COLORS.ui.dim}>Server: {serverUrl}</text>
+          {logPath && <text fg={COLORS.ui.dim}>  Log: {logPath}</text>}
+        </box>
+        <box>
+          <text fg={COLORS.ui.dim}>v{version}</text>
+          <box flexGrow={1} />
+          <text fg={COLORS.ui.dim}>1-4 Players  OpenTUI + Bun</text>
+        </box>
       </box>
       </box>
     </box>

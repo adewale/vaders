@@ -632,6 +632,113 @@ if (
 
 ---
 
+## 9. Testing Gaps Discovered
+
+### Unit Tests Don't Catch Client-Side Protocol Issues
+
+**Problem:** Server-side unit tests verified events were *sent* but not *received and processed*. All tests passed while the client silently ignored event messages.
+
+```typescript
+// Server test passes - event was sent
+it('broadcasts player_joined event', async () => {
+  await joinPlayer(gameRoom, ws, 'Alice')
+  const eventCall = ws.send.mock.calls.find(call => {
+    const msg = JSON.parse(call[0])
+    return msg.type === 'event' && msg.name === 'player_joined'
+  })
+  expect(eventCall).toBeDefined()  // ✓ Passes
+})
+
+// But client IGNORES event messages entirely
+ws.onmessage = (event) => {
+  const msg = JSON.parse(event.data)
+  if (msg.type === 'sync') { /* handled */ }
+  if (msg.type === 'error') { /* handled */ }
+  if (msg.type === 'pong') { /* handled */ }
+  // msg.type === 'event' → SILENTLY DROPPED
+}
+```
+
+**Fix applied:** Added event handling to `useGameConnection.ts`:
+
+```typescript
+if (msg.type === 'event') {
+  setState(s => {
+    const updates: Partial<ConnectionState> = { lastEvent: msg }
+    if (msg.name === 'game_over') {
+      updates.gameResult = msg.data.result
+    }
+    return { ...s, ...updates }
+  })
+  return
+}
+```
+
+**Lesson:** Integration tests must verify the full flow across client and server. Unit tests for protocol messages should exist on both sides.
+
+### Coordinate System Mismatches
+
+**Problem:** Server treated `player.x` as left edge, client treated it as center. Bullets appeared 2 columns off-center.
+
+```typescript
+// Server (WRONG - treating player.x as left edge)
+bullet.x = player.x + Math.floor(LAYOUT.PLAYER_WIDTH / 2)
+
+// Client (treating player.x as center)
+const spriteX = player.x - Math.floor(SPRITE_SIZE.player.width / 2)
+```
+
+**Solution:** Document coordinate system contract and add tests that verify visual alignment:
+
+```typescript
+// Coordinate System Contract Tests
+test('bullet spawns at visual center of player sprite', () => {
+  const playerX = 50  // player.x IS the center
+  const correctBulletX = playerX  // No offset needed
+  expect(correctBulletX).toBe(50)
+})
+
+test('DOCUMENTS: adding SPRITE_WIDTH/2 offset would be WRONG', () => {
+  const playerX = 50
+  const wrongBulletX = playerX + Math.floor(SPRITE_SIZE.player.width / 2)
+  expect(wrongBulletX).toBe(52)  // 2 columns off!
+})
+```
+
+**Lesson:** When client and server share coordinate semantics, add contract tests on both sides that document and enforce the same understanding.
+
+### Missing Game Result in State
+
+**Problem:** `game_over` event contains victory/defeat result, but `GameState` has no `result` field:
+
+```typescript
+// Event has result
+this.broadcast({ type: 'event', name: 'game_over', data: { result: 'victory' } })
+
+// But GameState doesn't
+interface GameState {
+  status: GameStatus  // 'game_over' but no victory/defeat field
+}
+```
+
+**Fix applied:** Client now extracts `gameResult` from `game_over` event and exposes it:
+
+```typescript
+interface ConnectionState {
+  // ...
+  gameResult: 'victory' | 'defeat' | null
+}
+
+// In event handler:
+if (msg.name === 'game_over') {
+  updates.gameResult = msg.data.result
+}
+```
+
+**Lesson:** If information is only in events and clients ignore events, that information is lost. Critical game state should be in `GameState`, not only in events.
+
+---
+
 ## Summary: Key Principles
 
 1. **Server is authoritative.** Client renders, server decides.
@@ -653,3 +760,7 @@ if (
 9. **Use hibernation-friendly patterns.** Alarms, not intervals. Auto-ping responses.
 
 10. **Log wide events.** One structured log per significant action, not scattered console.logs.
+
+11. **Integration tests across protocol boundaries.** Unit tests that verify "message sent" don't catch "message ignored." Test the full client-server flow.
+
+12. **Document coordinate system contracts.** When client and server share spatial semantics, add explicit tests that enforce the same interpretation (center vs left edge, etc.).

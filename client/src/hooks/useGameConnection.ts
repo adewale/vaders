@@ -2,12 +2,16 @@
 // WebSocket connection hook with prediction and interpolation
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import type { GameState, GameConfig, ClientMessage, ServerMessage, InputState } from '../../../shared/types'
+import type { GameState, GameConfig, ClientMessage, ServerMessage, ServerEvent, InputState } from '../../../shared/types'
 import { LAYOUT } from '../../../shared/types'
 
 const PING_INTERVAL = 30000
 const PONG_TIMEOUT = 5000
 const SYNC_INTERVAL_MS = 33  // Expected sync rate for lerp calculation
+
+// Event data types for type-safe access
+export type GameEventName = ServerEvent['name']
+export type GameEventData<T extends GameEventName> = Extract<ServerEvent, { name: T }>['data']
 
 interface ConnectionState {
   serverState: GameState | null
@@ -17,6 +21,9 @@ interface ConnectionState {
   config: GameConfig | null
   connected: boolean
   error: string | null
+  // Event handling
+  lastEvent: ServerEvent | null
+  gameResult: 'victory' | 'defeat' | null
 }
 
 export function useGameConnection(
@@ -31,6 +38,8 @@ export function useGameConnection(
     config: null,
     connected: false,
     error: null,
+    lastEvent: null,
+    gameResult: null,
   })
 
   const wsRef = useRef<WebSocket | null>(null)
@@ -90,7 +99,20 @@ export function useGameConnection(
               return
             }
 
-            // Game events are handled in sync messages
+            // Handle game events
+            if (msg.type === 'event') {
+              setState(s => {
+                const updates: Partial<ConnectionState> = { lastEvent: msg }
+
+                // Extract game result from game_over event
+                if (msg.name === 'game_over') {
+                  updates.gameResult = (msg.data as { result: 'victory' | 'defeat' }).result
+                }
+
+                return { ...s, ...updates }
+              })
+              return
+            }
           } catch {
             // Invalid JSON
           }
@@ -208,6 +230,8 @@ export function useGameConnection(
     playerId: state.playerId,
     connected: state.connected,
     error: state.error,
+    lastEvent: state.lastEvent,
+    gameResult: state.gameResult,
     send,
     updateInput,
     move,

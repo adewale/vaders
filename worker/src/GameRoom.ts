@@ -185,6 +185,16 @@ export class GameRoom extends DurableObject<Env> {
       const attachment = ws.deserializeAttachment() as WebSocketAttachment | null
       const playerId = attachment?.playerId
 
+      // Diagnostic logging for multiplayer debugging
+      console.log('[WS] Message', {
+        type: msg.type,
+        hasAttachment: !!attachment,
+        playerId: playerId ?? 'NULL',
+        playerExists: playerId ? !!this.game.players[playerId] : false,
+        gameStatus: this.game.status,
+        playerCount: Object.keys(this.game.players).length,
+      })
+
       switch (msg.type) {
         case 'join': {
           // Prevent duplicate joins
@@ -223,6 +233,12 @@ export class GameRoom extends DurableObject<Env> {
 
           // Store playerId in WebSocket attachment (survives hibernation)
           ws.serializeAttachment({ playerId: player.id } satisfies WebSocketAttachment)
+          console.log('[JOIN] Attachment set', {
+            playerId: player.id,
+            name: player.name,
+            slot: player.slot,
+            totalPlayers: Object.keys(this.game.players).length,
+          })
 
           // Send initial sync with playerId and config (only on join)
           ws.send(JSON.stringify({ type: 'sync', state: this.game, playerId: player.id, config: this.game.config }))
@@ -245,6 +261,11 @@ export class GameRoom extends DurableObject<Env> {
         case 'ready': {
           if (playerId && this.game.players[playerId] && !this.game.readyPlayerIds.includes(playerId)) {
             this.game.readyPlayerIds.push(playerId)
+            console.log('[READY]', {
+              playerId,
+              readyCount: this.game.readyPlayerIds.length,
+              totalPlayers: Object.keys(this.game.players).length,
+            })
             this.broadcast({ type: 'event', name: 'player_ready', data: { playerId } })
             this.broadcastFullState()
             this.persistState()
@@ -270,7 +291,11 @@ export class GameRoom extends DurableObject<Env> {
         }
 
         case 'input': {
-          if (playerId && this.game.players[playerId]) {
+          const inputAccepted = !!(playerId && this.game.players[playerId])
+          if (!inputAccepted) {
+            console.log('[INPUT] DROPPED', { playerId: playerId ?? 'NULL', reason: !playerId ? 'no playerId' : 'player not found' })
+          }
+          if (inputAccepted) {
             this.inputQueue.push({ type: 'PLAYER_INPUT', playerId, input: msg.held })
           }
           break
@@ -278,14 +303,31 @@ export class GameRoom extends DurableObject<Env> {
 
         case 'move': {
           // Discrete movement - one step per message (for terminals without key release events)
-          if (playerId && this.game.players[playerId] && (this.game.status === 'playing' || this.game.status === 'countdown')) {
+          const moveAccepted = !!(playerId && this.game.players[playerId] && (this.game.status === 'playing' || this.game.status === 'countdown'))
+          if (!moveAccepted) {
+            console.log('[MOVE] DROPPED', {
+              playerId: playerId ?? 'NULL',
+              playerExists: playerId ? !!this.game.players[playerId] : false,
+              status: this.game.status,
+              direction: msg.direction,
+            })
+          }
+          if (moveAccepted) {
             this.inputQueue.push({ type: 'PLAYER_MOVE', playerId, direction: msg.direction })
           }
           break
         }
 
         case 'shoot': {
-          if (playerId && this.game.players[playerId] && this.game.status === 'playing') {
+          const shootAccepted = !!(playerId && this.game.players[playerId] && this.game.status === 'playing')
+          if (!shootAccepted) {
+            console.log('[SHOOT] DROPPED', {
+              playerId: playerId ?? 'NULL',
+              playerExists: playerId ? !!this.game.players[playerId] : false,
+              status: this.game.status,
+            })
+          }
+          if (shootAccepted) {
             this.inputQueue.push({ type: 'PLAYER_SHOOT', playerId })
           }
           break
@@ -345,6 +387,8 @@ export class GameRoom extends DurableObject<Env> {
     const playerCount = Object.keys(this.game.players).length
     const readyCount = this.game.readyPlayerIds.length
 
+    console.log('[CHECK_START]', { playerCount, readyCount, willStart: playerCount >= 2 && readyCount === playerCount })
+
     if (playerCount >= 2 && readyCount === playerCount) {
       await this.startCountdown()
     }
@@ -352,6 +396,11 @@ export class GameRoom extends DurableObject<Env> {
 
   private async startCountdown() {
     if (!this.game) return
+    console.log('[COUNTDOWN_START]', {
+      players: Object.keys(this.game.players),
+      readyPlayerIds: this.game.readyPlayerIds,
+      wsCount: this.ctx.getWebSockets().length,
+    })
     this.game.status = 'countdown'
     this.game.countdownRemaining = 3
     this.countdownRemaining = 3
@@ -393,6 +442,12 @@ export class GameRoom extends DurableObject<Env> {
     if (!this.game) return
     const playerCount = Object.keys(this.game.players).length
     const scaled = getScaledConfig(playerCount, this.game.config)
+
+    console.log('[GAME_START]', {
+      players: Object.entries(this.game.players).map(([id, p]) => ({ id, name: p.name, slot: p.slot })),
+      wsCount: this.ctx.getWebSockets().length,
+      mode: playerCount === 1 ? 'solo' : 'coop',
+    })
 
     this.game.status = 'playing'
     this.game.countdownRemaining = null
@@ -501,12 +556,20 @@ export class GameRoom extends DurableObject<Env> {
     const syncMessage = { type: 'sync', state: this.game }
     const data = JSON.stringify(syncMessage)
     // Use ctx.getWebSockets() for hibernatable WebSockets
-    for (const ws of this.ctx.getWebSockets()) {
+    const webSockets = this.ctx.getWebSockets()
+    let sent = 0, failed = 0
+    for (const ws of webSockets) {
       try {
         ws.send(data)
-      } catch {
-        // WebSocket may be closed
+        sent++
+      } catch (err) {
+        failed++
+        console.log('[BROADCAST] Send failed', { error: String(err) })
       }
+    }
+    // Log only on status changes or periodically to reduce noise
+    if (this.game.status !== 'playing' || this.game.tick % 300 === 0) {
+      console.log('[BROADCAST]', { status: this.game.status, wsCount: webSockets.length, sent, failed })
     }
   }
 

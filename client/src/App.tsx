@@ -17,6 +17,7 @@ import { AudioManager, MusicManager } from './audio'
 
 const VERSION = '1.0.0'
 const SERVER_URL = process.env.VADERS_SERVER ?? 'http://localhost:8787'
+const LOG_PATH = process.env.VADERS_LOG_PATH ?? ''
 
 /** Construct WebSocket URL for a room from the HTTP server URL */
 function getRoomWsUrl(roomCode: string): string {
@@ -163,6 +164,8 @@ export function App({
         onJoinRoom={handleJoinRoom}
         onMatchmake={handleMatchmake}
         version={VERSION}
+        serverUrl={SERVER_URL}
+        logPath={LOG_PATH}
       />
     )
   }
