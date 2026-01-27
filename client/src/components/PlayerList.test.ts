@@ -15,10 +15,14 @@ function createMockPlayer(overrides: Partial<Player> = {}): Player {
     id: 'player-1',
     name: 'TestPlayer',
     slot: 1 as PlayerSlot,
+    color: 'green' as const,
     x: 60,
     lives: 3,
     alive: true,
     kills: 0,
+    lastShotTick: 0,
+    respawnAtTick: null,
+    inputState: { left: false, right: false },
     ...overrides,
   }
 }
@@ -151,9 +155,10 @@ describe('Player List Sorting', () => {
     const players = createMockPlayers(4)
     const sorted = sortPlayersBySlot(players)
 
-    for (let i = 0; i < 4; i++) {
-      expect(sorted[i].slot).toBe(i + 1)
-    }
+    expect(sorted[0].slot).toBe(1)
+    expect(sorted[1].slot).toBe(2)
+    expect(sorted[2].slot).toBe(3)
+    expect(sorted[3].slot).toBe(4)
   })
 
   test('reverse sorted list is correctly sorted', () => {

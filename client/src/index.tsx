@@ -101,7 +101,7 @@ async function main() {
   // shouldEnableKittyKeyboard() is determined by terminal compatibility layer
   const renderer = await createCliRenderer({
     exitOnCtrlC: false,
-    useKittyKeyboard: shouldEnableKittyKeyboard() ? { events: true } : false,
+    useKittyKeyboard: shouldEnableKittyKeyboard() ? { events: true } : undefined,
   })
   const root = createRoot(renderer)
 
