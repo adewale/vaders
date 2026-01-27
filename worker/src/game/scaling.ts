@@ -1,8 +1,8 @@
 // worker/src/game/scaling.ts
 // Player count scaling logic
 
-import type { GameConfig, ScaledConfig, GameState, BulletEntity } from '../../../shared/types'
-import { LAYOUT } from '../../../shared/types'
+import type { GameConfig, ScaledConfig, GameState } from '../../../shared/types'
+import { LAYOUT, getBullets, getAliens, applyPlayerInput } from '../../../shared/types'
 
 export function getScaledConfig(playerCount: number, baseConfig: GameConfig): ScaledConfig {
   // shootsPerSecond: average shots aliens fire per second (from bottom row)
@@ -50,19 +50,14 @@ export function tickMovementOnly(state: GameState, config: GameConfig): GameStat
   const next = structuredClone(state)
   next.tick++
 
-  // Process player input (uses LAYOUT constants)
+  // Process player input using shared utility
   for (const player of Object.values(next.players)) {
     if (!player.alive) continue
-    if (player.inputState.left) {
-      player.x = Math.max(LAYOUT.PLAYER_MIN_X, player.x - config.playerMoveSpeed)
-    }
-    if (player.inputState.right) {
-      player.x = Math.min(LAYOUT.PLAYER_MAX_X, player.x + config.playerMoveSpeed)
-    }
+    player.x = applyPlayerInput(player.x, player.inputState, config.playerMoveSpeed)
   }
 
-  // Move bullets
-  const bullets = next.entities.filter((e): e is BulletEntity => e.kind === 'bullet')
+  // Move bullets using shared filter helper
+  const bullets = getBullets(next.entities)
   for (const bullet of bullets) {
     bullet.y += bullet.dy * config.baseBulletSpeed
   }
@@ -72,13 +67,13 @@ export function tickMovementOnly(state: GameState, config: GameConfig): GameStat
     e.kind !== 'bullet' || (e.y > 0 && e.y < config.height)
   )
 
-  // Move aliens (if on move interval, uses LAYOUT constants)
+  // Move aliens (if on move interval) using shared filter helper
   if (next.tick % scaled.alienMoveIntervalTicks === 0) {
-    const aliens = next.entities.filter((e): e is import('../../../shared/types').AlienEntity => e.kind === 'alien' && e.alive)
+    const aliens = getAliens(next.entities).filter(a => a.alive)
     for (const alien of aliens) {
       alien.x += next.alienDirection * 2
     }
-    // Check for wall collision and reverse (uses LAYOUT.ALIEN_MIN_X/MAX_X)
+    // Check for wall collision and reverse
     const hitWall = aliens.some(a => a.x <= LAYOUT.ALIEN_MIN_X || a.x >= LAYOUT.ALIEN_MAX_X)
     if (hitWall) {
       next.alienDirection *= -1

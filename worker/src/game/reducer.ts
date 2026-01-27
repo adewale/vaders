@@ -18,6 +18,9 @@ import {
   getBarriers,
   getUFOs,
   seededRandom,
+  constrainPlayerX,
+  applyPlayerInput,
+  checkBulletCollision,
 } from '../../../shared/types'
 import { getScaledConfig } from './scaling'
 
@@ -189,11 +192,7 @@ function moveReducer(state: GameState, playerId: string, direction: 'left' | 'ri
   const nextPlayer = next.players[playerId]
 
   // Move immediately (2 cells per press for snappy feel)
-  if (direction === 'left') {
-    nextPlayer.x = Math.max(LAYOUT.PLAYER_MIN_X, nextPlayer.x - DISCRETE_MOVE_SPEED)
-  } else {
-    nextPlayer.x = Math.min(LAYOUT.PLAYER_MAX_X, nextPlayer.x + DISCRETE_MOVE_SPEED)
-  }
+  nextPlayer.x = constrainPlayerX(nextPlayer.x, direction, DISCRETE_MOVE_SPEED)
 
   return { state: next, events: [], persist: false }
 }
@@ -359,12 +358,7 @@ function tickReducer(state: GameState): ReducerResult {
 
     // Space Invaders style movement: instant response, no inertia
     // Ship moves while key is held, stops immediately when released
-    if (player.inputState.left) {
-      player.x = Math.max(LAYOUT.PLAYER_MIN_X, player.x - next.config.playerMoveSpeed)
-    }
-    if (player.inputState.right) {
-      player.x = Math.min(LAYOUT.PLAYER_MAX_X, player.x + next.config.playerMoveSpeed)
-    }
+    player.x = applyPlayerInput(player.x, player.inputState, next.config.playerMoveSpeed)
   }
 
   // 2. Move bullets
@@ -388,11 +382,7 @@ function tickReducer(state: GameState): ReducerResult {
     for (const alien of aliens) {
       if (!alien.alive) continue
 
-      // Simple AABB collision
-      if (
-        Math.abs(bullet.x - alien.x - 1) < LAYOUT.COLLISION_H &&
-        Math.abs(bullet.y - alien.y) < LAYOUT.COLLISION_V
-      ) {
+      if (checkBulletCollision(bullet.x, bullet.y, alien.x, alien.y)) {
         alien.alive = false
         bullet.y = -100  // Mark for removal
 
@@ -425,11 +415,7 @@ function tickReducer(state: GameState): ReducerResult {
     for (const ufo of currentUfos) {
       if (!ufo.alive) continue
 
-      // UFO is 3 chars wide
-      if (
-        Math.abs(bullet.x - ufo.x - 1) < LAYOUT.COLLISION_H &&
-        Math.abs(bullet.y - ufo.y) < LAYOUT.COLLISION_V
-      ) {
+      if (checkBulletCollision(bullet.x, bullet.y, ufo.x, ufo.y)) {
         ufo.alive = false
         bullet.y = -100  // Mark for removal
 
@@ -456,10 +442,7 @@ function tickReducer(state: GameState): ReducerResult {
     for (const player of Object.values(next.players)) {
       if (!player.alive) continue
 
-      if (
-        Math.abs(bullet.x - player.x - 1) < LAYOUT.COLLISION_H &&
-        Math.abs(bullet.y - LAYOUT.PLAYER_Y) < LAYOUT.COLLISION_V
-      ) {
+      if (checkBulletCollision(bullet.x, bullet.y, player.x, LAYOUT.PLAYER_Y)) {
         bullet.y = 100  // Mark for removal
         player.alive = false
         player.lives--

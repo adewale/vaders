@@ -214,6 +214,78 @@ export function getUFOs(entities: Entity[]): UFOEntity[] {
   return entities.filter((e): e is UFOEntity => e.kind === 'ufo')
 }
 
+// ─── Movement Utilities ──────────────────────────────────────────────────────
+
+/**
+ * Constrain a player's X position within movement boundaries.
+ * Centralizes boundary checking that was previously duplicated across files.
+ *
+ * @param currentX - Current X position
+ * @param direction - Movement direction ('left' or 'right')
+ * @param speed - Movement speed in cells
+ * @returns New X position constrained to [PLAYER_MIN_X, PLAYER_MAX_X]
+ */
+export function constrainPlayerX(
+  currentX: number,
+  direction: 'left' | 'right',
+  speed: number
+): number {
+  if (direction === 'left') {
+    return Math.max(LAYOUT.PLAYER_MIN_X, currentX - speed)
+  }
+  return Math.min(LAYOUT.PLAYER_MAX_X, currentX + speed)
+}
+
+/**
+ * Apply held input to player position (for continuous movement).
+ * Player moves while keys are held, stops immediately when released.
+ *
+ * @param currentX - Current X position
+ * @param input - Input state with left/right booleans
+ * @param speed - Movement speed in cells
+ * @returns New X position
+ */
+export function applyPlayerInput(
+  currentX: number,
+  input: { left: boolean; right: boolean },
+  speed: number
+): number {
+  let x = currentX
+  if (input.left) {
+    x = Math.max(LAYOUT.PLAYER_MIN_X, x - speed)
+  }
+  if (input.right) {
+    x = Math.min(LAYOUT.PLAYER_MAX_X, x + speed)
+  }
+  return x
+}
+
+// ─── Collision Utilities ─────────────────────────────────────────────────────
+
+/**
+ * Check if a bullet collides with a target entity.
+ * Uses AABB collision with configurable thresholds.
+ *
+ * @param bulletX - Bullet X position
+ * @param bulletY - Bullet Y position
+ * @param targetX - Target entity X position
+ * @param targetY - Target entity Y position
+ * @param offsetX - X offset for target center (default: 1 for 5-wide sprites)
+ * @returns true if collision detected
+ */
+export function checkBulletCollision(
+  bulletX: number,
+  bulletY: number,
+  targetX: number,
+  targetY: number,
+  offsetX: number = 1
+): boolean {
+  return (
+    Math.abs(bulletX - targetX - offsetX) < LAYOUT.COLLISION_H &&
+    Math.abs(bulletY - targetY) < LAYOUT.COLLISION_V
+  )
+}
+
 // ─── Game Config ──────────────────────────────────────────────────────────────
 
 export interface GameConfig {

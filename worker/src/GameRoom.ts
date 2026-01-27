@@ -18,6 +18,7 @@ import {
   ALIEN_REGISTRY,
   FORMATION_ROWS,
   PLAYER_COLORS,
+  getBarriers,
 } from '../../shared/types'
 import { getScaledConfig, getPlayerSpawnX } from './game/scaling'
 import { gameReducer, type GameAction } from './game/reducer'
@@ -199,16 +200,16 @@ export class GameRoom extends DurableObject<Env> {
         case 'join': {
           // Prevent duplicate joins
           if (attachment?.playerId) {
-            ws.send(JSON.stringify({ type: 'error', code: 'already_joined', message: 'Already in room' }))
+            this.sendError(ws, 'already_joined', 'Already in room')
             return
           }
 
           if (this.game.status === 'countdown') {
-            ws.send(JSON.stringify({ type: 'error', code: 'countdown_in_progress', message: 'Game starting, try again' }))
+            this.sendError(ws, 'countdown_in_progress', 'Game starting, try again')
             return
           }
           if (Object.keys(this.game.players).length >= 4) {
-            ws.send(JSON.stringify({ type: 'error', code: 'room_full', message: 'Room is full' }))
+            this.sendError(ws, 'room_full', 'Room is full')
             return
           }
 
@@ -339,11 +340,7 @@ export class GameRoom extends DurableObject<Env> {
         }
       }
     } catch (err) {
-      ws.send(JSON.stringify({
-        type: 'error',
-        code: 'invalid_message',
-        message: 'Failed to parse message'
-      }))
+      this.sendError(ws, 'invalid_message', 'Failed to parse message')
     }
   }
 
@@ -580,7 +577,7 @@ export class GameRoom extends DurableObject<Env> {
     const scaled = getScaledConfig(playerCount, this.game.config)
 
     // Remove bullets, keep barriers, replace aliens
-    const barriers = this.game.entities.filter((e): e is BarrierEntity => e.kind === 'barrier')
+    const barriers = getBarriers(this.game.entities)
 
     this.game.entities = [
       ...this.createAlienFormation(scaled.alienCols, scaled.alienRows),
@@ -689,6 +686,14 @@ export class GameRoom extends DurableObject<Env> {
     for (const ws of this.ctx.getWebSockets()) {
       try { ws.send(data) } catch {}
     }
+  }
+
+  /**
+   * Send an error message to a specific WebSocket.
+   * Centralizes error response formatting.
+   */
+  private sendError(ws: WebSocket, code: string, message: string) {
+    ws.send(JSON.stringify({ type: 'error', code, message }))
   }
 
   private async cleanup() {

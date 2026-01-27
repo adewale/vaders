@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import type { GameState, GameConfig, ClientMessage, ServerMessage, ServerEvent, InputState } from '../../../shared/types'
-import { LAYOUT } from '../../../shared/types'
+import { applyPlayerInput } from '../../../shared/types'
 
 const PING_INTERVAL = 30000
 const PONG_TIMEOUT = 5000
@@ -212,12 +212,7 @@ export function useGameConnection(
       const held = localInputRef.current
 
       if (localPlayer.alive) {
-        if (held.left) {
-          localPlayer.x = Math.max(LAYOUT.PLAYER_MIN_X, localPlayer.x - 1)
-        }
-        if (held.right) {
-          localPlayer.x = Math.min(LAYOUT.PLAYER_MAX_X, localPlayer.x + 1)
-        }
+        localPlayer.x = applyPlayerInput(localPlayer.x, held, 1)
       }
     }
 
