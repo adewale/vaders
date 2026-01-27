@@ -7,7 +7,7 @@
 // - Multiple spawn origins with staggered timing
 // - Celebration-themed characters and colors
 
-import { lerp, clamp } from './easing'
+import { clamp } from './easing'
 
 // ─── Confetti Characters ─────────────────────────────────────────────────────
 

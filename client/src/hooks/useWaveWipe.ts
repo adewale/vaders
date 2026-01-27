@@ -102,7 +102,7 @@ export function useWaveWipe(options: UseWaveWipeOptions): UseWaveWipeReturn {
       }
       wipeRef.current = null
     }
-  }, [width, height])
+  }, [width, height, config])
 
   // Animation loop
   const updateLoop = useCallback(() => {

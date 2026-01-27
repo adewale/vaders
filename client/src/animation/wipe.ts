@@ -8,7 +8,7 @@
 // - State machine for transition phases
 // - Multiple wipe patterns (iris, horizontal, vertical)
 
-import { easeInQuad, easeOutQuad, easeInOutQuad, clamp } from './easing'
+import { easeInQuad, easeOutQuad, clamp } from './easing'
 
 // ─── Block Characters for Edge Precision ─────────────────────────────────────
 

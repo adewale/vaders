@@ -47,7 +47,7 @@ export interface UseInterpolationReturn {
   /** Current interpolation factor (0-1) */
   factor: number
   /** Mark start of new game tick */
-  markTick: () => void
+  markTick: (gameTick: number) => void
 }
 
 /**
@@ -97,10 +97,12 @@ export function useInterpolation(
 
   // Initialize manager
   useEffect(() => {
+    let isActive = true
     managerRef.current = new InterpolationManager(config)
 
     // Start render loop
     const renderLoop = () => {
+      if (!isActive) return
       if (managerRef.current) {
         managerRef.current.interpolate()
         setPositions(new Map(managerRef.current.getAllVisualPositions()))
@@ -112,12 +114,13 @@ export function useInterpolation(
     animationFrameRef.current = requestAnimationFrame(renderLoop)
 
     return () => {
+      isActive = false
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current)
       }
       managerRef.current = null
     }
-  }, [])
+  }, [config])
 
   // Update multiple entities
   const updateEntities = useCallback((entities: EntityUpdate[], gameTick: number) => {
@@ -161,9 +164,9 @@ export function useInterpolation(
   }, [config.useAscii])
 
   // Mark tick start
-  const markTickFn = useCallback(() => {
+  const markTickFn = useCallback((gameTick: number) => {
     if (!managerRef.current) return
-    managerRef.current.startTick(Date.now())
+    managerRef.current.startTick(gameTick)
   }, [])
 
   return {

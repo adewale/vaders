@@ -84,7 +84,7 @@ export function useConfetti(options: UseConfettiOptions): UseConfettiReturn {
       }
       confettiRef.current = null
     }
-  }, [width, height])
+  }, [width, height, config])
 
   // Animation loop
   const updateLoop = useCallback(() => {

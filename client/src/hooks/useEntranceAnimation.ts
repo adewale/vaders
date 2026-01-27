@@ -114,7 +114,7 @@ export function useEntranceAnimation(
       }
       entranceRef.current = null
     }
-  }, [])
+  }, [config])
 
   // Animation loop
   const updateLoop = useCallback(() => {
