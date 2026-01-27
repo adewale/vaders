@@ -5,6 +5,7 @@ import { spawn } from 'bun'
 import { existsSync } from 'fs'
 import { getUserConfig, setUserConfig } from '../config/userConfig'
 import { type SoundName, SOUND_FILES, BELL_PATTERNS } from './sounds'
+import { getAudioPlayer, playTerminalBell } from '../terminal'
 
 // Debounce cooldown per sound type (ms)
 const DEBOUNCE_MS = 50
@@ -24,8 +25,8 @@ class AudioManager {
     // Load mute state from config
     this.muted = getUserConfig().audioMuted
 
-    // Detect platform audio player
-    this.player = process.platform === 'darwin' ? 'afplay' : 'aplay'
+    // Get platform audio player from terminal compatibility layer
+    this.player = getAudioPlayer()
   }
 
   static getInstance(): AudioManager {
@@ -79,11 +80,7 @@ class AudioManager {
    */
   private playBell(sound: SoundName): void {
     const count = BELL_PATTERNS[sound]
-    for (let i = 0; i < count; i++) {
-      setTimeout(() => {
-        process.stdout.write('\x07')
-      }, i * 100)
-    }
+    playTerminalBell(count)
   }
 
   /**

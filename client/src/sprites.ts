@@ -6,7 +6,7 @@ import { STANDARD_WIDTH, STANDARD_HEIGHT } from '../../shared/types'
 export { STANDARD_WIDTH, STANDARD_HEIGHT }
 
 // Import terminal capabilities for sprite selection and color conversion
-import { getTerminalCapabilities, hexTo256Color } from './terminal'
+import { getTerminalCapabilities, convertColorForTerminal, convertColorObject } from './terminal'
 
 export const SPRITES = {
   // Classic alien sprites (2 lines each, 5 chars wide)
@@ -182,8 +182,8 @@ export const ASCII_SPRITES = {
   },
   enhanced: {
     commander: {
-      healthy: ['<====>','+=====+'],
-      damaged: ['<---->','+-----+'],
+      healthy: ['<====>', '+====+'],
+      damaged: ['<---->', '+----+'],
     },
     transform: {
       scorpion: ['~~', 'vv'],
@@ -233,45 +233,8 @@ export function getPlayerColor(slot: PlayerSlot, fallbackColor?: string): string
   return COLORS.player[slot] ?? fallbackColor ?? COLORS.player[1]
 }
 
-// ─── Terminal-Aware Color Conversion ──────────────────────────────────────────
-
-/**
- * Convert a hex color to terminal-appropriate format.
- * - True color terminals: returns hex as-is (e.g., "#ff5555")
- * - 256-color terminals: returns ANSI 256 format (e.g., "color256:196")
- *
- * Note: OpenTUI may need to handle the "color256:N" format specially,
- * or we fall back to closest approximation the terminal can render.
- */
-function convertColor(hex: string): string {
-  const caps = getTerminalCapabilities()
-  if (caps.supportsTrueColor) {
-    return hex
-  }
-  // For 256-color terminals, return the 256-color index
-  // OpenTUI should interpret this as \x1b[38;5;Nm
-  const idx = hexTo256Color(hex)
-  return `ansi256:${idx}`
-}
-
-/**
- * Deep convert all color values in a color object.
- * Recursively processes nested objects to convert all hex strings.
- */
-function convertColorObject<T>(obj: T): T {
-  if (typeof obj === 'string') {
-    // It's a hex color string
-    return convertColor(obj) as T
-  }
-  if (typeof obj === 'object' && obj !== null) {
-    const result: Record<string, unknown> = {}
-    for (const [key, value] of Object.entries(obj)) {
-      result[key] = convertColorObject(value)
-    }
-    return result as T
-  }
-  return obj
-}
+// Color conversion is now handled by the terminal compatibility layer
+// via convertColorForTerminal() and convertColorObject() imports
 
 // Cache the converted colors (computed once at module load)
 const _termCaps = getTerminalCapabilities()

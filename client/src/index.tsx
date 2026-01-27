@@ -8,6 +8,7 @@ import { App } from './App'
 import { TerminalSizeProvider } from './hooks/useTerminalSize'
 import { runStartupChecks, printStartupReport, playStartupSound } from './startup'
 import { MusicManager } from './audio'
+import { shouldEnableKittyKeyboard } from './terminal'
 
 // Parse CLI flags: --room ABC123 --name Alice --matchmake --solo --check --no-audio-check
 function parseArgs(): {
@@ -97,9 +98,10 @@ async function main() {
 
   // Initialize OpenTUI renderer with Kitty keyboard protocol for key release events
   // This enables proper detection of when keys are released (required for smooth movement)
+  // shouldEnableKittyKeyboard() is determined by terminal compatibility layer
   const renderer = await createCliRenderer({
     exitOnCtrlC: false,
-    useKittyKeyboard: { events: true },
+    useKittyKeyboard: shouldEnableKittyKeyboard() ? { events: true } : false,
   })
   const root = createRoot(renderer)
 

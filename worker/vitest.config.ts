@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitest/config'
+import { resolve } from 'path'
 
 export default defineConfig({
   test: {
@@ -13,7 +14,7 @@ export default defineConfig({
   resolve: {
     alias: {
       // Mock Cloudflare-specific imports
-      'cloudflare:workers': '/home/user/vaders/worker/src/mocks/cloudflare-workers.ts',
+      'cloudflare:workers': resolve(__dirname, 'src/mocks/cloudflare-workers.ts'),
     },
   },
 })

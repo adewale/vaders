@@ -10,6 +10,9 @@ import {
   getTerminalDisplayNameCached,
   getColorDepth,
   getTerminalQuirks,
+  getAudioPlayer,
+  getTerminalRecommendation,
+  shouldShowTerminalRecommendation,
 } from './terminal'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -81,7 +84,7 @@ export async function runStartupChecks(): Promise<StartupReport> {
   })
 
   // Check 5: Audio player available
-  const audioPlayer = process.platform === 'darwin' ? 'afplay' : 'aplay'
+  const audioPlayer = getAudioPlayer()
   let audioPlayerAvailable = false
   try {
     const which = spawn({ cmd: ['which', audioPlayer], stdout: 'pipe', stderr: 'pipe' })
@@ -207,13 +210,14 @@ export function printStartupReport(report: StartupReport): void {
   }
 
   // Show terminal recommendation for limited terminals
-  if (termCaps.terminal === 'apple-terminal') {
+  if (shouldShowTerminalRecommendation(termCaps)) {
+    const recommendation = getTerminalRecommendation(termCaps)!
     console.log('')
     console.log(`  ${yellow}╭─────────────────────────────────────────────────╮${reset}`)
     console.log(`  ${yellow}│${reset} ${cyan}TIP:${reset} For the best Vaders experience, try:      ${yellow}│${reset}`)
-    console.log(`  ${yellow}│${reset}   • ${green}Ghostty${reset} - ghostty.org                      ${yellow}│${reset}`)
+    console.log(`  ${yellow}│${reset}   • ${green}${recommendation.name}${reset} - ${recommendation.url.padEnd(27)}${yellow}│${reset}`)
     console.log(`  ${yellow}│${reset}                                                 ${yellow}│${reset}`)
-    console.log(`  ${yellow}│${reset} ${dim}Better colors and instant key response.${reset}        ${yellow}│${reset}`)
+    console.log(`  ${yellow}│${reset} ${dim}${recommendation.reason.padEnd(40)}${reset}        ${yellow}│${reset}`)
     console.log(`  ${yellow}╰─────────────────────────────────────────────────╯${reset}`)
   }
   console.log('')
@@ -223,7 +227,7 @@ export function printStartupReport(report: StartupReport): void {
  * Play startup chime if audio is available
  */
 export async function playStartupSound(): Promise<void> {
-  const audioPlayer = process.platform === 'darwin' ? 'afplay' : 'aplay'
+  const audioPlayer = getAudioPlayer()
   const soundPath = join(__dirname, '../sounds/game_start.wav')
 
   if (existsSync(soundPath)) {
