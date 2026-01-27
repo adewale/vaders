@@ -764,23 +764,23 @@ function plasmaColor(value: number): [number, number, number] {
 │        │          │                                   │  └────────────────┘  │
 │        ▼          │                                   │          │           │
 │  ┌─────────────┐  │                                   │          ▼           │
-│  │  useGame()  │  │                                   │  ┌────────────────┐  │
-│  │  Hook       │  │                                   │  │    GameRoom    │  │
+│  │ useGame    │  │                                   │  ┌────────────────┐  │
+│  │ Connection │  │                                   │  │    GameRoom    │  │
 │  │  • state    │  │         ┌─────────────┐          │  │ (Imper. Shell) │  │
 │  │  • send()   │  │         │  Full State │          │  │ ┌────────────┐ │  │
 │  └─────────────┘  │◄────────│  Sync @30Hz │◄─────────│  │ │InputQueue  │ │  │
 │        │          │         └─────────────┘          │  │ └─────┬──────┘ │  │
 │        ▼          │                                   │  │       ▼        │  │
 │  ┌─────────────┐  │         ┌─────────────┐          │  │ ┌────────────┐ │  │
-│  │ Zig Native  │  │────────►│ InputState  │─────────►│  │ │gameReducer │ │  │
-│  │ • diffing   │  │         │ {left,right}│          │  │ │(Pure Core) │ │  │
-│  │ • ANSI      │  │         │ + seq + shoot│         │  │ └─────┬──────┘ │  │
+│  │  OpenTUI    │  │────────►│ InputState  │─────────►│  │ │gameReducer │ │  │
+│  │  Renderer   │  │         │ {left,right}│          │  │ │(Pure Core) │ │  │
+│  │  • diffing  │  │         │ + shoot     │          │  │ └─────┬──────┘ │  │
 │  └─────────────┘  │         └─────────────┘          │  │       ▼        │  │
 │        │          │                                   │  │ ┌────────────┐ │  │
 │        ▼          │                                   │  │ │ECS Systems │ │  │
 │   ┌─────────┐     │                                   │  │ └────────────┘ │  │
 │   │ stdout  │     │                                   │  └────────────────┘  │
-│   │ 80×24   │     │                                   │          │           │
+│   │ 120×36  │     │                                   │          │           │
 │   └─────────┘     │                                   │          ▼           │
 └───────────────────┘                                   │  ┌────────────────┐  │
                                                         │  │  Matchmaker DO │  │
@@ -851,11 +851,11 @@ function plasmaColor(value: number): [number, number, number] {
 CLIENT (Bun + OpenTUI)
 ├── App.tsx ─────────────── Root component, screen routing
 ├── input.ts ────────────── Input adapter (normalizes OpenTUI → VadersKey)
-├── useGame() ───────────── WebSocket connection, state management
+├── useGameConnection() ─── WebSocket connection, state management
 ├── GameScreen.tsx ──────── Main gameplay rendering
 ├── LobbyScreen.tsx ─────── Room code display, ready state
-├── AudioEngine ─────────── Terminal bell + optional native FFI
-└── Zig Native ──────────── Buffer diffing, ANSI escape codes
+├── useGameAudio() ──────── Sound effects triggered by state changes
+└── OpenTUI Renderer ────── React-based TUI with automatic diffing
 
 ### Input Adapter Layer
 
