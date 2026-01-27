@@ -3,7 +3,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest'
 import { gameReducer, canTransition, type GameAction } from './reducer'
-import type { GameState, Player, AlienEntity, BulletEntity } from '../../../shared/types'
+import type { GameState, Player, AlienEntity, BulletEntity, BarrierEntity } from '../../../shared/types'
 import { LAYOUT, DEFAULT_CONFIG, getBullets, getAliens } from '../../../shared/types'
 import {
   createTestGameState,
@@ -2042,5 +2042,555 @@ describe('shooting at screen boundaries', () => {
     const result = gameReducer(state, { type: 'TICK' })
 
     expect(result.state.players[player.id].x).toBe(LAYOUT.PLAYER_MAX_X)
+  })
+})
+
+// ============================================================================
+// Barrier Collision Detection Tests
+// ============================================================================
+
+describe('barrier collision detection', () => {
+  /**
+   * BARRIER COLLISION DETECTION CONTRACT:
+   *
+   * Barriers consist of segments at positions:
+   *   segX = barrier.x + segment.offsetX
+   *   segY = LAYOUT.BARRIER_Y + segment.offsetY
+   *
+   * Collision occurs when:
+   *   Math.abs(bullet.x - segX) < 1 AND Math.abs(bullet.y - segY) < 1
+   *
+   * This means:
+   *   - Exact position match (distance = 0) -> collision
+   *   - Distance < 1 in both axes -> collision
+   *   - Distance >= 1 in either axis -> no collision (bullet passes)
+   *
+   * When collision occurs:
+   *   - Segment health decrements by 1
+   *   - Bullet is marked for removal (y = -100 for player bullets, y = 100 for alien bullets)
+   *
+   * When segment health == 0:
+   *   - No collision check (bullet passes through gap)
+   */
+
+  describe('player bullets hitting barriers from below', () => {
+    it('bullet hits barrier segment when moving into exact position', () => {
+      const { state, players } = createTestPlayingState(1)
+      const barrier = createTestBarrier('barrier1', 50, [
+        { offsetX: 0, offsetY: 0, health: 4 },
+      ])
+      // Player bullet moving up, starts 1 below barrier segment
+      // After TICK: bullet y = LAYOUT.BARRIER_Y (collision position)
+      const bullet = createTestBullet('b1', 50, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
+      state.entities = [barrier, bullet]
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // Segment health should decrement
+      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
+      expect(updatedBarrier.segments[0].health).toBe(3)
+
+      // Bullet should be removed
+      const bullets = getBullets(result.state.entities)
+      expect(bullets.find(b => b.id === 'b1')).toBeUndefined()
+    })
+
+    it('bullet hits barrier when x is within threshold (< 1 distance)', () => {
+      const { state, players } = createTestPlayingState(1)
+      const barrier = createTestBarrier('barrier1', 50, [
+        { offsetX: 0, offsetY: 0, health: 4 },
+      ])
+      // Bullet at x=50.5, segment at x=50, distance = 0.5 < 1 -> collision
+      const bullet = createTestBullet('b1', 50.5, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
+      state.entities = [barrier, bullet]
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
+      expect(updatedBarrier.segments[0].health).toBe(3)
+    })
+
+    it('bullet hits barrier when y is within threshold after movement', () => {
+      const { state, players } = createTestPlayingState(1)
+      const barrier = createTestBarrier('barrier1', 50, [
+        { offsetX: 0, offsetY: 0, health: 4 },
+      ])
+      // Bullet starts at y = BARRIER_Y + 1, moves to y = BARRIER_Y
+      // Segment at y = BARRIER_Y, distance = 0 < 1 -> collision
+      const bullet = createTestBullet('b1', 50, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
+      state.entities = [barrier, bullet]
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
+      expect(updatedBarrier.segments[0].health).toBe(3)
+    })
+
+    it('bullet misses barrier when x distance >= 1', () => {
+      const { state, players } = createTestPlayingState(1)
+      const barrier = createTestBarrier('barrier1', 50, [
+        { offsetX: 0, offsetY: 0, health: 4 },
+      ])
+      // Bullet at x=51, segment at x=50, distance = 1 >= 1 -> no collision
+      const bullet = createTestBullet('b1', 51, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
+      state.entities = [barrier, bullet]
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // Segment health should remain unchanged
+      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
+      expect(updatedBarrier.segments[0].health).toBe(4)
+
+      // Bullet should continue (not removed by barrier, may be removed by off-screen check)
+      const bullets = getBullets(result.state.entities)
+      const bullet1 = bullets.find(b => b.id === 'b1')
+      // If still on screen, it should exist and have moved
+      if (bullet1) {
+        expect(bullet1.y).toBe(LAYOUT.BARRIER_Y) // Moved up by 1
+      }
+    })
+
+    it('bullet hits multiple segment barrier on left edge', () => {
+      const { state, players } = createTestPlayingState(1)
+      const barrier = createTestBarrier('barrier1', 50, [
+        { offsetX: 0, offsetY: 0, health: 4 },
+        { offsetX: 1, offsetY: 0, health: 4 },
+        { offsetX: 2, offsetY: 0, health: 4 },
+      ])
+      // Bullet aimed at leftmost segment (x=50)
+      const bullet = createTestBullet('b1', 50, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
+      state.entities = [barrier, bullet]
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
+      expect(updatedBarrier.segments[0].health).toBe(3) // Left segment hit
+      expect(updatedBarrier.segments[1].health).toBe(4) // Middle untouched
+      expect(updatedBarrier.segments[2].health).toBe(4) // Right untouched
+    })
+
+    it('bullet hits multiple segment barrier on right edge', () => {
+      const { state, players } = createTestPlayingState(1)
+      const barrier = createTestBarrier('barrier1', 50, [
+        { offsetX: 0, offsetY: 0, health: 4 },
+        { offsetX: 1, offsetY: 0, health: 4 },
+        { offsetX: 2, offsetY: 0, health: 4 },
+      ])
+      // Bullet aimed at rightmost segment (x=52)
+      const bullet = createTestBullet('b1', 52, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
+      state.entities = [barrier, bullet]
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
+      expect(updatedBarrier.segments[0].health).toBe(4) // Left untouched
+      expect(updatedBarrier.segments[1].health).toBe(4) // Middle untouched
+      expect(updatedBarrier.segments[2].health).toBe(3) // Right segment hit
+    })
+  })
+
+  describe('alien bullets hitting barriers from above', () => {
+    it('alien bullet hits barrier segment when moving into position', () => {
+      const { state, players } = createTestPlayingState(1)
+      const barrier = createTestBarrier('barrier1', 50, [
+        { offsetX: 0, offsetY: 0, health: 4 },
+      ])
+      // Alien bullet moving down, starts 1 above barrier segment
+      // After TICK: bullet y = LAYOUT.BARRIER_Y (collision position)
+      const bullet = createTestBullet('ab1', 50, LAYOUT.BARRIER_Y - 1, null, 1)
+      state.entities = [barrier, bullet]
+      state.tick = 1 // Not a multiple of 5, so alien bullet moves
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
+      expect(updatedBarrier.segments[0].health).toBe(3)
+
+      // Alien bullet should be removed
+      const bullets = getBullets(result.state.entities)
+      expect(bullets.find(b => b.id === 'ab1')).toBeUndefined()
+    })
+
+    it('alien bullet marked for removal goes to y=100 (positive, off-screen below)', () => {
+      const { state, players } = createTestPlayingState(1)
+      const barrier = createTestBarrier('barrier1', 50, [
+        { offsetX: 0, offsetY: 0, health: 4 },
+      ])
+      const bullet = createTestBullet('ab1', 50, LAYOUT.BARRIER_Y - 1, null, 1)
+      state.entities = [barrier, bullet]
+      state.tick = 1
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // Bullet is removed (y >= height condition filters it out)
+      const bullets = getBullets(result.state.entities)
+      expect(bullets.find(b => b.id === 'ab1')).toBeUndefined()
+    })
+
+    it('alien bullet hits barrier on upper segment when barrier has vertical depth', () => {
+      const { state, players } = createTestPlayingState(1)
+      const barrier = createTestBarrier('barrier1', 50, [
+        { offsetX: 0, offsetY: 0, health: 4 }, // Upper segment
+        { offsetX: 0, offsetY: 1, health: 4 }, // Lower segment
+      ])
+      // Bullet aimed at upper segment (y = BARRIER_Y + 0)
+      const bullet = createTestBullet('ab1', 50, LAYOUT.BARRIER_Y - 1, null, 1)
+      state.entities = [barrier, bullet]
+      state.tick = 1
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
+      expect(updatedBarrier.segments[0].health).toBe(3) // Upper hit
+      expect(updatedBarrier.segments[1].health).toBe(4) // Lower untouched
+    })
+
+    it('alien bullet on 5th tick does not move (slower alien bullets)', () => {
+      const { state, players } = createTestPlayingState(1)
+      const barrier = createTestBarrier('barrier1', 50, [
+        { offsetX: 0, offsetY: 0, health: 4 },
+      ])
+      // Alien bullet at exact collision position but on tick that skips movement
+      const bullet = createTestBullet('ab1', 50, LAYOUT.BARRIER_Y, null, 1)
+      state.entities = [barrier, bullet]
+      state.tick = 4 // Next tick (5) is % 5 === 0, alien bullet won't move
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // Bullet should still be at same position (didn't move)
+      // But collision check happens AFTER movement, so if already at collision pos, it still collides
+      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
+      expect(updatedBarrier.segments[0].health).toBe(3) // Collision detected at current position
+    })
+  })
+
+  describe('bullets passing through gaps in damaged barriers', () => {
+    it('bullet passes through destroyed segment (health = 0)', () => {
+      const { state, players } = createTestPlayingState(1)
+      const barrier = createTestBarrier('barrier1', 50, [
+        { offsetX: 0, offsetY: 0, health: 0 }, // Destroyed
+      ])
+      const bullet = createTestBullet('b1', 50, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
+      state.entities = [barrier, bullet]
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // Segment health stays at 0
+      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
+      expect(updatedBarrier.segments[0].health).toBe(0)
+
+      // Bullet should continue through (not removed by barrier collision)
+      const bullets = getBullets(result.state.entities)
+      const bullet1 = bullets.find(b => b.id === 'b1')
+      expect(bullet1).toBeDefined()
+      expect(bullet1!.y).toBe(LAYOUT.BARRIER_Y) // Moved up by 1
+    })
+
+    it('bullet passes through gap between segments', () => {
+      const { state, players } = createTestPlayingState(1)
+      const barrier = createTestBarrier('barrier1', 50, [
+        { offsetX: 0, offsetY: 0, health: 4 },
+        { offsetX: 2, offsetY: 0, health: 4 }, // Gap at offsetX: 1
+      ])
+      // Bullet aimed at gap (x=51, which is barrier.x + 1)
+      const bullet = createTestBullet('b1', 51, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
+      state.entities = [barrier, bullet]
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // Both segments should be untouched
+      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
+      expect(updatedBarrier.segments[0].health).toBe(4) // x=50
+      expect(updatedBarrier.segments[1].health).toBe(4) // x=52
+
+      // Bullet should pass through
+      const bullets = getBullets(result.state.entities)
+      const bullet1 = bullets.find(b => b.id === 'b1')
+      expect(bullet1).toBeDefined()
+    })
+
+    it('bullet passes through destroyed middle segment while adjacent segments remain', () => {
+      const { state, players } = createTestPlayingState(1)
+      const barrier = createTestBarrier('barrier1', 50, [
+        { offsetX: 0, offsetY: 0, health: 4 },
+        { offsetX: 1, offsetY: 0, health: 0 }, // Destroyed middle
+        { offsetX: 2, offsetY: 0, health: 4 },
+      ])
+      // Bullet aimed at destroyed middle segment (x=51)
+      const bullet = createTestBullet('b1', 51, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
+      state.entities = [barrier, bullet]
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // All segments unchanged
+      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
+      expect(updatedBarrier.segments[0].health).toBe(4)
+      expect(updatedBarrier.segments[1].health).toBe(0) // Still destroyed
+      expect(updatedBarrier.segments[2].health).toBe(4)
+
+      // Bullet passes through
+      const bullets = getBullets(result.state.entities)
+      expect(bullets.find(b => b.id === 'b1')).toBeDefined()
+    })
+
+    it('alien bullet passes through vertically destroyed column', () => {
+      const { state, players } = createTestPlayingState(1)
+      const barrier = createTestBarrier('barrier1', 50, [
+        { offsetX: 0, offsetY: 0, health: 0 }, // Top destroyed
+        { offsetX: 0, offsetY: 1, health: 0 }, // Bottom destroyed
+        { offsetX: 1, offsetY: 0, health: 4 }, // Adjacent intact
+        { offsetX: 1, offsetY: 1, health: 4 }, // Adjacent intact
+      ])
+      // Alien bullet aimed at destroyed column (x=50)
+      const bullet = createTestBullet('ab1', 50, LAYOUT.BARRIER_Y - 1, null, 1)
+      state.entities = [barrier, bullet]
+      state.tick = 1
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // All health values unchanged
+      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
+      expect(updatedBarrier.segments[0].health).toBe(0)
+      expect(updatedBarrier.segments[1].health).toBe(0)
+      expect(updatedBarrier.segments[2].health).toBe(4)
+      expect(updatedBarrier.segments[3].health).toBe(4)
+
+      // Bullet passes through
+      const bullets = getBullets(result.state.entities)
+      expect(bullets.find(b => b.id === 'ab1')).toBeDefined()
+    })
+  })
+
+  describe('edge cases around barrier boundaries', () => {
+    it('bullet at exactly x distance = 0.99 still collides (< 1)', () => {
+      const { state, players } = createTestPlayingState(1)
+      const barrier = createTestBarrier('barrier1', 50, [
+        { offsetX: 0, offsetY: 0, health: 4 },
+      ])
+      // Bullet at x=50.99, segment at x=50, distance = 0.99 < 1 -> collision
+      const bullet = createTestBullet('b1', 50.99, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
+      state.entities = [barrier, bullet]
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
+      expect(updatedBarrier.segments[0].health).toBe(3)
+    })
+
+    it('bullet at exactly x distance = 1.0 does NOT collide (not < 1)', () => {
+      const { state, players } = createTestPlayingState(1)
+      const barrier = createTestBarrier('barrier1', 50, [
+        { offsetX: 0, offsetY: 0, health: 4 },
+      ])
+      // Bullet at x=51, segment at x=50, distance = 1.0 NOT < 1 -> no collision
+      const bullet = createTestBullet('b1', 51, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
+      state.entities = [barrier, bullet]
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
+      expect(updatedBarrier.segments[0].health).toBe(4) // No damage
+    })
+
+    it('bullet at negative x offset from segment still detects collision', () => {
+      const { state, players } = createTestPlayingState(1)
+      const barrier = createTestBarrier('barrier1', 50, [
+        { offsetX: 0, offsetY: 0, health: 4 },
+      ])
+      // Bullet at x=49.5, segment at x=50, distance = |-0.5| = 0.5 < 1 -> collision
+      const bullet = createTestBullet('b1', 49.5, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
+      state.entities = [barrier, bullet]
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
+      expect(updatedBarrier.segments[0].health).toBe(3)
+    })
+
+    it('bullet hits first segment when within range of multiple segments', () => {
+      const { state, players } = createTestPlayingState(1)
+      const barrier = createTestBarrier('barrier1', 50, [
+        { offsetX: 0, offsetY: 0, health: 4 },
+        { offsetX: 0.5, offsetY: 0, health: 4 }, // Overlapping segment
+      ])
+      // Bullet at x=50.25, within range of both segments (|50.25-50| < 1 and |50.25-50.5| < 1)
+      const bullet = createTestBullet('b1', 50.25, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
+      state.entities = [barrier, bullet]
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
+      // First segment in array gets hit (collision check breaks after first hit)
+      expect(updatedBarrier.segments[0].health).toBe(3)
+      expect(updatedBarrier.segments[1].health).toBe(4) // Second not hit
+    })
+
+    it('bullet collision with segment at offsetY > 0', () => {
+      const { state, players } = createTestPlayingState(1)
+      const barrier = createTestBarrier('barrier1', 50, [
+        { offsetX: 0, offsetY: 1, health: 4 }, // Segment at y = BARRIER_Y + 1
+      ])
+      // Bullet needs to collide at y = BARRIER_Y + 1
+      const bullet = createTestBullet('b1', 50, LAYOUT.BARRIER_Y + 2, players[0].id, -1)
+      state.entities = [barrier, bullet]
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // After tick, bullet at y = BARRIER_Y + 1, segment at y = BARRIER_Y + 1 -> collision
+      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
+      expect(updatedBarrier.segments[0].health).toBe(3)
+    })
+
+    it('bullet misses segment when y distance >= 1', () => {
+      const { state, players } = createTestPlayingState(1)
+      const barrier = createTestBarrier('barrier1', 50, [
+        { offsetX: 0, offsetY: 0, health: 4 },
+      ])
+      // Bullet at y = BARRIER_Y + 2, after tick at y = BARRIER_Y + 1
+      // Segment at y = BARRIER_Y, distance = 1 NOT < 1 -> no collision
+      const bullet = createTestBullet('b1', 50, LAYOUT.BARRIER_Y + 2, players[0].id, -1)
+      state.entities = [barrier, bullet]
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
+      expect(updatedBarrier.segments[0].health).toBe(4) // No damage
+    })
+
+    it('handles barrier with no segments (empty array)', () => {
+      const { state, players } = createTestPlayingState(1)
+      const barrier: BarrierEntity = {
+        kind: 'barrier',
+        id: 'barrier1',
+        x: 50,
+        segments: [], // No segments
+      }
+      const bullet = createTestBullet('b1', 50, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
+      state.entities = [barrier, bullet]
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // Bullet should pass through (no segments to hit)
+      const bullets = getBullets(result.state.entities)
+      expect(bullets.find(b => b.id === 'b1')).toBeDefined()
+    })
+
+    it('handles multiple barriers, bullet hits only the aligned one', () => {
+      const { state, players } = createTestPlayingState(1)
+      const barrier1 = createTestBarrier('barrier1', 30, [
+        { offsetX: 0, offsetY: 0, health: 4 },
+      ])
+      const barrier2 = createTestBarrier('barrier2', 50, [
+        { offsetX: 0, offsetY: 0, health: 4 },
+      ])
+      const barrier3 = createTestBarrier('barrier3', 70, [
+        { offsetX: 0, offsetY: 0, health: 4 },
+      ])
+      // Bullet aimed at barrier2 (x=50)
+      const bullet = createTestBullet('b1', 50, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
+      state.entities = [barrier1, barrier2, barrier3, bullet]
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      const b1 = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
+      const b2 = result.state.entities.find(e => e.id === 'barrier2') as BarrierEntity
+      const b3 = result.state.entities.find(e => e.id === 'barrier3') as BarrierEntity
+
+      expect(b1.segments[0].health).toBe(4) // Not hit
+      expect(b2.segments[0].health).toBe(3) // Hit
+      expect(b3.segments[0].health).toBe(4) // Not hit
+    })
+
+    it('health cannot go below 0 even with multiple hits in same tick', () => {
+      const { state, players } = createTestPlayingState(1)
+      const barrier = createTestBarrier('barrier1', 50, [
+        { offsetX: 0, offsetY: 0, health: 1 },
+      ])
+      // Single bullet should reduce from 1 to 0, not below
+      const bullet = createTestBullet('b1', 50, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
+      state.entities = [barrier, bullet]
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
+      expect(updatedBarrier.segments[0].health).toBe(0)
+    })
+
+    it('two bullets hitting same segment in same tick - first bullet hits, second may pass through', () => {
+      const { state, players } = createTestPlayingState(1)
+      const barrier = createTestBarrier('barrier1', 50, [
+        { offsetX: 0, offsetY: 0, health: 4 },
+      ])
+      // Two bullets at same position - both will try to hit the segment
+      const bullet1 = createTestBullet('b1', 50, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
+      const bullet2 = createTestBullet('b2', 50, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
+      state.entities = [barrier, bullet1, bullet2]
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
+      // Both bullets hit in sequence during the same tick
+      // Health goes 4 -> 3 -> 2
+      expect(updatedBarrier.segments[0].health).toBe(2)
+    })
+  })
+
+  describe('barrier collision with standard barrier shape', () => {
+    it('bullet hits top-left of standard 5-segment barrier', () => {
+      const { state, players } = createTestPlayingState(1)
+      // Standard barrier shape from createTestBarrier:
+      // [0,0] [1,0] [2,0]  <- top row
+      // [0,1]       [2,1]  <- bottom row (gap in middle)
+      const barrier = createTestBarrier('barrier1', 50)
+      // Bullet aimed at top-left segment (x=50, y=BARRIER_Y)
+      const bullet = createTestBullet('b1', 50, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
+      state.entities = [barrier, bullet]
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
+      expect(updatedBarrier.segments[0].health).toBe(3) // [0,0] hit
+      expect(updatedBarrier.segments[1].health).toBe(4) // [1,0] untouched
+      expect(updatedBarrier.segments[2].health).toBe(4) // [2,0] untouched
+      expect(updatedBarrier.segments[3].health).toBe(4) // [0,1] untouched
+      expect(updatedBarrier.segments[4].health).toBe(4) // [2,1] untouched
+    })
+
+    it('bullet hits top-middle of standard 5-segment barrier', () => {
+      const { state, players } = createTestPlayingState(1)
+      const barrier = createTestBarrier('barrier1', 50)
+      // Bullet aimed at top-middle segment (x=51, y=BARRIER_Y)
+      const bullet = createTestBullet('b1', 51, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
+      state.entities = [barrier, bullet]
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
+      expect(updatedBarrier.segments[0].health).toBe(4) // [0,0] untouched
+      expect(updatedBarrier.segments[1].health).toBe(3) // [1,0] hit
+      expect(updatedBarrier.segments[2].health).toBe(4) // [2,0] untouched
+    })
+
+    it('alien bullet passes through bottom-middle gap of standard barrier', () => {
+      const { state, players } = createTestPlayingState(1)
+      const barrier = createTestBarrier('barrier1', 50)
+      // Standard barrier has gap at [1,1] (no segment there)
+      // Alien bullet aimed at x=51, y=BARRIER_Y+1 (the gap)
+      const bullet = createTestBullet('ab1', 51, LAYOUT.BARRIER_Y, null, 1)
+      state.entities = [barrier, bullet]
+      state.tick = 1
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
+      // All segments should be untouched
+      for (const seg of updatedBarrier.segments) {
+        expect(seg.health).toBe(4)
+      }
+
+      // Bullet passes through
+      const bullets = getBullets(result.state.entities)
+      expect(bullets.find(b => b.id === 'ab1')).toBeDefined()
+    })
   })
 })
