@@ -2,8 +2,9 @@
 // Lobby screen with player list and ready state
 
 import type { GameState } from '../../../shared/types'
-import { COLORS, getPlayerColor } from '../sprites'
+import { COLORS } from '../sprites'
 import { useTerminalSize } from '../hooks/useTerminalSize'
+import { PlayerList } from './PlayerList'
 
 interface LobbyScreenProps {
   state: GameState
@@ -64,25 +65,13 @@ export function LobbyScreen({
       <text fg={COLORS.ui.score}>Players ({playerCount}/4):</text>
       <box height={1} />
 
-      {players.map((player) => {
-        const playerReady = state.readyPlayerIds.includes(player.id)
-        const playerColor = getPlayerColor(player.slot)
-        return (
-          <box key={player.id}>
-            <text fg={playerColor}>
-              {player.id === currentPlayerId ? '> ' : '  '}P{player.slot} {player.name}
-            </text>
-            <box flexGrow={1} />
-            <text fg={playerReady ? COLORS.ui.success : COLORS.ui.unselected}>
-              {playerReady ? 'READY' : 'waiting'}
-            </text>
-          </box>
-        )
-      })}
-
-      {Array.from({ length: 4 - playerCount }).map((_, i) => (
-        <text key={`empty-${i}`} fg={COLORS.ui.dim}>  P{playerCount + i + 1} (empty)</text>
-      ))}
+      {/* Player list with ship sprites and colored ready indicators */}
+      <PlayerList
+        players={players}
+        readyPlayerIds={state.readyPlayerIds}
+        currentPlayerId={currentPlayerId}
+        maxPlayers={4}
+      />
 
       <box flexGrow={1} />
       <box borderStyle="single" borderColor={COLORS.ui.border} paddingLeft={1} paddingRight={1} flexDirection="column">
