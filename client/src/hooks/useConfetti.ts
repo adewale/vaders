@@ -62,6 +62,9 @@ export interface UseConfettiReturn {
  *   )
  * }
  * ```
+ *
+ * @note Config objects should be memoized (useMemo) or defined outside the component
+ * to prevent unnecessary re-initialization on every render.
  */
 export function useConfetti(options: UseConfettiOptions): UseConfettiReturn {
   const { width, height, autoStart = false, config = {} } = options

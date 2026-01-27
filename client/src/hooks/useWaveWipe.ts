@@ -74,6 +74,9 @@ export interface UseWaveWipeReturn {
  *   )
  * }
  * ```
+ *
+ * @note Config objects should be memoized (useMemo) or defined outside the component
+ * to prevent unnecessary re-initialization on every render.
  */
 export function useWaveWipe(options: UseWaveWipeOptions): UseWaveWipeReturn {
   const { width, height, config = {} } = options
@@ -82,6 +85,7 @@ export function useWaveWipe(options: UseWaveWipeOptions): UseWaveWipeReturn {
   const [waveNumber, setWaveNumber] = useState(0)
   const [maskCells, setMaskCells] = useState<WipeCell[]>([])
   const [progress, setProgress] = useState(0)
+  const [maskColor, setMaskColor] = useState('#000000')
 
   // Create wipe system ref
   const wipeRef = useRef<WipeTransition | null>(null)
@@ -114,6 +118,7 @@ export function useWaveWipe(options: UseWaveWipeOptions): UseWaveWipeReturn {
     setState(currentState)
     setProgress(wipeRef.current.getProgress())
     setMaskCells(wipeRef.current.getMaskCells())
+    setMaskColor(wipeRef.current.getMaskColor())
 
     if (wipeRef.current.isActive()) {
       animationFrameRef.current = requestAnimationFrame(updateLoop)
@@ -163,7 +168,7 @@ export function useWaveWipe(options: UseWaveWipeOptions): UseWaveWipeReturn {
     isInHold: state === 'hold',
     waveNumber,
     maskCells,
-    maskColor: wipeRef.current?.getMaskColor() ?? '#000000',
+    maskColor,
     isCellVisible,
     progress,
   }

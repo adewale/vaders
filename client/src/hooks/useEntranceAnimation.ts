@@ -89,6 +89,9 @@ export interface UseEntranceAnimationReturn {
  *   )
  * }
  * ```
+ *
+ * @note Config objects should be memoized (useMemo) or defined outside the component
+ * to prevent unnecessary re-initialization on every render.
  */
 export function useEntranceAnimation(
   options: UseEntranceAnimationOptions = {}
