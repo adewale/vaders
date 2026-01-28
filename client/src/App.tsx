@@ -538,8 +538,16 @@ function GameContainer({
         />
       )
     case 'countdown':
+      // Co-op countdown: "GET READY! 3...2...1"
+      return (
+        <box width={terminalWidth} height={terminalHeight} justifyContent="center" alignItems="center" flexDirection="column">
+          <text fg="cyan"><b>GET READY!</b></text>
+          <box height={1} />
+          <text fg="yellow"><b>{state.countdownRemaining ?? ''}</b></text>
+        </box>
+      )
     case 'wipe_hold':
-      // Black screen with centered wave title (terminal bg is black by default)
+      // Wave transition: show wave number
       return (
         <box width={terminalWidth} height={terminalHeight} justifyContent="center" alignItems="center">
           <text fg="yellow"><b>WAVE {state.wipeWaveNumber ?? state.wave}</b></text>

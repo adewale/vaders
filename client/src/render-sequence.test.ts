@@ -199,16 +199,21 @@ describe('App.tsx render logic matches test expectations', () => {
     expect(gameScreenCases).not.toBeNull()
   })
 
-  test('countdown case renders wipe_hold_screen (not GameScreen)', async () => {
+  test('countdown case shows GET READY countdown (not GameScreen)', async () => {
     const fs = await import('fs')
     const path = await import('path')
 
     const appPath = path.join(__dirname, 'App.tsx')
     const source = fs.readFileSync(appPath, 'utf-8')
 
-    // countdown and wipe_hold should be grouped together
-    const countdownMatch = source.match(/case\s+'countdown':\s*\n\s*case\s+'wipe_hold':/)
+    // Find countdown case
+    const countdownMatch = source.match(/case\s+'countdown':[\s\S]*?(?=case\s+'wipe_hold':)/)
     expect(countdownMatch).not.toBeNull()
+
+    // Should show GET READY and countdownRemaining, not GameScreen
+    expect(countdownMatch![0]).toContain('GET READY')
+    expect(countdownMatch![0]).toContain('countdownRemaining')
+    expect(countdownMatch![0]).not.toContain('<GameScreen')
   })
 })
 
