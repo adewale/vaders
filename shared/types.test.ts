@@ -165,6 +165,7 @@ describe('Entity Filter Helpers', () => {
     row: 0,
     col: 0,
     points: 30,
+    entering: false,
   })
 
   const createBullet = (id: string): BulletEntity => ({

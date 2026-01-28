@@ -584,7 +584,7 @@ describe('START_SOLO action', () => {
 
     const result = gameReducer(state, { type: 'START_SOLO' })
 
-    expect(result.state.status).toBe('playing')
+    expect(result.state.status).toBe('wipe_hold') // Wipe phase before playing
   })
 
   it('fails with 0 players', () => {
@@ -605,14 +605,16 @@ describe('START_SOLO action', () => {
     expect(result.events.length).toBe(0)
   })
 
-  it('sets status to playing, mode to solo, lives to 3', () => {
+  it('sets status to wipe_hold, mode to solo, lives to 3', () => {
     const { state, player } = createTestGameStateWithPlayer({ id: 'p1' })
 
     const result = gameReducer(state, { type: 'START_SOLO' })
 
-    expect(result.state.status).toBe('playing')
+    expect(result.state.status).toBe('wipe_hold') // Wipe phase before playing
     expect(result.state.mode).toBe('solo')
     expect(result.state.lives).toBe(3)
+    expect(result.state.wipeTicksRemaining).toBe(30) // 2 seconds at 30Hz
+    expect(result.state.wipeWaveNumber).toBe(1)
   })
 
   it('resets tick to 0', () => {
@@ -724,19 +726,21 @@ describe('COUNTDOWN_TICK action', () => {
     expect(data?.count).toBe(2)
   })
 
-  it('transitions to playing and emits game_start when countdownRemaining reaches 0', () => {
+  it('transitions to wipe_hold and emits game_start when countdownRemaining reaches 0', () => {
     const { state, players } = createTestGameStateWithPlayers(2)
     state.status = 'countdown'
     state.countdownRemaining = 1
 
     const result = gameReducer(state, { type: 'COUNTDOWN_TICK' })
 
-    expect(result.state.status).toBe('playing')
+    expect(result.state.status).toBe('wipe_hold') // Wipe phase before playing
     expect(result.state.countdownRemaining).toBeNull()
+    expect(result.state.wipeTicksRemaining).toBe(30)
+    expect(result.state.wipeWaveNumber).toBe(1)
     expect(hasEvent(result.events, 'game_start')).toBe(true)
   })
 
-  it('returns persist: true when transitioning to playing', () => {
+  it('returns persist: true when transitioning to wipe_hold', () => {
     const { state, players } = createTestGameStateWithPlayers(2)
     state.status = 'countdown'
     state.countdownRemaining = 1
@@ -1982,6 +1986,167 @@ describe('shared lives in coop mode', () => {
     expect(result.state.players[p1.id].lives).toBe(2)
     // Player 2 keeps their lives
     expect(result.state.players[p2.id].lives).toBe(3)
+  })
+})
+
+// ============================================================================
+// Grace Period Tests
+// ============================================================================
+
+describe('alien entering flag (prevents shooting during wipe_reveal)', () => {
+  describe('entering flag behavior', () => {
+    it('aliens with entering=true do NOT shoot', () => {
+      const { state, players } = createTestPlayingState(1)
+      const enteringAlien = createTestAlien('alien1', 50, 10, { row: 0, col: 0, entering: true })
+      state.entities = [enteringAlien]
+      state.tick = 0
+      state.rngSeed = 42
+
+      let currentState = state
+      let bulletsCreated = 0
+
+      // Run many ticks with entering aliens
+      for (let i = 0; i < 100; i++) {
+        const result = gameReducer(currentState, { type: 'TICK' })
+        const newBullets = getBullets(result.state.entities).filter(b => b.ownerId === null)
+        bulletsCreated += newBullets.length
+        currentState = structuredClone(result.state)
+        // Keep entering flag set
+        for (const e of currentState.entities) {
+          if (e.kind === 'alien') e.entering = true
+        }
+      }
+
+      // No alien bullets should have been created
+      expect(bulletsCreated).toBe(0)
+    })
+
+    it('aliens with entering=false CAN shoot', () => {
+      const { state, players } = createTestPlayingState(1)
+      const normalAlien = createTestAlien('alien1', 50, 10, { row: 0, col: 0, entering: false })
+      state.entities = [normalAlien]
+      state.tick = 0
+      state.rngSeed = 42
+
+      let currentState = state
+      let bulletsCreated = 0
+
+      // Run many ticks with normal aliens
+      for (let i = 0; i < 2000; i++) {
+        const result = gameReducer(currentState, { type: 'TICK' })
+        const newBullets = getBullets(result.state.entities).filter(b => b.ownerId === null)
+        bulletsCreated += newBullets.length
+        currentState = structuredClone(result.state)
+        currentState.entities = currentState.entities.filter(e => e.kind !== 'bullet')
+      }
+
+      // Aliens should have fired during the period
+      expect(bulletsCreated).toBeGreaterThan(0)
+    })
+
+    it('mixed entering and non-entering aliens: none shoot if any are entering', () => {
+      const { state, players } = createTestPlayingState(1)
+      const enteringAlien = createTestAlien('alien1', 50, 10, { row: 0, col: 0, entering: true })
+      const normalAlien = createTestAlien('alien2', 60, 10, { row: 0, col: 1, entering: false })
+      state.entities = [enteringAlien, normalAlien]
+      state.tick = 0
+      state.rngSeed = 42
+
+      let currentState = state
+      let bulletsCreated = 0
+
+      // Run many ticks with mixed aliens
+      for (let i = 0; i < 100; i++) {
+        const result = gameReducer(currentState, { type: 'TICK' })
+        const newBullets = getBullets(result.state.entities).filter(b => b.ownerId === null)
+        bulletsCreated += newBullets.length
+        currentState = structuredClone(result.state)
+      }
+
+      // No bullets because at least one alien is entering
+      expect(bulletsCreated).toBe(0)
+    })
+  })
+
+  describe('wipe phase transitions', () => {
+    it('START_SOLO transitions to wipe_hold', () => {
+      const { state } = createTestGameStateWithPlayer({ id: 'p1' })
+
+      const result = gameReducer(state, { type: 'START_SOLO' })
+
+      expect(result.state.status).toBe('wipe_hold')
+      expect(result.state.wipeTicksRemaining).toBe(30)
+      expect(result.state.wipeWaveNumber).toBe(1)
+    })
+
+    it('COUNTDOWN_TICK (ending) transitions to wipe_hold', () => {
+      const { state } = createTestGameStateWithPlayers(2)
+      state.status = 'countdown'
+      state.countdownRemaining = 1
+
+      const result = gameReducer(state, { type: 'COUNTDOWN_TICK' })
+
+      expect(result.state.status).toBe('wipe_hold')
+      expect(result.state.wipeTicksRemaining).toBe(30)
+      expect(result.state.wipeWaveNumber).toBe(1)
+    })
+
+    it('wipe_hold transitions to wipe_reveal after countdown', () => {
+      const { state } = createTestGameStateWithPlayer({ id: 'p1' })
+      state.status = 'wipe_hold'
+      state.wipeTicksRemaining = 1 // Last tick
+      state.wipeWaveNumber = 1
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      expect(result.state.status).toBe('wipe_reveal')
+      expect(result.state.wipeTicksRemaining).toBe(60) // Reveal duration
+    })
+
+    it('wipe_reveal transitions to playing after countdown', () => {
+      const { state } = createTestGameStateWithPlayer({ id: 'p1' })
+      const alien = createTestAlien('a1', 50, 10, { entering: true })
+      state.status = 'wipe_reveal'
+      state.wipeTicksRemaining = 1 // Last tick
+      state.wipeWaveNumber = 1
+      state.entities = [alien]
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      expect(result.state.status).toBe('playing')
+      expect(result.state.wipeTicksRemaining).toBeNull()
+      expect(result.state.wipeWaveNumber).toBeNull()
+      // Aliens should have entering=false after wipe_reveal ends
+      const aliens = getAliens(result.state.entities)
+      expect(aliens[0].entering).toBe(false)
+    })
+
+    it('wipe_exit transitions to wipe_hold after countdown', () => {
+      const { state } = createTestGameStateWithPlayer({ id: 'p1' })
+      state.status = 'wipe_exit'
+      state.wipeTicksRemaining = 1 // Last tick
+      state.wipeWaveNumber = 2
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      expect(result.state.status).toBe('wipe_hold')
+      expect(result.state.wipeTicksRemaining).toBe(30) // Hold duration
+    })
+
+    it('wipe_hold sets entering=true on aliens when transitioning to wipe_reveal', () => {
+      const { state } = createTestGameStateWithPlayer({ id: 'p1' })
+      const alien = createTestAlien('a1', 50, 10, { entering: false })
+      state.status = 'wipe_hold'
+      state.wipeTicksRemaining = 1 // Last tick
+      state.wipeWaveNumber = 1
+      state.entities = [alien]
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      expect(result.state.status).toBe('wipe_reveal')
+      const aliens = getAliens(result.state.entities)
+      expect(aliens[0].entering).toBe(true)
+    })
   })
 })
 

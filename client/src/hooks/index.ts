@@ -7,8 +7,6 @@ export { useGameAudio, playShootSound, playMenuNavigateSound, playMenuSelectSoun
 export { useTerminalSize, STANDARD_WIDTH, STANDARD_HEIGHT } from './useTerminalSize'
 
 // Visual enhancements
-export { useConfetti, type UseConfettiOptions, type UseConfettiReturn } from './useConfetti'
-export { useWaveWipe, type UseWaveWipeOptions, type UseWaveWipeReturn } from './useWaveWipe'
 export {
   useEntranceAnimation,
   type UseEntranceAnimationOptions,

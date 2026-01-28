@@ -302,10 +302,16 @@ export class WipeTransition {
   /**
    * Start a wave transition
    * @param waveNumber - The wave number to display during hold
+   * @param reverse - If true, skip exit phase and start from hold (for game start)
    */
-  start(waveNumber: number): void {
+  start(waveNumber: number, reverse: boolean = false): void {
     this.waveNumber = waveNumber
-    this.state = 'exiting'
+    if (reverse) {
+      // Skip exit phase, go straight to hold then enter
+      this.state = 'hold'
+    } else {
+      this.state = 'exiting'
+    }
     this.tick = 0
   }
 

@@ -105,38 +105,6 @@ export {
   type EntranceConfig,
 } from './entrance'
 
-// ─── Box-Drawing Border System ───────────────────────────────────────────────
-
-export {
-  // Border character sets
-  BORDER_SINGLE,
-  BORDER_DOUBLE,
-  BORDER_ROUNDED,
-  BORDER_HEAVY,
-  BORDER_DASHED,
-  BORDER_ASCII,
-  BORDER_STYLES,
-  // Main render function
-  renderBorder,
-  // Helper functions
-  createBorderedBox,
-  borderWrap,
-  createDivider,
-  createTitleBar,
-  // Preset borders
-  createGamePanel,
-  createDialogBorder,
-  createAlertBorder,
-  createSuccessBorder,
-  // Configuration
-  DEFAULT_BORDER_CONFIG,
-  // Types
-  type BorderCharset,
-  type BorderStyleName,
-  type BorderConfig,
-  type BorderCell,
-} from './borders'
-
 // ─── Smooth Movement Interpolation ───────────────────────────────────────────
 
 export {

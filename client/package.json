@@ -9,7 +9,8 @@
     "dev": "bun run src/index.tsx",
     "build": "bun build src/index.tsx --outdir dist --target bun",
     "typecheck": "tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "observer": "bun run src/observer.ts"
   },
   "dependencies": {
     "@opentui/core": "0.1.74",

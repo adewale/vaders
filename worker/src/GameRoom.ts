@@ -22,6 +22,7 @@ import {
 } from '../../shared/types'
 import { getScaledConfig, getPlayerSpawnX } from './game/scaling'
 import { gameReducer, type GameAction } from './game/reducer'
+import { createDefaultGameState, migrateGameState } from '../../shared/state-defaults'
 
 export interface Env {
   GAME_ROOM: DurableObjectNamespace
@@ -73,7 +74,8 @@ export class GameRoom extends DurableObject<Env> {
       ).toArray()
 
       if (rows.length > 0) {
-        this.game = JSON.parse(rows[0].data)
+        // Migrate persisted state to fill any missing fields with defaults
+        this.game = migrateGameState(JSON.parse(rows[0].data))
         this.nextEntityId = rows[0].next_entity_id
       }
     })
@@ -93,22 +95,7 @@ export class GameRoom extends DurableObject<Env> {
   }
 
   private createInitialState(roomCode: string): GameState {
-    return {
-      roomId: roomCode,
-      mode: 'solo',
-      status: 'waiting',
-      tick: 0,
-      rngSeed: Date.now(),
-      countdownRemaining: null,
-      players: {},
-      readyPlayerIds: [],
-      entities: [],
-      wave: 1,
-      lives: 3,
-      score: 0,
-      alienDirection: 1,
-      config: DEFAULT_CONFIG,
-    }
+    return createDefaultGameState(roomCode)
   }
 
   /**
@@ -255,6 +242,17 @@ export class GameRoom extends DurableObject<Env> {
             this.game.mode = 'solo'
             this.game.lives = 3
             await this.startGame()
+          }
+          break
+        }
+
+        case 'forfeit': {
+          // End game early - only allowed during gameplay
+          const playableStatuses = ['playing', 'wipe_exit', 'wipe_hold', 'wipe_reveal']
+          if (playableStatuses.includes(this.game.status)) {
+            this.endGame('defeat')
+            this.broadcastFullState()
+            this.persistState()
           }
           break
         }
@@ -446,15 +444,18 @@ export class GameRoom extends DurableObject<Env> {
       mode: playerCount === 1 ? 'solo' : 'coop',
     })
 
-    this.game.status = 'playing'
+    // Start in wipe_hold phase (skip exit for game start)
+    this.game.status = 'wipe_hold'
     this.game.countdownRemaining = null
     this.countdownRemaining = null
     this.game.lives = scaled.lives
     this.game.tick = 0
+    this.game.wipeTicksRemaining = 30  // 1 second at 30Hz
+    this.game.wipeWaveNumber = 1
+    // Note: alienShootingDisabled is set via GAME_STATE_DEFAULTS in state-defaults.ts
 
-    // Initialize entities
+    // Initialize barriers only - aliens created at wipe_hold→wipe_reveal transition
     this.game.entities = [
-      ...this.createAlienFormation(scaled.alienCols, scaled.alienRows),
       ...this.createBarriers(playerCount),
     ]
 
@@ -464,7 +465,7 @@ export class GameRoom extends DurableObject<Env> {
     await this.updateRoomRegistry()
 
     // Use alarm for game tick (hibernation-compatible)
-    // Game runs at 30Hz (33ms per tick)
+    // Game runs at 30Hz (33ms per tick) during wipe phases too
     await this.ctx.storage.setAlarm(Date.now() + this.game.config.tickIntervalMs)
   }
 
@@ -489,8 +490,9 @@ export class GameRoom extends DurableObject<Env> {
       return
     }
 
-    // Handle game tick
-    if (!this.game || this.game.status !== 'playing') {
+    // Handle game tick (including wipe phases)
+    const activeStatuses = ['playing', 'wipe_exit', 'wipe_hold', 'wipe_reveal']
+    if (!this.game || !activeStatuses.includes(this.game.status)) {
       // Room cleanup if empty
       if (this.game && Object.keys(this.game.players).length === 0) {
         await this.cleanup()
@@ -500,14 +502,19 @@ export class GameRoom extends DurableObject<Env> {
 
     this.tick()
 
-    // Schedule next tick if still playing
-    if (this.game.status === 'playing') {
+    // Schedule next tick if still in an active status
+    if (this.game && activeStatuses.includes(this.game.status)) {
       await this.ctx.storage.setAlarm(Date.now() + this.game.config.tickIntervalMs)
     }
   }
 
   private tick() {
-    if (!this.game || this.game.status !== 'playing') return
+    if (!this.game) return
+
+    const activeStatuses = ['playing', 'wipe_exit', 'wipe_hold', 'wipe_reveal']
+    if (!activeStatuses.includes(this.game.status)) return
+
+    const prevStatus = this.game.status
 
     // 1. Process queued input actions via reducer
     const queuedActions = this.inputQueue
@@ -533,13 +540,25 @@ export class GameRoom extends DurableObject<Env> {
     }
     if (tickResult.persist) this.persistState()
 
-    // 3. Handle game_over status
+    // 3. Handle wipe phase transitions - create aliens when entering wipe_reveal
+    if (prevStatus === 'wipe_hold' && this.game.status === 'wipe_reveal') {
+      const playerCount = Object.keys(this.game.players).length
+      const scaled = getScaledConfig(playerCount, this.game.config)
+      const aliens = this.createAlienFormation(scaled.alienCols, scaled.alienRows)
+      // Mark all aliens as entering
+      for (const alien of aliens) {
+        alien.entering = true
+      }
+      this.game.entities.push(...aliens)
+    }
+
+    // 4. Handle game_over status
     if (this.game.status === 'game_over') {
       this.endGame(this.game.lives <= 0 ? 'defeat' : 'victory')
       return
     }
 
-    // 4. Heartbeat: update registry every ~60s (1800 ticks at 30Hz)
+    // 5. Heartbeat: update registry every ~60s (1800 ticks at 30Hz)
     if (this.game.tick % 1800 === 0) {
       void this.updateRoomRegistry()
     }
@@ -573,17 +592,17 @@ export class GameRoom extends DurableObject<Env> {
   private nextWave() {
     if (!this.game) return
     this.game.wave++
-    const playerCount = Object.keys(this.game.players).length
-    const scaled = getScaledConfig(playerCount, this.game.config)
 
-    // Remove bullets, keep barriers, replace aliens
+    // Remove bullets, keep barriers, remove old aliens (new ones created during wipe_reveal)
     const barriers = getBarriers(this.game.entities)
 
-    this.game.entities = [
-      ...this.createAlienFormation(scaled.alienCols, scaled.alienRows),
-      ...barriers,
-    ]
+    this.game.entities = [...barriers]
     this.game.alienDirection = 1
+
+    // Start wave transition wipe (exit → hold → reveal)
+    this.game.status = 'wipe_exit'
+    this.game.wipeTicksRemaining = 30  // 1 second at 30Hz
+    this.game.wipeWaveNumber = this.game.wave
 
     this.persistState()
   }
@@ -621,6 +640,7 @@ export class GameRoom extends DurableObject<Env> {
           y: LAYOUT.ALIEN_START_Y + row * LAYOUT.ALIEN_ROW_SPACING,
           alive: true,
           points: ALIEN_REGISTRY[type].points,
+          entering: false,  // Will be set to true when entering wipe_reveal
         })
       }
     }

@@ -138,6 +138,24 @@ function getErrorMessages(ws: MockWebSocket) {
   return getMessages(ws, 'error') as Array<{ type: 'error'; code: string; message: string }>
 }
 
+/**
+ * Helper to run through wipe phases to get to 'playing' status.
+ * After startGame(), the game goes through:
+ * - wipe_hold (60 ticks)
+ * - wipe_reveal (120 ticks)
+ * - playing
+ */
+async function completeWipePhases(gameRoom: GameRoom) {
+  // wipe_hold: 60 ticks
+  for (let i = 0; i < 60; i++) {
+    await gameRoom.alarm()
+  }
+  // wipe_reveal: 120 ticks
+  for (let i = 0; i < 120; i++) {
+    await gameRoom.alarm()
+  }
+}
+
 // ============================================================================
 // Scenario 1: Player Creates Room, Another Player Joins
 // ============================================================================
@@ -303,10 +321,10 @@ describe('Integration: Player Creates Room, Another Player Joins', () => {
     ws1.send.mockClear()
     ws2.send.mockClear()
 
-    // Countdown: 3 -> 2 -> 1 -> game_start
+    // Countdown: 3 -> 2 -> 1 -> wipe_hold
     await gameRoom.alarm() // count: 2
     await gameRoom.alarm() // count: 1
-    await gameRoom.alarm() // game_start
+    await gameRoom.alarm() // wipe_hold starts
 
     // Both players should receive game_start event
     const ws1Events = getEventMessages(ws1)
@@ -314,6 +332,9 @@ describe('Integration: Player Creates Room, Another Player Joins', () => {
 
     expect(ws1Events.some(e => e.name === 'game_start')).toBe(true)
     expect(ws2Events.some(e => e.name === 'game_start')).toBe(true)
+
+    // Complete wipe phases to reach 'playing'
+    await completeWipePhases(gameRoom)
 
     // Verify game state is now 'playing'
     const state = JSON.parse(gameRoomCtx._sqlData['game_state'].data) as GameState
@@ -740,7 +761,10 @@ describe('Integration: Complete 4-Player Game Flow', () => {
     // Complete countdown
     await gameRoom.alarm() // 2
     await gameRoom.alarm() // 1
-    await gameRoom.alarm() // game_start
+    await gameRoom.alarm() // wipe_hold starts
+
+    // Complete wipe phases
+    await completeWipePhases(gameRoom)
 
     // Verify game started with correct 4-player config
     gameState = JSON.parse(ctx._sqlData['game_state'].data) as GameState
@@ -840,7 +864,10 @@ describe('Integration: Edge Cases', () => {
     // Complete countdown
     await gameRoom.alarm() // 2
     await gameRoom.alarm() // 1
-    await gameRoom.alarm() // game_start
+    await gameRoom.alarm() // wipe_hold starts
+
+    // Complete wipe phases
+    await completeWipePhases(gameRoom)
 
     // Player 2 disconnects
     await gameRoom.webSocketClose(ws2 as any, 1000, 'Left', true)
@@ -857,6 +884,9 @@ describe('Integration: Edge Cases', () => {
 
     await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'join', name: 'Solo' }))
     await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'start_solo' }))
+
+    // Complete wipe phases to reach playing
+    await completeWipePhases(gameRoom)
 
     // Verify game started
     let state = JSON.parse(ctx._sqlData['game_state'].data) as GameState

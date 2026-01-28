@@ -391,6 +391,15 @@ function GameContainer({
         return
       }
 
+      // Handle X to forfeit game (go to game over)
+      if (key.type === 'key' && key.key === 'x' && isPress && !isRepeated) {
+        const playableStatuses = ['playing', 'wipe_exit', 'wipe_hold', 'wipe_reveal']
+        if (currentStatus && playableStatuses.includes(currentStatus)) {
+          send({ type: 'forfeit' })
+          return
+        }
+      }
+
     // IMPORTANT: Always process key releases for movement keys, regardless of game status
     // This prevents "stuck" keys when transitioning between screens mid-keypress
     if (isRelease) {
@@ -510,6 +519,14 @@ function GameContainer({
 
   switch (state.status) {
     case 'waiting':
+      // Skip lobby when autoStartSolo - show "Starting..." to avoid flash
+      if (autoStartSolo) {
+        return (
+          <box width={terminalWidth} height={terminalHeight} justifyContent="center" alignItems="center">
+            <text fg="cyan">Starting game...</text>
+          </box>
+        )
+      }
       return (
         <LobbyScreen
           state={state}
@@ -521,6 +538,15 @@ function GameContainer({
         />
       )
     case 'countdown':
+    case 'wipe_hold':
+      // Black screen with centered wave title (terminal bg is black by default)
+      return (
+        <box width={terminalWidth} height={terminalHeight} justifyContent="center" alignItems="center">
+          <text fg="yellow"><b>WAVE {state.wipeWaveNumber ?? state.wave}</b></text>
+        </box>
+      )
+    case 'wipe_exit':
+    case 'wipe_reveal':
     case 'playing':
       return <GameScreen state={state} currentPlayerId={playerId} isMuted={isMuted} isMusicMuted={isMusicMuted} />
     case 'game_over':

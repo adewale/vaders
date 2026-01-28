@@ -101,6 +101,7 @@ export interface AlienEntity {
   row: number
   col: number
   points: number
+  entering: boolean  // True during wipe_reveal phase, prevents shooting
 }
 
 export interface CommanderEntity {
@@ -353,7 +354,7 @@ export type GameEvent =
 
 // ─── Game State ───────────────────────────────────────────────────────────────
 
-export type GameStatus = 'waiting' | 'countdown' | 'playing' | 'game_over'
+export type GameStatus = 'waiting' | 'countdown' | 'wipe_exit' | 'wipe_hold' | 'wipe_reveal' | 'playing' | 'game_over'
 
 export interface GameState {
   roomId: string                    // 6-char base36 (0-9, A-Z)
@@ -375,6 +376,13 @@ export interface GameState {
   lives: number                     // 3 solo, 5 co-op
   score: number
   alienDirection: 1 | -1
+
+  // Wipe state: server-controlled transition timing
+  wipeTicksRemaining: number | null  // Countdown for current wipe phase
+  wipeWaveNumber: number | null      // Wave number to display during wipe
+
+  // Debug flag: completely disable alien shooting
+  alienShootingDisabled: boolean
 
   config: GameConfig
 }

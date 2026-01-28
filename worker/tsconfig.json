@@ -12,7 +12,11 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "allowSyntheticDefaultImports": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": {
+      "cloudflare:workers": ["./src/mocks/cloudflare-workers.ts"]
+    }
   },
   "include": ["src/**/*", "../shared/**/*"],
   "exclude": ["node_modules", "../shared/**/*.test.ts"]

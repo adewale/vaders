@@ -16,6 +16,7 @@ import type {
   Entity,
 } from '../../shared/types'
 import { DEFAULT_CONFIG, LAYOUT, PLAYER_COLORS } from '../../shared/types'
+import { GAME_STATE_DEFAULTS } from '../../shared/state-defaults'
 
 /**
  * Creates a test player with sensible defaults
@@ -39,24 +40,15 @@ export function createTestPlayer(overrides?: Partial<Player>): Player {
 }
 
 /**
- * Creates a test game state with sensible defaults
+ * Creates a test game state with sensible defaults.
+ * Uses GAME_STATE_DEFAULTS as base, with test-specific overrides.
  */
 export function createTestGameState(overrides?: Partial<GameState>): GameState {
   return {
+    ...GAME_STATE_DEFAULTS,
     roomId: 'TEST01',
-    mode: 'solo',
-    status: 'waiting',
-    tick: 0,
-    rngSeed: 12345,
-    countdownRemaining: null,
-    players: {},
-    readyPlayerIds: [],
-    entities: [],
-    wave: 1,
-    lives: 3,
-    score: 0,
-    alienDirection: 1,
-    config: DEFAULT_CONFIG,
+    rngSeed: 12345, // Fixed seed for test determinism
+    alienShootingDisabled: false, // Tests need aliens to shoot
     ...overrides,
   }
 }
@@ -80,6 +72,7 @@ export function createTestAlien(
     row: overrides?.row ?? 0,
     col: overrides?.col ?? 0,
     points: overrides?.points ?? 10,
+    entering: overrides?.entering ?? false,
     ...overrides,
   }
 }
@@ -252,6 +245,7 @@ export function createTestAlienFormation(
         row,
         col,
         points: points[type],
+        entering: false,
       })
     }
   }

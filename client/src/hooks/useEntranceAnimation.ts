@@ -93,36 +93,36 @@ export interface UseEntranceAnimationReturn {
  * @note Config objects should be memoized (useMemo) or defined outside the component
  * to prevent unnecessary re-initialization on every render.
  */
+// Stable empty config to avoid re-creating on every render
+const EMPTY_CONFIG: Partial<EntranceConfig> = {}
+
 export function useEntranceAnimation(
   options: UseEntranceAnimationOptions = {}
 ): UseEntranceAnimationReturn {
-  const { config = {} } = options
+  // Use stable reference for empty config
+  const config = options.config ?? EMPTY_CONFIG
 
   const [isRunning, setIsRunning] = useState(false)
   const [isComplete, setIsComplete] = useState(true)
   const [positions, setPositions] = useState<Map<string, AlienVisualPosition>>(new Map())
   const [progress, setProgress] = useState(1)
 
-  // Create entrance system ref
-  const entranceRef = useRef<EntranceAnimation | null>(null)
+  // Create entrance system ref - initialized synchronously to avoid race conditions
+  // (other useEffects might try to call start() before an initialization effect runs)
+  const entranceRef = useRef<EntranceAnimation>(new EntranceAnimation(config))
   const animationFrameRef = useRef<number | null>(null)
 
-  // Initialize entrance system
+  // Cleanup on unmount
   useEffect(() => {
-    entranceRef.current = new EntranceAnimation(config)
-
     return () => {
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current)
       }
-      entranceRef.current = null
     }
-  }, [config])
+  }, [])
 
   // Animation loop
   const updateLoop = useCallback(() => {
-    if (!entranceRef.current) return
-
     entranceRef.current.update()
 
     const running = entranceRef.current.isRunning()
@@ -140,8 +140,6 @@ export function useEntranceAnimation(
 
   // Start entrance animation
   const start = useCallback((aliens: EntranceAlien[]) => {
-    if (!entranceRef.current) return
-
     entranceRef.current.start(aliens)
     setIsRunning(true)
     setIsComplete(false)
@@ -155,8 +153,6 @@ export function useEntranceAnimation(
 
   // Stop and snap to formation
   const stop = useCallback(() => {
-    if (!entranceRef.current) return
-
     entranceRef.current.stop()
     setIsRunning(false)
     setIsComplete(true)
@@ -170,7 +166,6 @@ export function useEntranceAnimation(
 
   // Get position for single alien
   const getPosition = useCallback((id: string): AlienVisualPosition | null => {
-    if (!entranceRef.current) return null
     return entranceRef.current.getVisualPosition(id)
   }, [])
 

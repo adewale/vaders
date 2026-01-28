@@ -86,31 +86,31 @@ export interface UseInterpolationReturn {
  * @note Config objects should be memoized (useMemo) or defined outside the component
  * to prevent unnecessary re-initialization on every render.
  */
+// Stable empty config to avoid re-creating on every render
+const EMPTY_CONFIG: Partial<InterpolationConfig> = {}
+
 export function useInterpolation(
   options: UseInterpolationOptions = {}
 ): UseInterpolationReturn {
-  const { config = {} } = options
+  // Use stable reference for empty config
+  const config = options.config ?? EMPTY_CONFIG
 
   const [positions, setPositions] = useState<Map<string, { x: number; y: number }>>(new Map())
   const [factor, setFactor] = useState(0)
 
-  // Create interpolation manager ref
-  const managerRef = useRef<InterpolationManager | null>(null)
+  // Create interpolation manager ref - initialized synchronously
+  const managerRef = useRef<InterpolationManager>(new InterpolationManager(config))
   const animationFrameRef = useRef<number | null>(null)
 
-  // Initialize manager
+  // Start render loop on mount
   useEffect(() => {
     let isActive = true
-    managerRef.current = new InterpolationManager(config)
 
-    // Start render loop
     const renderLoop = () => {
       if (!isActive) return
-      if (managerRef.current) {
-        managerRef.current.interpolate()
-        setPositions(new Map(managerRef.current.getAllVisualPositions()))
-        setFactor(managerRef.current.getInterpolationFactor())
-      }
+      managerRef.current.interpolate()
+      setPositions(new Map(managerRef.current.getAllVisualPositions()))
+      setFactor(managerRef.current.getInterpolationFactor())
       animationFrameRef.current = requestAnimationFrame(renderLoop)
     }
 
@@ -121,13 +121,11 @@ export function useInterpolation(
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current)
       }
-      managerRef.current = null
     }
-  }, [config])
+  }, [])
 
   // Update multiple entities
   const updateEntities = useCallback((entities: EntityUpdate[], gameTick: number) => {
-    if (!managerRef.current) return
     for (const entity of entities) {
       managerRef.current.updateEntity(entity.id, entity.x, entity.y, gameTick)
     }
@@ -135,32 +133,27 @@ export function useInterpolation(
 
   // Update single entity
   const updateEntity = useCallback((id: string, x: number, y: number, gameTick: number) => {
-    if (!managerRef.current) return
     managerRef.current.updateEntity(id, x, y, gameTick)
   }, [])
 
   // Remove entity
   const removeEntity = useCallback((id: string) => {
-    if (!managerRef.current) return
     managerRef.current.removeEntity(id)
   }, [])
 
   // Clear all
   const clear = useCallback(() => {
-    if (!managerRef.current) return
     managerRef.current.clear()
     setPositions(new Map())
   }, [])
 
   // Get visual position
   const getPosition = useCallback((id: string): { x: number; y: number } | null => {
-    if (!managerRef.current) return null
     return managerRef.current.getVisualPosition(id)
   }, [])
 
   // Get render position with sub-cell info
   const getRenderPosition = useCallback((id: string): RenderPosition | null => {
-    if (!managerRef.current) return null
     const pos = managerRef.current.getVisualPosition(id)
     if (!pos) return null
     return toRenderPosition(pos.x, pos.y, config.useAscii)
@@ -168,7 +161,6 @@ export function useInterpolation(
 
   // Mark tick start
   const markTickFn = useCallback((gameTick: number) => {
-    if (!managerRef.current) return
     managerRef.current.startTick(gameTick)
   }, [])
 
