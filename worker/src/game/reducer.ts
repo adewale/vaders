@@ -630,11 +630,12 @@ function tickReducer(state: GameState): ReducerResult {
     }
   }
 
-  // 5. Alien shooting (seeded RNG) - skip if aliens are entering or if disabled
+  // 5. Alien shooting (seeded RNG) - skip if aliens are entering, disabled, or all players dead
   const liveAliens = aliens.filter(a => a.alive)
   const aliensEntering = liveAliens.some(a => a.entering)
+  const allPlayersDead = Object.values(next.players).every(p => !p.alive)
 
-  if (!aliensEntering && !next.alienShootingDisabled) {
+  if (!aliensEntering && !next.alienShootingDisabled && !allPlayersDead) {
     // Find bottom-row aliens (can shoot)
     const bottomAliens: AlienEntity[] = []
     const colToBottomAlien = new Map<number, AlienEntity>()
