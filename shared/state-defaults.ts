@@ -81,7 +81,7 @@ export const GAME_STATE_DEFAULTS: Omit<GameState, 'roomId'> = {
   alienDirection: 1,
   wipeTicksRemaining: null,
   wipeWaveNumber: null,
-  alienShootingDisabled: true, // DEBUG: disable alien shooting
+  alienShootingDisabled: false, // Set to true to disable alien shooting for debugging
   config: DEFAULT_CONFIG,
 }
 
