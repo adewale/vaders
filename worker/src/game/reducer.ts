@@ -13,6 +13,7 @@ import type {
 } from '../../../shared/types'
 import {
   LAYOUT,
+  WIPE_TIMING,
   getAliens,
   getBullets,
   getBarriers,
@@ -276,11 +277,6 @@ function unreadyReducer(state: GameState, playerId: string): ReducerResult {
   }
 }
 
-// Wipe phase durations at 30Hz server tick rate
-const WIPE_EXIT_TICKS = 30    // 1 second - iris closing
-const WIPE_HOLD_TICKS = 30    // 1 second - screen covered with wave title
-const WIPE_REVEAL_TICKS = 60  // 2 seconds - iris opening + aliens entering
-
 function startSoloReducer(state: GameState): ReducerResult {
   if (Object.keys(state.players).length !== 1) {
     return { state, events: [], persist: false }
@@ -291,7 +287,7 @@ function startSoloReducer(state: GameState): ReducerResult {
   next.mode = 'solo'
   next.lives = 3
   next.tick = 0
-  next.wipeTicksRemaining = WIPE_HOLD_TICKS
+  next.wipeTicksRemaining = WIPE_TIMING.HOLD_TICKS
   next.wipeWaveNumber = 1
 
   return {
@@ -328,7 +324,7 @@ function countdownTickReducer(state: GameState): ReducerResult {
     // Transition to wipe_hold (skip exit for game start)
     next.status = 'wipe_hold'
     next.countdownRemaining = null
-    next.wipeTicksRemaining = WIPE_HOLD_TICKS
+    next.wipeTicksRemaining = WIPE_TIMING.HOLD_TICKS
     next.wipeWaveNumber = 1
     return {
       state: next,
@@ -376,13 +372,13 @@ function wipeTickReducer(state: GameState): ReducerResult {
         case 'wipe_exit':
           // Exit complete → hold with wave title
           next.status = 'wipe_hold'
-          next.wipeTicksRemaining = WIPE_HOLD_TICKS
+          next.wipeTicksRemaining = WIPE_TIMING.HOLD_TICKS
           break
 
         case 'wipe_hold':
           // Hold complete → reveal (create aliens with entering=true)
           next.status = 'wipe_reveal'
-          next.wipeTicksRemaining = WIPE_REVEAL_TICKS
+          next.wipeTicksRemaining = WIPE_TIMING.REVEAL_TICKS
           // Aliens are created by GameRoom when entering wipe_reveal
           // Mark all aliens as entering
           for (const entity of next.entities) {

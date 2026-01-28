@@ -350,6 +350,7 @@ export type GameEvent =
   | 'score_awarded'
   | 'wave_complete'
   | 'game_over'
+  | 'invasion'
   | 'ufo_spawn'
 
 // ─── Game State ───────────────────────────────────────────────────────────────
@@ -385,6 +386,89 @@ export interface GameState {
   alienShootingDisabled: boolean
 
   config: GameConfig
+}
+
+// ─── Wipe Timing Constants ────────────────────────────────────────────────────
+// Server-side wipe phase durations at 30Hz tick rate
+// These are the canonical values - client should derive from these
+
+export const WIPE_TIMING = {
+  /** Ticks for iris closing (1 second at 30Hz) */
+  EXIT_TICKS: 30,
+  /** Ticks for black screen with wave title (1 second at 30Hz) */
+  HOLD_TICKS: 30,
+  /** Ticks for iris opening + aliens entering (2 seconds at 30Hz) */
+  REVEAL_TICKS: 60,
+} as const
+
+// ─── Barrier Factory ──────────────────────────────────────────────────────────
+
+/** Canonical barrier shape - arch with gap in center bottom */
+export const BARRIER_SHAPE = [
+  [1, 1, 1, 1, 1],  // Top row: solid
+  [1, 1, 0, 1, 1],  // Bottom row: gap in center (arch)
+] as const
+
+/**
+ * Create barrier segments from the canonical shape.
+ * Each segment starts with health=4.
+ */
+export function createBarrierSegments(): BarrierSegment[] {
+  const segments: BarrierSegment[] = []
+  for (let row = 0; row < BARRIER_SHAPE.length; row++) {
+    for (let col = 0; col < BARRIER_SHAPE[row].length; col++) {
+      if (BARRIER_SHAPE[row][col]) {
+        segments.push({ offsetX: col, offsetY: row, health: 4 })
+      }
+    }
+  }
+  return segments
+}
+
+// ─── Alien Formation Factory ──────────────────────────────────────────────────
+
+/**
+ * Create an alien formation grid.
+ * This is the canonical formation creation logic - use this everywhere.
+ *
+ * @param cols - Number of columns
+ * @param rows - Number of rows
+ * @param screenWidth - Screen width for centering (default: STANDARD_WIDTH)
+ * @param idGenerator - Function to generate unique IDs (default: counter-based)
+ * @returns Array of AlienEntity objects
+ */
+export function createAlienFormation(
+  cols: number,
+  rows: number,
+  screenWidth: number = STANDARD_WIDTH,
+  idGenerator?: () => string
+): AlienEntity[] {
+  const aliens: AlienEntity[] = []
+  // Calculate grid width using sprite width
+  const gridWidth = (cols - 1) * LAYOUT.ALIEN_COL_SPACING + LAYOUT.ALIEN_WIDTH
+  const startX = Math.floor((screenWidth - gridWidth) / 2)
+
+  let idCounter = 0
+  const generateId = idGenerator || (() => `alien-${idCounter++}`)
+
+  for (let row = 0; row < rows; row++) {
+    const type = FORMATION_ROWS[row] || 'octopus'
+    for (let col = 0; col < cols; col++) {
+      aliens.push({
+        kind: 'alien',
+        id: generateId(),
+        type,
+        row,
+        col,
+        x: startX + col * LAYOUT.ALIEN_COL_SPACING,
+        y: LAYOUT.ALIEN_START_Y + row * LAYOUT.ALIEN_ROW_SPACING,
+        alive: true,
+        points: ALIEN_REGISTRY[type].points,
+        entering: false,
+      })
+    }
+  }
+  return aliens
 }
 
 // ─── Seeded RNG ───────────────────────────────────────────────────────────────

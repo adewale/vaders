@@ -5,9 +5,7 @@ import { DurableObject } from 'cloudflare:workers'
 import type {
   GameState,
   Player,
-  AlienEntity,
   BarrierEntity,
-  BarrierSegment,
   ServerMessage,
   ClientMessage,
   PlayerSlot,
@@ -15,10 +13,11 @@ import type {
 import {
   DEFAULT_CONFIG,
   LAYOUT,
-  ALIEN_REGISTRY,
-  FORMATION_ROWS,
+  WIPE_TIMING,
   PLAYER_COLORS,
   getBarriers,
+  createAlienFormation,
+  createBarrierSegments,
 } from '../../shared/types'
 import { getScaledConfig, getPlayerSpawnX } from './game/scaling'
 import { gameReducer, type GameAction } from './game/reducer'
@@ -450,7 +449,7 @@ export class GameRoom extends DurableObject<Env> {
     this.countdownRemaining = null
     this.game.lives = scaled.lives
     this.game.tick = 0
-    this.game.wipeTicksRemaining = 30  // 1 second at 30Hz
+    this.game.wipeTicksRemaining = WIPE_TIMING.HOLD_TICKS
     this.game.wipeWaveNumber = 1
     // Note: alienShootingDisabled is set via GAME_STATE_DEFAULTS in state-defaults.ts
 
@@ -544,7 +543,7 @@ export class GameRoom extends DurableObject<Env> {
     if (prevStatus === 'wipe_hold' && this.game.status === 'wipe_reveal') {
       const playerCount = Object.keys(this.game.players).length
       const scaled = getScaledConfig(playerCount, this.game.config)
-      const aliens = this.createAlienFormation(scaled.alienCols, scaled.alienRows)
+      const aliens = this.createAlienFormationWithIds(scaled.alienCols, scaled.alienRows)
       // Mark all aliens as entering
       for (const alien of aliens) {
         alien.entering = true
@@ -601,7 +600,7 @@ export class GameRoom extends DurableObject<Env> {
 
     // Start wave transition wipe (exit → hold → reveal)
     this.game.status = 'wipe_exit'
-    this.game.wipeTicksRemaining = 30  // 1 second at 30Hz
+    this.game.wipeTicksRemaining = WIPE_TIMING.EXIT_TICKS
     this.game.wipeWaveNumber = this.game.wave
 
     this.persistState()
@@ -620,31 +619,15 @@ export class GameRoom extends DurableObject<Env> {
     void this.ctx.storage.setAlarm(Date.now() + 5 * 60 * 1000)
   }
 
-  private createAlienFormation(cols: number, rows: number): AlienEntity[] {
+  private createAlienFormationWithIds(cols: number, rows: number) {
     if (!this.game) return []
-    const aliens: AlienEntity[] = []
-    // Use ALIEN_WIDTH for grid calculation (5-wide sprites)
-    const gridWidth = (cols - 1) * LAYOUT.ALIEN_COL_SPACING + LAYOUT.ALIEN_WIDTH
-    const startX = Math.floor((this.game.config.width - gridWidth) / 2)
-
-    for (let row = 0; row < rows; row++) {
-      const type = FORMATION_ROWS[row] || 'octopus'
-      for (let col = 0; col < cols; col++) {
-        aliens.push({
-          kind: 'alien',
-          id: this.generateEntityId(),
-          type,
-          row,
-          col,
-          x: startX + col * LAYOUT.ALIEN_COL_SPACING,
-          y: LAYOUT.ALIEN_START_Y + row * LAYOUT.ALIEN_ROW_SPACING,
-          alive: true,
-          points: ALIEN_REGISTRY[type].points,
-          entering: false,  // Will be set to true when entering wipe_reveal
-        })
-      }
-    }
-    return aliens
+    // Use shared createAlienFormation with custom ID generator
+    return createAlienFormation(
+      cols,
+      rows,
+      this.game.config.width,
+      () => this.generateEntityId()
+    )
   }
 
   private createBarriers(playerCount: number): BarrierEntity[] {
@@ -654,26 +637,13 @@ export class GameRoom extends DurableObject<Env> {
     const barriers: BarrierEntity[] = []
     const spacing = width / (barrierCount + 1)
 
-    const BARRIER_SHAPE = [
-      [1, 1, 1, 1, 1],
-      [1, 1, 0, 1, 1],
-    ]
-
     for (let i = 0; i < barrierCount; i++) {
       const x = Math.floor(spacing * (i + 1)) - 3
-      const segments: BarrierSegment[] = []
-      for (let row = 0; row < BARRIER_SHAPE.length; row++) {
-        for (let col = 0; col < BARRIER_SHAPE[row].length; col++) {
-          if (BARRIER_SHAPE[row][col]) {
-            segments.push({ offsetX: col, offsetY: row, health: 4 })
-          }
-        }
-      }
       barriers.push({
         kind: 'barrier',
         id: this.generateEntityId(),
         x,
-        segments,
+        segments: createBarrierSegments(),
       })
     }
     return barriers

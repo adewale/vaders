@@ -1,42 +1,8 @@
 import { describe, test, expect } from 'bun:test'
 import { gameReducer } from './reducer'
 import { createDefaultGameState } from '../../../shared/state-defaults'
-import { getAliens, getBullets, type AlienEntity, LAYOUT } from '../../../shared/types'
+import { getAliens, getBullets, createAlienFormation } from '../../../shared/types'
 import { getScaledConfig } from './scaling'
-
-// Simulate GameRoom's createAlienFormation
-function createAlienFormation(cols: number, rows: number): AlienEntity[] {
-  const ALIEN_TYPES = ['squid', 'crab', 'octopus'] as const
-  const ALIEN_REGISTRY = {
-    squid: { points: 30 },
-    crab: { points: 20 },
-    octopus: { points: 10 },
-  }
-
-  const aliens: AlienEntity[] = []
-  const totalWidth = cols * LAYOUT.ALIEN_COL_SPACING
-  const startX = Math.floor((120 - totalWidth) / 2)
-
-  let idCounter = 0
-  for (let row = 0; row < rows; row++) {
-    const type = ALIEN_TYPES[Math.min(row, ALIEN_TYPES.length - 1)]
-    for (let col = 0; col < cols; col++) {
-      aliens.push({
-        kind: 'alien',
-        id: `alien-${idCounter++}`,
-        type,
-        row,
-        col,
-        x: startX + col * LAYOUT.ALIEN_COL_SPACING,
-        y: LAYOUT.ALIEN_START_Y + row * LAYOUT.ALIEN_ROW_SPACING,
-        alive: true,
-        points: ALIEN_REGISTRY[type].points,
-        entering: false,
-      })
-    }
-  }
-  return aliens
-}
 
 describe('PROOF: Alien shooting works end-to-end', () => {
   test('Full game flow: wipe_hold → wipe_reveal → playing → aliens shoot', () => {
