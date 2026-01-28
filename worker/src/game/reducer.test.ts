@@ -1470,6 +1470,47 @@ describe('barrier segment damage progression', () => {
     const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as any
     expect(updatedBarrier.segments[0].health).toBe(3)
   })
+
+  it('bullet must be exactly aligned with segment X to hit (integer coordinates)', () => {
+    // This test verifies the collision detection boundary behavior:
+    // - Barrier at x=50 has segments at x=50, 51, 52 (offsets 0, 1, 2)
+    // - Bullet at x=49 should miss (outside barrier on left)
+    // - Bullet at x=50 should hit segment[0] at x=50
+    // - Bullet at x=53 should miss (outside barrier on right)
+    // Note: Bullets start at BARRIER_Y + 1 so they move INTO the barrier on tick
+
+    const { state: state1, players } = createTestPlayingState(1)
+    const barrier1 = createTestBarrier('barrier1', 50)
+    const bulletOutsideLeft = createTestBullet('b1', 49, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
+    state1.entities = [barrier1, bulletOutsideLeft]
+
+    const result1 = gameReducer(state1, { type: 'TICK' })
+    const updatedBarrier1 = result1.state.entities.find(e => e.id === 'barrier1') as any
+    // Segment at x=50 should be undamaged - bullet at x=49 is outside barrier
+    expect(updatedBarrier1.segments[0].health).toBe(4)
+
+    // Test bullet aligned with segment
+    const { state: state2 } = createTestPlayingState(1)
+    const barrier2 = createTestBarrier('barrier2', 50)
+    const bulletAligned = createTestBullet('b2', 50, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
+    state2.entities = [barrier2, bulletAligned]
+
+    const result2 = gameReducer(state2, { type: 'TICK' })
+    const updatedBarrier2 = result2.state.entities.find(e => e.id === 'barrier2') as any
+    // Segment[0] at x=50 should be damaged
+    expect(updatedBarrier2.segments[0].health).toBe(3)
+
+    // Test bullet outside on right
+    const { state: state3 } = createTestPlayingState(1)
+    const barrier3 = createTestBarrier('barrier3', 50)
+    const bulletOutsideRight = createTestBullet('b3', 53, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
+    state3.entities = [barrier3, bulletOutsideRight]
+
+    const result3 = gameReducer(state3, { type: 'TICK' })
+    const updatedBarrier3 = result3.state.entities.find(e => e.id === 'barrier3') as any
+    // Segment at x=52 should be undamaged - bullet at x=53 is outside barrier (only 3 segments wide in test)
+    expect(updatedBarrier3.segments[2].health).toBe(4)
+  })
 })
 
 // ============================================================================
