@@ -595,6 +595,39 @@ function tickReducer(state: GameState): ReducerResult {
         alien.x += next.alienDirection * 2
       }
     }
+
+    // Alien-barrier collision: aliens destroy barrier segments on contact
+    // Barrier segments are 1x1 cells, aliens are ALIEN_WIDTH x ALIEN_HEIGHT
+    for (const alien of liveAliens) {
+      for (const barrier of barriers) {
+        for (const seg of barrier.segments) {
+          if (seg.health <= 0) continue
+
+          // Segment position (each segment is 1 cell)
+          const segX = barrier.x + seg.offsetX
+          const segY = LAYOUT.BARRIER_Y + seg.offsetY
+
+          // Check if alien sprite overlaps segment
+          // Alien occupies from (alien.x, alien.y) to (alien.x + ALIEN_WIDTH, alien.y + ALIEN_HEIGHT)
+          if (alien.x <= segX && segX < alien.x + LAYOUT.ALIEN_WIDTH &&
+              alien.y <= segY && segY < alien.y + LAYOUT.ALIEN_HEIGHT) {
+            // Alien destroys the barrier segment completely
+            seg.health = 0
+          }
+        }
+      }
+    }
+
+    // Game over if aliens reach player level (invasion)
+    for (const alien of liveAliens) {
+      if (alien.y + LAYOUT.ALIEN_HEIGHT >= LAYOUT.PLAYER_Y) {
+        // Invasion! Game over regardless of lives
+        next.status = 'game_over'
+        next.lives = 0
+        events.push({ type: 'event', name: 'invasion', data: undefined })
+        return { state: next, events, persist: true }
+      }
+    }
   }
 
   // 5. Alien shooting (seeded RNG) - skip if aliens are entering or if disabled
