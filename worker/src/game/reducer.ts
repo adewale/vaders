@@ -13,6 +13,7 @@ import type {
 } from '../../../shared/types'
 import {
   LAYOUT,
+  HITBOX,
   WIPE_TIMING,
   getAliens,
   getBullets,
@@ -21,7 +22,10 @@ import {
   seededRandom,
   constrainPlayerX,
   applyPlayerInput,
-  checkBulletCollision,
+  checkPlayerHit,
+  checkAlienHit,
+  checkUfoHit,
+  checkBarrierSegmentHit,
 } from '../../../shared/types'
 import { getScaledConfig } from './scaling'
 
@@ -465,7 +469,7 @@ function tickReducer(state: GameState): ReducerResult {
     for (const alien of aliens) {
       if (!alien.alive) continue
 
-      if (checkBulletCollision(bullet.x, bullet.y, alien.x, alien.y)) {
+      if (checkAlienHit(bullet.x, bullet.y, alien.x, alien.y)) {
         alien.alive = false
         bullet.y = -100  // Mark for removal
 
@@ -498,7 +502,7 @@ function tickReducer(state: GameState): ReducerResult {
     for (const ufo of currentUfos) {
       if (!ufo.alive) continue
 
-      if (checkBulletCollision(bullet.x, bullet.y, ufo.x, ufo.y)) {
+      if (checkUfoHit(bullet.x, bullet.y, ufo.x, ufo.y)) {
         ufo.alive = false
         bullet.y = -100  // Mark for removal
 
@@ -525,7 +529,7 @@ function tickReducer(state: GameState): ReducerResult {
     for (const player of Object.values(next.players)) {
       if (!player.alive) continue
 
-      if (checkBulletCollision(bullet.x, bullet.y, player.x, LAYOUT.PLAYER_Y)) {
+      if (checkPlayerHit(bullet.x, bullet.y, player.x, LAYOUT.PLAYER_Y)) {
         bullet.y = 100  // Mark for removal
         player.alive = false
         player.lives--
@@ -545,15 +549,17 @@ function tickReducer(state: GameState): ReducerResult {
   }
 
   // Bullet-barrier collisions
+  // Segments are rendered at 2x spacing to match visual position
   for (const bullet of bullets) {
     for (const barrier of barriers) {
       for (const seg of barrier.segments) {
         if (seg.health <= 0) continue
 
-        const segX = barrier.x + seg.offsetX
-        const segY = LAYOUT.BARRIER_Y + seg.offsetY
+        // Match visual rendering: offset * segment_size
+        const segX = barrier.x + seg.offsetX * HITBOX.BARRIER_SEGMENT_WIDTH
+        const segY = LAYOUT.BARRIER_Y + seg.offsetY * HITBOX.BARRIER_SEGMENT_HEIGHT
 
-        if (Math.abs(bullet.x - segX) < 1 && Math.abs(bullet.y - segY) < 1) {
+        if (checkBarrierSegmentHit(bullet.x, bullet.y, segX, segY)) {
           seg.health = Math.max(0, seg.health - 1) as 0 | 1 | 2 | 3 | 4
           bullet.y = bullet.dy === -1 ? -100 : 100  // Mark for removal
           break
@@ -593,20 +599,27 @@ function tickReducer(state: GameState): ReducerResult {
     }
 
     // Alien-barrier collision: aliens destroy barrier segments on contact
-    // Barrier segments are 1x1 cells, aliens are ALIEN_WIDTH x ALIEN_HEIGHT
+    // Segments are 2x2 cells (matching visual), aliens are ALIEN_WIDTH x ALIEN_HEIGHT
     for (const alien of liveAliens) {
       for (const barrier of barriers) {
         for (const seg of barrier.segments) {
           if (seg.health <= 0) continue
 
-          // Segment position (each segment is 1 cell)
-          const segX = barrier.x + seg.offsetX
-          const segY = LAYOUT.BARRIER_Y + seg.offsetY
+          // Segment position (matching visual rendering with 2x multiplier)
+          const segX = barrier.x + seg.offsetX * HITBOX.BARRIER_SEGMENT_WIDTH
+          const segY = LAYOUT.BARRIER_Y + seg.offsetY * HITBOX.BARRIER_SEGMENT_HEIGHT
 
           // Check if alien sprite overlaps segment
-          // Alien occupies from (alien.x, alien.y) to (alien.x + ALIEN_WIDTH, alien.y + ALIEN_HEIGHT)
-          if (alien.x <= segX && segX < alien.x + LAYOUT.ALIEN_WIDTH &&
-              alien.y <= segY && segY < alien.y + LAYOUT.ALIEN_HEIGHT) {
+          // Alien occupies [alien.x, alien.x + width) × [alien.y, alien.y + height)
+          // Segment occupies [segX, segX + width) × [segY, segY + height)
+          const alienRight = alien.x + LAYOUT.ALIEN_WIDTH
+          const alienBottom = alien.y + LAYOUT.ALIEN_HEIGHT
+          const segRight = segX + HITBOX.BARRIER_SEGMENT_WIDTH
+          const segBottom = segY + HITBOX.BARRIER_SEGMENT_HEIGHT
+
+          // AABB overlap check
+          if (alien.x < segRight && alienRight > segX &&
+              alien.y < segBottom && alienBottom > segY) {
             // Alien destroys the barrier segment completely
             seg.health = 0
           }

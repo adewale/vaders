@@ -24,6 +24,8 @@ describe('PROOF: Alien shooting works end-to-end', () => {
         lives: 3,
         kills: 0,
         alive: true,
+        color: 'green',
+        lastShotTick: 0,
         inputState: { left: false, right: false },
         respawnAtTick: null
       }
@@ -109,10 +111,14 @@ describe('PROOF: Alien shooting works end-to-end', () => {
     const scaled = getScaledConfig(1, {
       width: 120,
       height: 36,
+      maxPlayers: 4,
       tickIntervalMs: 33,
-      respawnDelayTicks: 90,
+      baseAlienMoveIntervalTicks: 18,
       baseBulletSpeed: 1,
+      baseAlienShootRate: 0.016,
+      playerCooldownTicks: 6,
       playerMoveSpeed: 2,
+      respawnDelayTicks: 90,
     })
 
     console.log('alienShootProbability:', scaled.alienShootProbability)

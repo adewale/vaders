@@ -44,6 +44,19 @@ export const LAYOUT = {
   COLLISION_V: 2,            // Vertical collision threshold (for 2-tall sprites)
 } as const
 
+// ─── Hitbox Constants ────────────────────────────────────────────────────────
+// These match the visual sprite sizes for accurate collision detection
+
+export const HITBOX = {
+  PLAYER_HALF_WIDTH: 2,      // Player.x is center, sprite width 5, so half is 2
+  ALIEN_WIDTH: 5,            // Left-edge based, full sprite width
+  ALIEN_HEIGHT: 2,           // Full sprite height
+  UFO_WIDTH: 5,              // Left-edge based, full sprite width
+  UFO_HEIGHT: 2,             // Full sprite height
+  BARRIER_SEGMENT_WIDTH: 2,  // Each segment is 2 chars wide
+  BARRIER_SEGMENT_HEIGHT: 2, // Each segment is 2 rows tall
+} as const
+
 // ─── Player ───────────────────────────────────────────────────────────────────
 
 export type PlayerSlot = 1 | 2 | 3 | 4
@@ -273,6 +286,7 @@ export function applyPlayerInput(
  * @param targetY - Target entity Y position
  * @param offsetX - X offset for target center (default: 1 for 5-wide sprites)
  * @returns true if collision detected
+ * @deprecated Use entity-specific collision functions instead (checkPlayerHit, checkAlienHit, etc.)
  */
 export function checkBulletCollision(
   bulletX: number,
@@ -285,6 +299,51 @@ export function checkBulletCollision(
     Math.abs(bulletX - targetX - offsetX) < LAYOUT.COLLISION_H &&
     Math.abs(bulletY - targetY) < LAYOUT.COLLISION_V
   )
+}
+
+// ─── Entity-Specific Collision Functions ─────────────────────────────────────
+// These functions fix X bounds to match visual rendering while preserving
+// Y tolerance for bullet movement (bullets move before collision detection)
+
+/**
+ * Check if a bullet hits a player.
+ * Player.x is CENTER of sprite (width 5), so visual span is [x-2, x+3).
+ * Y uses tolerance (COLLISION_V=2) to account for bullet movement.
+ */
+export function checkPlayerHit(bX: number, bY: number, pX: number, pY: number): boolean {
+  return bX >= pX - HITBOX.PLAYER_HALF_WIDTH &&
+         bX < pX + HITBOX.PLAYER_HALF_WIDTH + 1 &&
+         Math.abs(bY - pY) < LAYOUT.COLLISION_V  // Keep Y tolerance for bullet movement
+}
+
+/**
+ * Check if a bullet hits an alien.
+ * Alien.x is LEFT EDGE of sprite (width 5), so visual span is [x, x+5).
+ * Y uses tolerance (COLLISION_V=2) to account for bullet movement.
+ */
+export function checkAlienHit(bX: number, bY: number, aX: number, aY: number): boolean {
+  return bX >= aX && bX < aX + HITBOX.ALIEN_WIDTH &&
+         Math.abs(bY - aY) < LAYOUT.COLLISION_V  // Keep Y tolerance for bullet movement
+}
+
+/**
+ * Check if a bullet hits a UFO.
+ * UFO.x is LEFT EDGE of sprite (width 5), so visual span is [x, x+5).
+ * Y uses tolerance (COLLISION_V=2) to account for bullet movement.
+ */
+export function checkUfoHit(bX: number, bY: number, uX: number, uY: number): boolean {
+  return bX >= uX && bX < uX + HITBOX.UFO_WIDTH &&
+         Math.abs(bY - uY) < LAYOUT.COLLISION_V  // Keep Y tolerance for bullet movement
+}
+
+/**
+ * Check if a bullet hits a barrier segment.
+ * Segment position already includes the 2x multiplier for visual position.
+ * Uses point collision (< 1 tolerance) for precise barrier hits.
+ */
+export function checkBarrierSegmentHit(bX: number, bY: number, segX: number, segY: number): boolean {
+  return bX >= segX && bX < segX + HITBOX.BARRIER_SEGMENT_WIDTH &&
+         bY >= segY && bY < segY + HITBOX.BARRIER_SEGMENT_HEIGHT
 }
 
 // ─── Game Config ──────────────────────────────────────────────────────────────

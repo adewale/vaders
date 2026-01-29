@@ -40,6 +40,7 @@ export type ServerEvent =
   | { type: 'event'; name: 'score_awarded'; data: { playerId: string | null; points: number; source: 'alien' | 'ufo' | 'commander' | 'wave_bonus' } }
   | { type: 'event'; name: 'wave_complete'; data: { wave: number } }
   | { type: 'event'; name: 'game_over'; data: { result: 'victory' | 'defeat' } }
+  | { type: 'event'; name: 'invasion'; data?: undefined }
   | { type: 'event'; name: 'ufo_spawn'; data: { x: number } }
 
 export type ServerMessage =
