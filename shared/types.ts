@@ -117,32 +117,6 @@ export interface AlienEntity {
   entering: boolean  // True during wipe_reveal phase, prevents shooting
 }
 
-export interface CommanderEntity {
-  kind: 'commander'
-  id: string
-  x: number  // LEFT EDGE of sprite (unlike Player which uses CENTER)
-  y: number
-  alive: boolean
-  health: 1 | 2
-  tractorBeamActive: boolean
-  tractorBeamCooldown: number
-  capturedPlayerId: string | null
-  escorts: string[]  // IDs of escorting aliens
-}
-
-export interface DiveBomberEntity {
-  kind: 'dive_bomber'
-  id: string
-  x: number  // LEFT EDGE of sprite (unlike Player which uses CENTER)
-  y: number
-  alive: boolean
-  diveState: 'formation' | 'diving' | 'returning'
-  divePathProgress: number
-  diveDirection: 1 | -1
-  row: number
-  col: number
-}
-
 export interface BulletEntity {
   kind: 'bullet'
   id: string
@@ -176,26 +150,11 @@ export interface UFOEntity {
   points: number     // 50-300 (mystery score)
 }
 
-export type TransformType = 'scorpion' | 'stingray' | 'mini_commander'
-
-export interface TransformEntity {
-  kind: 'transform'
-  id: string
-  x: number  // LEFT EDGE of sprite (unlike Player which uses CENTER)
-  y: number
-  type: TransformType
-  velocity: Position
-  lifetime: number
-}
-
 // Unified entity type for all game objects
 export type Entity =
   | AlienEntity
-  | CommanderEntity
-  | DiveBomberEntity
   | BulletEntity
   | BarrierEntity
-  | TransformEntity
   | UFOEntity
 
 // ─── Entity Filter Helpers ────────────────────────────────────────────────────
@@ -204,24 +163,12 @@ export function getAliens(entities: Entity[]): AlienEntity[] {
   return entities.filter((e): e is AlienEntity => e.kind === 'alien')
 }
 
-export function getCommanders(entities: Entity[]): CommanderEntity[] {
-  return entities.filter((e): e is CommanderEntity => e.kind === 'commander')
-}
-
-export function getDiveBombers(entities: Entity[]): DiveBomberEntity[] {
-  return entities.filter((e): e is DiveBomberEntity => e.kind === 'dive_bomber')
-}
-
 export function getBullets(entities: Entity[]): BulletEntity[] {
   return entities.filter((e): e is BulletEntity => e.kind === 'bullet')
 }
 
 export function getBarriers(entities: Entity[]): BarrierEntity[] {
   return entities.filter((e): e is BarrierEntity => e.kind === 'barrier')
-}
-
-export function getTransforms(entities: Entity[]): TransformEntity[] {
-  return entities.filter((e): e is TransformEntity => e.kind === 'transform')
 }
 
 export function getUFOs(entities: Entity[]): UFOEntity[] {
@@ -275,33 +222,6 @@ export function applyPlayerInput(
 }
 
 // ─── Collision Utilities ─────────────────────────────────────────────────────
-
-/**
- * Check if a bullet collides with a target entity.
- * Uses AABB collision with configurable thresholds.
- *
- * @param bulletX - Bullet X position
- * @param bulletY - Bullet Y position
- * @param targetX - Target entity X position
- * @param targetY - Target entity Y position
- * @param offsetX - X offset for target center (default: 1 for 5-wide sprites)
- * @returns true if collision detected
- * @deprecated Use entity-specific collision functions instead (checkPlayerHit, checkAlienHit, etc.)
- */
-export function checkBulletCollision(
-  bulletX: number,
-  bulletY: number,
-  targetX: number,
-  targetY: number,
-  offsetX: number = 1
-): boolean {
-  return (
-    Math.abs(bulletX - targetX - offsetX) < LAYOUT.COLLISION_H &&
-    Math.abs(bulletY - targetY) < LAYOUT.COLLISION_V
-  )
-}
-
-// ─── Entity-Specific Collision Functions ─────────────────────────────────────
 // These functions fix X bounds to match visual rendering while preserving
 // Y tolerance for bullet movement (bullets move before collision detection)
 

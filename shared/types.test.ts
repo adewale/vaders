@@ -6,7 +6,6 @@ import {
   LAYOUT,
   constrainPlayerX,
   applyPlayerInput,
-  checkBulletCollision,
   getAliens,
   getBullets,
   getBarriers,
@@ -100,55 +99,6 @@ describe('applyPlayerInput', () => {
   test('uses correct speed', () => {
     const result = applyPlayerInput(50, { left: true, right: false }, 3)
     expect(result).toBe(47)
-  })
-})
-
-// ─── checkBulletCollision Tests ──────────────────────────────────────────────
-
-describe('checkBulletCollision', () => {
-  test('detects collision when bullet is at target center', () => {
-    const result = checkBulletCollision(50, 20, 49, 20)
-    expect(result).toBe(true)
-  })
-
-  test('detects collision within horizontal threshold', () => {
-    // COLLISION_H is 3, so within 3 cells horizontally should collide
-    const result = checkBulletCollision(50, 20, 48, 20)
-    expect(result).toBe(true)
-  })
-
-  test('detects collision within vertical threshold', () => {
-    // COLLISION_V is 2, so within 2 cells vertically should collide
-    const result = checkBulletCollision(50, 20, 49, 21)
-    expect(result).toBe(true)
-  })
-
-  test('no collision when bullet is far away horizontally', () => {
-    const result = checkBulletCollision(50, 20, 40, 20)
-    expect(result).toBe(false)
-  })
-
-  test('no collision when bullet is far away vertically', () => {
-    const result = checkBulletCollision(50, 20, 49, 30)
-    expect(result).toBe(false)
-  })
-
-  test('handles custom offset', () => {
-    const result = checkBulletCollision(50, 20, 47, 20, 2)
-    expect(result).toBe(true)
-  })
-
-  test('edge case: exactly at threshold boundary', () => {
-    // Formula: Math.abs(bulletX - targetX - offsetX) < COLLISION_H
-    // With bulletX=50, targetX=46, offsetX=1: |50 - 46 - 1| = 3, and 3 < 3 is false
-    const result = checkBulletCollision(50, 20, 46, 20)
-    expect(result).toBe(false)
-  })
-
-  test('edge case: just inside threshold', () => {
-    // With bulletX=50, targetX=47, offsetX=1: |50 - 47 - 1| = 2, and 2 < 3 is true
-    const result = checkBulletCollision(50, 20, 47, 20)
-    expect(result).toBe(true)
   })
 })
 
