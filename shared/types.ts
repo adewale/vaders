@@ -6,7 +6,7 @@
 // - x: 0 = left edge, increases rightward
 // - y: 0 = top edge, increases downward
 // - Entity sprites render from their (x, y) position rightward/downward
-// Screen is 80×24 cells (columns × rows)
+// Screen is 120×36 cells (columns × rows)
 
 export interface Position {
   x: number  // Top-left x coordinate
@@ -72,7 +72,7 @@ export const PLAYER_COLORS: Record<PlayerSlot, PlayerColor> = {
 export interface Player {
   id: string
   name: string
-  x: number                         // Horizontal position (y is always LAYOUT.PLAYER_Y)
+  x: number                         // Horizontal position CENTER of sprite (y is always LAYOUT.PLAYER_Y)
   slot: PlayerSlot
   color: PlayerColor
   lastShotTick: number              // Tick of last shot (for cooldown)
@@ -107,7 +107,7 @@ export const FORMATION_ROWS: ClassicAlienType[] = ['squid', 'crab', 'crab', 'oct
 export interface AlienEntity {
   kind: 'alien'
   id: string
-  x: number
+  x: number  // LEFT EDGE of sprite (unlike Player which uses CENTER)
   y: number
   type: ClassicAlienType
   alive: boolean
@@ -120,7 +120,7 @@ export interface AlienEntity {
 export interface CommanderEntity {
   kind: 'commander'
   id: string
-  x: number
+  x: number  // LEFT EDGE of sprite (unlike Player which uses CENTER)
   y: number
   alive: boolean
   health: 1 | 2
@@ -133,7 +133,7 @@ export interface CommanderEntity {
 export interface DiveBomberEntity {
   kind: 'dive_bomber'
   id: string
-  x: number
+  x: number  // LEFT EDGE of sprite (unlike Player which uses CENTER)
   y: number
   alive: boolean
   diveState: 'formation' | 'diving' | 'returning'
@@ -146,7 +146,7 @@ export interface DiveBomberEntity {
 export interface BulletEntity {
   kind: 'bullet'
   id: string
-  x: number
+  x: number  // CENTER of bullet (spawns from center of player/alien)
   y: number
   ownerId: string | null  // null = alien bullet
   dy: -1 | 1              // -1 = up (player), 1 = down (alien)
@@ -162,15 +162,15 @@ export interface BarrierSegment {
 export interface BarrierEntity {
   kind: 'barrier'
   id: string
-  x: number               // Left edge (y is always LAYOUT.BARRIER_Y)
+  x: number  // LEFT EDGE of barrier (unlike Player which uses CENTER)
   segments: BarrierSegment[]
 }
 
 export interface UFOEntity {
   kind: 'ufo'
   id: string
-  x: number
-  y: number          // Always 1 (top row)
+  x: number  // LEFT EDGE of sprite (unlike Player which uses CENTER)
+  y: number  // Always 1 (top row)
   direction: 1 | -1  // 1 = right, -1 = left
   alive: boolean
   points: number     // 50-300 (mystery score)
@@ -181,7 +181,7 @@ export type TransformType = 'scorpion' | 'stingray' | 'mini_commander'
 export interface TransformEntity {
   kind: 'transform'
   id: string
-  x: number
+  x: number  // LEFT EDGE of sprite (unlike Player which uses CENTER)
   y: number
   type: TransformType
   velocity: Position

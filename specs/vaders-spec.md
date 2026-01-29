@@ -155,7 +155,7 @@ vaders --room ABC123 --name "Alice"
 
 On startup, players see a full-screen launch experience with logo, mode selection, and controls reference.
 
-### Layout (80×24)
+### Layout (120×36)
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
@@ -296,7 +296,7 @@ export function LaunchScreen({ onStartSolo, onCreateRoom, onJoinRoom, onMatchmak
   useKeyboard(handleKeyInput)
 
   return (
-    <box flexDirection="column" width={80} height={24} padding={1}>
+    <box flexDirection="column" width={120} height={36} padding={1}>
       <Logo />
       <box height={1} />
 
@@ -780,7 +780,7 @@ function plasmaColor(value: number): [number, number, number] {
 │        ▼          │                                   │  │ │ECS Systems │ │  │
 │   ┌─────────┐     │                                   │  │ └────────────┘ │  │
 │   │ stdout  │     │                                   │  └────────────────┘  │
-│   │ 80×24   │     │                                   │          │           │
+│   │ 120×36  │     │                                   │          │           │
 │   └─────────┘     │                                   │          ▼           │
 └───────────────────┘                                   │  ┌────────────────┐  │
                                                         │  │  Matchmaker DO │  │
@@ -1654,7 +1654,7 @@ export class Matchmaker implements DurableObject {
 // - x: 0 = left edge, increases rightward
 // - y: 0 = top edge, increases downward
 // - Entity sprites render from their (x, y) position rightward/downward
-// Screen is 80×24 cells (columns × rows)
+// Screen is 120×36 cells (columns × rows)
 
 interface Position {
   x: number  // Top-left x coordinate
@@ -1865,7 +1865,7 @@ type GameEvent =
 
 // ─── Layout Constants ─────────────────────────────────────────────────────────
 
-/** Layout constants for the 80×24 game grid */
+/** Layout constants for the 120×36 game grid */
 const LAYOUT = {
   PLAYER_Y: 20,              // Y position for player ships
   PLAYER_MIN_X: 2,           // Left boundary for player movement
@@ -3052,7 +3052,7 @@ export function GameScreen({ state, currentPlayerId }: GameScreenProps) {
   const playerCount = Object.keys(players).length
   
   return (
-    <box flexDirection="column" width={80} height={24}>
+    <box flexDirection="column" width={120} height={36}>
       {/* Header */}
       <box height={1} paddingLeft={1} paddingRight={1}>
         <text fg="white"><strong>◀ VADERS ▶</strong></text>
@@ -3319,7 +3319,7 @@ vaders/
 
 ---
 
-## Display Layout (80×24)
+## Display Layout (120×36)
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
@@ -3433,7 +3433,7 @@ See `getScaledConfig()` in Scaling Logic section for canonical values. Summary:
 | Player disconnect | Remove player immediately, broadcast full sync |
 | All players leave | End game, destroy room after 5min via Durable Object alarm |
 | Room full (4 players) | Return HTTP 429 with `room_full` error |
-| Terminal too small | Show "resize terminal to 80×24" message |
+| Terminal too small | Show "resize terminal to 120×36" message |
 | Simultaneous kills | First bullet processed wins (no shared credit) |
 | Reconnect during game | Not supported — no rejoin protocol implemented |
 

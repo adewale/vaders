@@ -545,9 +545,9 @@ describe('bullet spawn position centering', () => {
   })
 
   describe('alien bullets (coordinate system contract)', () => {
-    it('alien.x is also CENTER, so alien bullet.x should equal alien.x', () => {
-      // Same coordinate system applies to aliens
-      // Alien bullets should spawn at alien.x, not alien.x + offset
+    it('alien.x is LEFT EDGE, so alien bullet spawns at alien.x + half width (center)', () => {
+      // Aliens use LEFT EDGE coordinates (unlike players which use CENTER)
+      // Alien bullets spawn at the visual center: alien.x + floor(ALIEN_WIDTH / 2)
       expect(LAYOUT.ALIEN_WIDTH).toBe(LAYOUT.PLAYER_WIDTH)
     })
 
@@ -981,7 +981,7 @@ describe('TICK action (tickReducer)', () => {
   })
 
   describe('alien-bullet collision', () => {
-    it('alien.alive becomes false when hit', () => {
+    it('alien is removed from entities when hit (dead aliens are cleaned up)', () => {
       const { state, players } = createTestPlayingState(1)
       const alien = createTestAlien('alien1', 50, 10)
       const bullet = createTestBullet('b1', 51, 10, players[0].id, -1) // Close enough for collision
@@ -989,8 +989,9 @@ describe('TICK action (tickReducer)', () => {
 
       const result = gameReducer(state, { type: 'TICK' })
 
+      // Dead aliens are cleaned up at end of tick (like UFOs)
       const aliens = getAliens(result.state.entities)
-      expect(aliens.find(a => a.id === 'alien1')?.alive).toBe(false)
+      expect(aliens.find(a => a.id === 'alien1')).toBeUndefined()
     })
 
     it('score is increased by alien points', () => {
@@ -2088,8 +2089,9 @@ describe('multiple simultaneous events in one tick', () => {
     const result = gameReducer(state, { type: 'TICK' })
 
     // Only one alien should be killed (first one checked)
-    const deadAliens = getAliens(result.state.entities).filter(a => !a.alive)
-    expect(deadAliens.length).toBe(1)
+    // Dead aliens are cleaned up, so we count remaining alive aliens
+    const remainingAliens = getAliens(result.state.entities)
+    expect(remainingAliens.length).toBe(1) // One alien remains (only one killed per tick)
     expect(result.state.players[player.id].kills).toBe(1)
   })
 
@@ -2562,8 +2564,9 @@ describe('Sprite shape vs hitbox alignment', () => {
         state.entities = [alien, bullet]
 
         const result = gameReducer(state, { type: 'TICK' })
+        // Dead aliens are cleaned up at end of tick, so check if alien is removed (undefined)
         const alienAfter = getAliens(result.state.entities).find(a => a.id === 'alien1')
-        const hit = alienAfter && !alienAfter.alive
+        const hit = alienAfter === undefined  // Alien removed = was hit
 
         expect(hit).toBe(tc.expectedHit)  // Correct behavior
       }
@@ -2590,11 +2593,12 @@ describe('Sprite shape vs hitbox alignment', () => {
       state.entities = [alien, bullet]
 
       const result = gameReducer(state, { type: 'TICK' })
+      // Dead aliens are cleaned up at end of tick
       const alienAfter = getAliens(result.state.entities).find(a => a.id === 'alien1')
 
       // FIXED: 54 >= 50 && 54 < 55 -> HIT
       // x=54 is visually ON the alien sprite, correctly hits
-      expect(alienAfter?.alive).toBe(false)  // Correctly hits!
+      expect(alienAfter).toBeUndefined()  // Alien removed = was hit correctly!
     })
   })
 

@@ -10,7 +10,7 @@ Multiplayer TUI Space Invaders clone (1-4 players) using OpenTUI for terminal re
 
 The project has three main parts:
 
-1. **Worker** (`worker/`) - Cloudflare Worker with Durable Object (`GameRoom`) that manages game state, runs the 60fps game loop, and broadcasts delta updates via WebSocket
+1. **Worker** (`worker/`) - Cloudflare Worker with Durable Object (`GameRoom`) that manages game state, runs the ~30Hz game loop, and broadcasts delta updates via WebSocket
 2. **Client** (`client/`) - Bun + OpenTUI React app that renders the TUI, handles keyboard input, and maintains WebSocket connection
 3. **Shared** (`shared/`) - TypeScript types (`GameState`, `Player`, `Alien`, etc.) and WebSocket protocol definitions
 

@@ -711,6 +711,9 @@ function tickReducer(state: GameState): ReducerResult {
   // Remove dead UFOs
   next.entities = next.entities.filter(e => e.kind !== 'ufo' || e.alive)
 
+  // Remove dead aliens (cleanup to prevent memory leak)
+  next.entities = next.entities.filter(e => e.kind !== 'alien' || e.alive)
+
   // 7. Check end conditions
   const allLiveAliens = getAliens(next.entities).filter(a => a.alive)
   const allAliensKilled = allLiveAliens.length === 0
