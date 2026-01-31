@@ -151,6 +151,47 @@ async function joinPlayer(
   await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'join', name }))
 }
 
+/**
+ * Helper to run through wipe phases to get to 'playing' status.
+ * After startGame(), the game goes through:
+ * - wipe_hold (60 ticks)
+ * - wipe_reveal (120 ticks)
+ * - playing
+ */
+async function completeWipePhases(gameRoom: GameRoom) {
+  // wipe_hold: 60 ticks
+  for (let i = 0; i < 60; i++) {
+    await gameRoom.alarm()
+  }
+  // wipe_reveal: 120 ticks
+  for (let i = 0; i < 120; i++) {
+    await gameRoom.alarm()
+  }
+}
+
+/**
+ * Helper to run through wave transition wipe phases (from wipe_exit).
+ * Wave transitions go through:
+ * - wipe_exit (60 ticks)
+ * - wipe_hold (60 ticks)
+ * - wipe_reveal (120 ticks)
+ * - playing
+ */
+async function completeWaveTransitionPhases(gameRoom: GameRoom) {
+  // wipe_exit: 60 ticks
+  for (let i = 0; i < 60; i++) {
+    await gameRoom.alarm()
+  }
+  // wipe_hold: 60 ticks
+  for (let i = 0; i < 60; i++) {
+    await gameRoom.alarm()
+  }
+  // wipe_reveal: 120 ticks
+  for (let i = 0; i < 120; i++) {
+    await gameRoom.alarm()
+  }
+}
+
 // ============================================================================
 // HTTP Endpoints Tests
 // ============================================================================
@@ -289,7 +330,8 @@ describe('HTTP Endpoints', () => {
       expect(result.code).toBe('game_in_progress')
     })
 
-    it('accepts upgrade for valid room', async () => {
+    // Skip this test in Bun's test runner since vi.stubGlobal is Vitest-specific
+    it.skipIf(!vi.stubGlobal)('accepts upgrade for valid room', async () => {
       const { gameRoom, ctx } = await createInitializedGameRoom()
 
       // Mock WebSocketPair to return mock sockets
@@ -929,12 +971,12 @@ describe('Wave Transition', () => {
     await joinPlayer(gameRoom, ws, 'Player')
     await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'start_solo' }))
 
-    // Get initial state
-    let syncCall = ws.send.mock.calls.find((call: unknown[]) => {
-      const msg = JSON.parse(call[0] as string)
-      return msg.type === 'sync' && msg.state?.status === 'playing'
-    })
-    let state = JSON.parse(syncCall![0]).state as GameState
+    // Complete wipe phases to get to playing status
+    await completeWipePhases(gameRoom)
+
+    // Get state in playing mode
+    let state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+    expect(state.status).toBe('playing')
     expect(state.wave).toBe(1)
 
     // Kill all aliens by setting them to dead
@@ -969,8 +1011,12 @@ describe('Wave Transition', () => {
     await joinPlayer(gameRoom, ws, 'Player')
     await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'start_solo' }))
 
-    // Get initial state and mark all aliens dead
+    // Complete wipe phases to get to playing status
+    await completeWipePhases(gameRoom)
+
+    // Get state and mark all aliens dead
     let state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+    expect(state.status).toBe('playing')
     const aliens = state.entities.filter(e => e.kind === 'alien')
     for (const alien of aliens) {
       ;(alien as any).alive = false
@@ -981,8 +1027,11 @@ describe('Wave Transition', () => {
     const gameRoom2 = new GameRoom(ctx as any, createMockEnv())
     await new Promise(resolve => setTimeout(resolve, 0))
 
-    // Trigger tick to process wave transition
+    // Trigger tick to process wave transition - game goes to wipe_exit
     await gameRoom2.alarm()
+
+    // Wave transition goes through wipe_exit -> wipe_hold -> wipe_reveal (where aliens spawn) -> playing
+    await completeWaveTransitionPhases(gameRoom2)
 
     // Check that new aliens were spawned
     const newState = JSON.parse(ctx._sqlData['game_state'].data) as GameState
@@ -1069,6 +1118,9 @@ describe('Player Disconnect During Active Gameplay', () => {
     await joinPlayer(gameRoom, ws1, 'Player1')
     await gameRoom.webSocketMessage(ws1 as any, JSON.stringify({ type: 'start_solo' }))
 
+    // Complete wipe phases to reach playing status
+    await completeWipePhases(gameRoom)
+
     // Verify game is playing
     let state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
     expect(state.status).toBe('playing')
@@ -1096,10 +1148,13 @@ describe('Player Disconnect During Active Gameplay', () => {
     await gameRoom.webSocketMessage(ws1 as any, JSON.stringify({ type: 'ready' }))
     await gameRoom.webSocketMessage(ws2 as any, JSON.stringify({ type: 'ready' }))
 
-    // Countdown through to game start
+    // Countdown through to wipe_hold start
     await gameRoom.alarm() // 2
     await gameRoom.alarm() // 1
-    await gameRoom.alarm() // game start
+    await gameRoom.alarm() // wipe_hold starts
+
+    // Complete wipe phases to reach playing status
+    await completeWipePhases(gameRoom)
 
     // Verify game is playing
     let state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
@@ -1218,13 +1273,29 @@ describe('4-Player Room Full Scenario', () => {
       await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'ready' }))
     }
 
-    // Complete countdown: 3 -> 2 -> 1 -> start
+    // Complete countdown: 3 -> 2 -> 1 -> wipe_hold
     await gameRoom.alarm() // 2
     await gameRoom.alarm() // 1
-    await gameRoom.alarm() // game start
+    await gameRoom.alarm() // wipe_hold start
 
-    // Verify game is playing with 4-player scaling
-    const state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+    // Verify game is in wipe_hold phase (server-driven wipe)
+    let state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+    expect(state.status).toBe('wipe_hold')
+    expect(state.wipeWaveNumber).toBe(1)
+
+    // Run through wipe_hold (60 ticks) and wipe_reveal (120 ticks) phases
+    // wipe_hold: 60 ticks at 30Hz
+    for (let i = 0; i < 60; i++) {
+      await gameRoom.alarm()
+    }
+    state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+    expect(state.status).toBe('wipe_reveal')
+
+    // wipe_reveal: 120 ticks - aliens are created here
+    for (let i = 0; i < 120; i++) {
+      await gameRoom.alarm()
+    }
+    state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
     expect(state.status).toBe('playing')
 
     // 4-player config should have 15 columns and 6 rows of aliens (15*6 = 90 aliens)

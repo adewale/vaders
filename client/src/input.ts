@@ -8,7 +8,7 @@ import { getKeyReleaseTimeoutMs } from './terminal'
 // ─── Internal Key Type (stable, not tied to OpenTUI) ──────────────────────────
 
 export type VadersKey =
-  | { type: 'key'; key: 'left' | 'right' | 'up' | 'down' | 'space' | 'enter' | 'escape' | 'q' | 'm' | 'n' | 's' | 'r' }
+  | { type: 'key'; key: 'left' | 'right' | 'up' | 'down' | 'space' | 'enter' | 'escape' | 'q' | 'm' | 'n' | 's' | 'r' | 'x' }
   | { type: 'char'; char: string }  // For text input (room codes, names)
 
 // ─── Normalize OpenTUI KeyEvent → VadersKey ───────────────────────────────────
@@ -31,6 +31,7 @@ export function normalizeKey(event: KeyEvent): VadersKey | null {
     if (char === 'n') return { type: 'key', key: 'n' }
     if (char === 's') return { type: 'key', key: 's' }
     if (char === 'r') return { type: 'key', key: 'r' }
+    if (char === 'x') return { type: 'key', key: 'x' }
     return { type: 'char', char: event.sequence }
   }
 

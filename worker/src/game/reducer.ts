@@ -13,6 +13,8 @@ import type {
 } from '../../../shared/types'
 import {
   LAYOUT,
+  HITBOX,
+  WIPE_TIMING,
   getAliens,
   getBullets,
   getBarriers,
@@ -20,7 +22,10 @@ import {
   seededRandom,
   constrainPlayerX,
   applyPlayerInput,
-  checkBulletCollision,
+  checkPlayerHit,
+  checkAlienHit,
+  checkUfoHit,
+  checkBarrierSegmentHit,
 } from '../../../shared/types'
 import { getScaledConfig } from './scaling'
 
@@ -57,7 +62,7 @@ const TRANSITIONS: Record<GameStatus, Partial<Record<GameAction['type'], GameSta
     PLAYER_READY: 'waiting',
     PLAYER_UNREADY: 'waiting',
     PLAYER_INPUT: 'waiting',
-    START_SOLO: 'playing',
+    START_SOLO: 'wipe_hold',
     START_COUNTDOWN: 'countdown',
     PLAYER_LEAVE: 'waiting',
   },
@@ -67,6 +72,21 @@ const TRANSITIONS: Record<GameStatus, Partial<Record<GameAction['type'], GameSta
     PLAYER_LEAVE: 'waiting',
     PLAYER_INPUT: 'countdown',
     PLAYER_MOVE: 'countdown',
+  },
+  wipe_exit: {
+    TICK: 'wipe_exit',
+    PLAYER_INPUT: 'wipe_exit',
+    PLAYER_LEAVE: 'wipe_exit',
+  },
+  wipe_hold: {
+    TICK: 'wipe_hold',
+    PLAYER_INPUT: 'wipe_hold',
+    PLAYER_LEAVE: 'wipe_hold',
+  },
+  wipe_reveal: {
+    TICK: 'wipe_reveal',
+    PLAYER_INPUT: 'wipe_reveal',
+    PLAYER_LEAVE: 'wipe_reveal',
   },
   playing: {
     TICK: 'playing',
@@ -95,6 +115,10 @@ export function gameReducer(state: GameState, action: GameAction): ReducerResult
 
   switch (action.type) {
     case 'TICK':
+      // Handle wipe phase ticks separately
+      if (state.status === 'wipe_exit' || state.status === 'wipe_hold' || state.status === 'wipe_reveal') {
+        return wipeTickReducer(state)
+      }
       return tickReducer(state)
     case 'PLAYER_JOIN':
       return playerJoinReducer(state, action.player)
@@ -263,10 +287,12 @@ function startSoloReducer(state: GameState): ReducerResult {
   }
 
   const next = structuredClone(state)
-  next.status = 'playing'
+  next.status = 'wipe_hold'  // Skip exit, go straight to hold for game start
   next.mode = 'solo'
   next.lives = 3
   next.tick = 0
+  next.wipeTicksRemaining = WIPE_TIMING.HOLD_TICKS
+  next.wipeWaveNumber = 1
 
   return {
     state: next,
@@ -299,9 +325,11 @@ function countdownTickReducer(state: GameState): ReducerResult {
   next.countdownRemaining = state.countdownRemaining - 1
 
   if (next.countdownRemaining <= 0) {
-    // Transition to playing handled by shell
-    next.status = 'playing'
+    // Transition to wipe_hold (skip exit for game start)
+    next.status = 'wipe_hold'
     next.countdownRemaining = null
+    next.wipeTicksRemaining = WIPE_TIMING.HOLD_TICKS
+    next.wipeWaveNumber = 1
     return {
       state: next,
       events: [{ type: 'event', name: 'game_start', data: undefined }],
@@ -325,6 +353,65 @@ function countdownCancelReducer(state: GameState, reason: string): ReducerResult
     state: next,
     events: [{ type: 'event', name: 'countdown_cancelled', data: { reason } }],
     persist: true,
+  }
+}
+
+// ─── Wipe Tick Reducer ─────────────────────────────────────────────────────────
+
+function wipeTickReducer(state: GameState): ReducerResult {
+  const next = structuredClone(state)
+  next.tick++
+
+  const events: ServerEvent[] = []
+  let persist = false
+
+  // Decrement wipe countdown
+  if (next.wipeTicksRemaining !== null) {
+    next.wipeTicksRemaining--
+
+    if (next.wipeTicksRemaining <= 0) {
+      // Transition to next wipe phase - persist on status changes
+      persist = true
+      switch (next.status) {
+        case 'wipe_exit':
+          // Exit complete → hold with wave title
+          next.status = 'wipe_hold'
+          next.wipeTicksRemaining = WIPE_TIMING.HOLD_TICKS
+          break
+
+        case 'wipe_hold':
+          // Hold complete → reveal (create aliens with entering=true)
+          next.status = 'wipe_reveal'
+          next.wipeTicksRemaining = WIPE_TIMING.REVEAL_TICKS
+          // Aliens are created by GameRoom when entering wipe_reveal
+          // Mark all aliens as entering
+          for (const entity of next.entities) {
+            if (entity.kind === 'alien') {
+              entity.entering = true
+            }
+          }
+          break
+
+        case 'wipe_reveal':
+          // Reveal complete → playing (set entering=false)
+          next.status = 'playing'
+          next.wipeTicksRemaining = null
+          next.wipeWaveNumber = null
+          // Clear entering flag on all aliens
+          for (const entity of next.entities) {
+            if (entity.kind === 'alien') {
+              entity.entering = false
+            }
+          }
+          break
+      }
+    }
+  }
+
+  return {
+    state: next,
+    events,
+    persist,
   }
 }
 
@@ -382,7 +469,7 @@ function tickReducer(state: GameState): ReducerResult {
     for (const alien of aliens) {
       if (!alien.alive) continue
 
-      if (checkBulletCollision(bullet.x, bullet.y, alien.x, alien.y)) {
+      if (checkAlienHit(bullet.x, bullet.y, alien.x, alien.y)) {
         alien.alive = false
         bullet.y = -100  // Mark for removal
 
@@ -415,7 +502,7 @@ function tickReducer(state: GameState): ReducerResult {
     for (const ufo of currentUfos) {
       if (!ufo.alive) continue
 
-      if (checkBulletCollision(bullet.x, bullet.y, ufo.x, ufo.y)) {
+      if (checkUfoHit(bullet.x, bullet.y, ufo.x, ufo.y)) {
         ufo.alive = false
         bullet.y = -100  // Mark for removal
 
@@ -442,7 +529,7 @@ function tickReducer(state: GameState): ReducerResult {
     for (const player of Object.values(next.players)) {
       if (!player.alive) continue
 
-      if (checkBulletCollision(bullet.x, bullet.y, player.x, LAYOUT.PLAYER_Y)) {
+      if (checkPlayerHit(bullet.x, bullet.y, player.x, LAYOUT.PLAYER_Y)) {
         bullet.y = 100  // Mark for removal
         player.alive = false
         player.lives--
@@ -462,15 +549,17 @@ function tickReducer(state: GameState): ReducerResult {
   }
 
   // Bullet-barrier collisions
+  // Segments are rendered at 2x spacing to match visual position
   for (const bullet of bullets) {
     for (const barrier of barriers) {
       for (const seg of barrier.segments) {
         if (seg.health <= 0) continue
 
-        const segX = barrier.x + seg.offsetX
-        const segY = LAYOUT.BARRIER_Y + seg.offsetY
+        // Match visual rendering: offset * segment_size
+        const segX = barrier.x + seg.offsetX * HITBOX.BARRIER_SEGMENT_WIDTH
+        const segY = LAYOUT.BARRIER_Y + seg.offsetY * HITBOX.BARRIER_SEGMENT_HEIGHT
 
-        if (Math.abs(bullet.x - segX) < 1 && Math.abs(bullet.y - segY) < 1) {
+        if (checkBarrierSegmentHit(bullet.x, bullet.y, segX, segY)) {
           seg.health = Math.max(0, seg.health - 1) as 0 | 1 | 2 | 3 | 4
           bullet.y = bullet.dy === -1 ? -100 : 100  // Mark for removal
           break
@@ -508,38 +597,82 @@ function tickReducer(state: GameState): ReducerResult {
         alien.x += next.alienDirection * 2
       }
     }
-  }
 
-  // 5. Alien shooting (seeded RNG)
-  const liveAliens = aliens.filter(a => a.alive)
+    // Alien-barrier collision: aliens destroy barrier segments on contact
+    // Segments are 2x2 cells (matching visual), aliens are ALIEN_WIDTH x ALIEN_HEIGHT
+    for (const alien of liveAliens) {
+      for (const barrier of barriers) {
+        for (const seg of barrier.segments) {
+          if (seg.health <= 0) continue
 
-  // Find bottom-row aliens (can shoot)
-  const bottomAliens: AlienEntity[] = []
-  const colToBottomAlien = new Map<number, AlienEntity>()
-  for (const alien of liveAliens) {
-    const existing = colToBottomAlien.get(alien.col)
-    if (!existing || alien.row > existing.row) {
-      colToBottomAlien.set(alien.col, alien)
+          // Segment position (matching visual rendering with 2x multiplier)
+          const segX = barrier.x + seg.offsetX * HITBOX.BARRIER_SEGMENT_WIDTH
+          const segY = LAYOUT.BARRIER_Y + seg.offsetY * HITBOX.BARRIER_SEGMENT_HEIGHT
+
+          // Check if alien sprite overlaps segment
+          // Alien occupies [alien.x, alien.x + width) × [alien.y, alien.y + height)
+          // Segment occupies [segX, segX + width) × [segY, segY + height)
+          const alienRight = alien.x + LAYOUT.ALIEN_WIDTH
+          const alienBottom = alien.y + LAYOUT.ALIEN_HEIGHT
+          const segRight = segX + HITBOX.BARRIER_SEGMENT_WIDTH
+          const segBottom = segY + HITBOX.BARRIER_SEGMENT_HEIGHT
+
+          // AABB overlap check
+          if (alien.x < segRight && alienRight > segX &&
+              alien.y < segBottom && alienBottom > segY) {
+            // Alien destroys the barrier segment completely
+            seg.health = 0
+          }
+        }
+      }
+    }
+
+    // Game over if aliens reach player level (invasion)
+    for (const alien of liveAliens) {
+      if (alien.y + LAYOUT.ALIEN_HEIGHT >= LAYOUT.PLAYER_Y) {
+        // Invasion! Game over regardless of lives
+        next.status = 'game_over'
+        next.lives = 0
+        events.push({ type: 'event', name: 'invasion', data: undefined })
+        return { state: next, events, persist: true }
+      }
     }
   }
-  for (const alien of colToBottomAlien.values()) {
-    bottomAliens.push(alien)
-  }
 
-  // Each bottom alien has a chance to shoot
-  // NOTE: Unlike players, alien.x IS the left edge (aliens use left-edge coordinates)
-  // So we DO need to add ALIEN_WIDTH/2 to get the center for bullet spawning
-  for (const alien of bottomAliens) {
-    if (seededRandom(next) < scaled.alienShootProbability) {
-      const bullet: BulletEntity = {
-        kind: 'bullet',
-        id: `ab_${next.tick}_${alien.id}`,
-        x: alien.x + Math.floor(LAYOUT.ALIEN_WIDTH / 2),  // Left edge + offset = center
-        y: alien.y + LAYOUT.ALIEN_HEIGHT,  // Below alien sprite
-        ownerId: null,  // Alien bullet
-        dy: 1,  // Moving down
+  // 5. Alien shooting (seeded RNG) - skip if aliens are entering, disabled, or all players dead
+  const liveAliens = aliens.filter(a => a.alive)
+  const aliensEntering = liveAliens.some(a => a.entering)
+  const allPlayersDead = Object.values(next.players).every(p => !p.alive)
+
+  if (!aliensEntering && !next.alienShootingDisabled && !allPlayersDead) {
+    // Find bottom-row aliens (can shoot)
+    const bottomAliens: AlienEntity[] = []
+    const colToBottomAlien = new Map<number, AlienEntity>()
+    for (const alien of liveAliens) {
+      const existing = colToBottomAlien.get(alien.col)
+      if (!existing || alien.row > existing.row) {
+        colToBottomAlien.set(alien.col, alien)
       }
-      next.entities.push(bullet)
+    }
+    for (const alien of colToBottomAlien.values()) {
+      bottomAliens.push(alien)
+    }
+
+    // Each bottom alien has a chance to shoot
+    // NOTE: Unlike players, alien.x IS the left edge (aliens use left-edge coordinates)
+    // So we DO need to add ALIEN_WIDTH/2 to get the center for bullet spawning
+    for (const alien of bottomAliens) {
+      if (seededRandom(next) < scaled.alienShootProbability) {
+        const bullet: BulletEntity = {
+          kind: 'bullet',
+          id: `ab_${next.tick}_${alien.id}`,
+          x: alien.x + Math.floor(LAYOUT.ALIEN_WIDTH / 2),  // Left edge + offset = center
+          y: alien.y + LAYOUT.ALIEN_HEIGHT,  // Below alien sprite
+          ownerId: null,  // Alien bullet
+          dy: 1,  // Moving down
+        }
+        next.entities.push(bullet)
+      }
     }
   }
 
@@ -577,6 +710,9 @@ function tickReducer(state: GameState): ReducerResult {
 
   // Remove dead UFOs
   next.entities = next.entities.filter(e => e.kind !== 'ufo' || e.alive)
+
+  // Remove dead aliens (cleanup to prevent memory leak)
+  next.entities = next.entities.filter(e => e.kind !== 'alien' || e.alive)
 
   // 7. Check end conditions
   const allLiveAliens = getAliens(next.entities).filter(a => a.alive)
