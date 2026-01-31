@@ -44,6 +44,19 @@ export const LAYOUT = {
   COLLISION_V: 2,            // Vertical collision threshold (for 2-tall sprites)
 } as const
 
+// ─── Hitbox Constants ────────────────────────────────────────────────────────
+// These match the visual sprite sizes for accurate collision detection
+
+export const HITBOX = {
+  PLAYER_HALF_WIDTH: 2,      // Player.x is center, sprite width 5, so half is 2
+  ALIEN_WIDTH: 5,            // Left-edge based, full sprite width
+  ALIEN_HEIGHT: 2,           // Full sprite height
+  UFO_WIDTH: 5,              // Left-edge based, full sprite width
+  UFO_HEIGHT: 2,             // Full sprite height
+  BARRIER_SEGMENT_WIDTH: 2,  // Each segment is 2 chars wide
+  BARRIER_SEGMENT_HEIGHT: 2, // Each segment is 2 rows tall
+} as const
+
 // ─── Player ───────────────────────────────────────────────────────────────────
 
 export type PlayerSlot = 1 | 2 | 3 | 4
@@ -59,7 +72,7 @@ export const PLAYER_COLORS: Record<PlayerSlot, PlayerColor> = {
 export interface Player {
   id: string
   name: string
-  x: number                         // Horizontal position (y is always LAYOUT.PLAYER_Y)
+  x: number                         // Horizontal position CENTER of sprite (y is always LAYOUT.PLAYER_Y)
   slot: PlayerSlot
   color: PlayerColor
   lastShotTick: number              // Tick of last shot (for cooldown)
@@ -94,45 +107,20 @@ export const FORMATION_ROWS: ClassicAlienType[] = ['squid', 'crab', 'crab', 'oct
 export interface AlienEntity {
   kind: 'alien'
   id: string
-  x: number
+  x: number  // LEFT EDGE of sprite (unlike Player which uses CENTER)
   y: number
   type: ClassicAlienType
   alive: boolean
   row: number
   col: number
   points: number
-}
-
-export interface CommanderEntity {
-  kind: 'commander'
-  id: string
-  x: number
-  y: number
-  alive: boolean
-  health: 1 | 2
-  tractorBeamActive: boolean
-  tractorBeamCooldown: number
-  capturedPlayerId: string | null
-  escorts: string[]  // IDs of escorting aliens
-}
-
-export interface DiveBomberEntity {
-  kind: 'dive_bomber'
-  id: string
-  x: number
-  y: number
-  alive: boolean
-  diveState: 'formation' | 'diving' | 'returning'
-  divePathProgress: number
-  diveDirection: 1 | -1
-  row: number
-  col: number
+  entering: boolean  // True during wipe_reveal phase, prevents shooting
 }
 
 export interface BulletEntity {
   kind: 'bullet'
   id: string
-  x: number
+  x: number  // CENTER of bullet (spawns from center of player/alien)
   y: number
   ownerId: string | null  // null = alien bullet
   dy: -1 | 1              // -1 = up (player), 1 = down (alien)
@@ -148,40 +136,25 @@ export interface BarrierSegment {
 export interface BarrierEntity {
   kind: 'barrier'
   id: string
-  x: number               // Left edge (y is always LAYOUT.BARRIER_Y)
+  x: number  // LEFT EDGE of barrier (unlike Player which uses CENTER)
   segments: BarrierSegment[]
 }
 
 export interface UFOEntity {
   kind: 'ufo'
   id: string
-  x: number
-  y: number          // Always 1 (top row)
+  x: number  // LEFT EDGE of sprite (unlike Player which uses CENTER)
+  y: number  // Always 1 (top row)
   direction: 1 | -1  // 1 = right, -1 = left
   alive: boolean
   points: number     // 50-300 (mystery score)
 }
 
-export type TransformType = 'scorpion' | 'stingray' | 'mini_commander'
-
-export interface TransformEntity {
-  kind: 'transform'
-  id: string
-  x: number
-  y: number
-  type: TransformType
-  velocity: Position
-  lifetime: number
-}
-
 // Unified entity type for all game objects
 export type Entity =
   | AlienEntity
-  | CommanderEntity
-  | DiveBomberEntity
   | BulletEntity
   | BarrierEntity
-  | TransformEntity
   | UFOEntity
 
 // ─── Entity Filter Helpers ────────────────────────────────────────────────────
@@ -190,24 +163,12 @@ export function getAliens(entities: Entity[]): AlienEntity[] {
   return entities.filter((e): e is AlienEntity => e.kind === 'alien')
 }
 
-export function getCommanders(entities: Entity[]): CommanderEntity[] {
-  return entities.filter((e): e is CommanderEntity => e.kind === 'commander')
-}
-
-export function getDiveBombers(entities: Entity[]): DiveBomberEntity[] {
-  return entities.filter((e): e is DiveBomberEntity => e.kind === 'dive_bomber')
-}
-
 export function getBullets(entities: Entity[]): BulletEntity[] {
   return entities.filter((e): e is BulletEntity => e.kind === 'bullet')
 }
 
 export function getBarriers(entities: Entity[]): BarrierEntity[] {
   return entities.filter((e): e is BarrierEntity => e.kind === 'barrier')
-}
-
-export function getTransforms(entities: Entity[]): TransformEntity[] {
-  return entities.filter((e): e is TransformEntity => e.kind === 'transform')
 }
 
 export function getUFOs(entities: Entity[]): UFOEntity[] {
@@ -261,29 +222,48 @@ export function applyPlayerInput(
 }
 
 // ─── Collision Utilities ─────────────────────────────────────────────────────
+// These functions fix X bounds to match visual rendering while preserving
+// Y tolerance for bullet movement (bullets move before collision detection)
 
 /**
- * Check if a bullet collides with a target entity.
- * Uses AABB collision with configurable thresholds.
- *
- * @param bulletX - Bullet X position
- * @param bulletY - Bullet Y position
- * @param targetX - Target entity X position
- * @param targetY - Target entity Y position
- * @param offsetX - X offset for target center (default: 1 for 5-wide sprites)
- * @returns true if collision detected
+ * Check if a bullet hits a player.
+ * Player.x is CENTER of sprite (width 5), so visual span is [x-2, x+3).
+ * Y uses tolerance (COLLISION_V=2) to account for bullet movement.
  */
-export function checkBulletCollision(
-  bulletX: number,
-  bulletY: number,
-  targetX: number,
-  targetY: number,
-  offsetX: number = 1
-): boolean {
-  return (
-    Math.abs(bulletX - targetX - offsetX) < LAYOUT.COLLISION_H &&
-    Math.abs(bulletY - targetY) < LAYOUT.COLLISION_V
-  )
+export function checkPlayerHit(bX: number, bY: number, pX: number, pY: number): boolean {
+  return bX >= pX - HITBOX.PLAYER_HALF_WIDTH &&
+         bX < pX + HITBOX.PLAYER_HALF_WIDTH + 1 &&
+         Math.abs(bY - pY) < LAYOUT.COLLISION_V  // Keep Y tolerance for bullet movement
+}
+
+/**
+ * Check if a bullet hits an alien.
+ * Alien.x is LEFT EDGE of sprite (width 5), so visual span is [x, x+5).
+ * Y uses tolerance (COLLISION_V=2) to account for bullet movement.
+ */
+export function checkAlienHit(bX: number, bY: number, aX: number, aY: number): boolean {
+  return bX >= aX && bX < aX + HITBOX.ALIEN_WIDTH &&
+         Math.abs(bY - aY) < LAYOUT.COLLISION_V  // Keep Y tolerance for bullet movement
+}
+
+/**
+ * Check if a bullet hits a UFO.
+ * UFO.x is LEFT EDGE of sprite (width 5), so visual span is [x, x+5).
+ * Y uses tolerance (COLLISION_V=2) to account for bullet movement.
+ */
+export function checkUfoHit(bX: number, bY: number, uX: number, uY: number): boolean {
+  return bX >= uX && bX < uX + HITBOX.UFO_WIDTH &&
+         Math.abs(bY - uY) < LAYOUT.COLLISION_V  // Keep Y tolerance for bullet movement
+}
+
+/**
+ * Check if a bullet hits a barrier segment.
+ * Segment position already includes the 2x multiplier for visual position.
+ * Uses point collision (< 1 tolerance) for precise barrier hits.
+ */
+export function checkBarrierSegmentHit(bX: number, bY: number, segX: number, segY: number): boolean {
+  return bX >= segX && bX < segX + HITBOX.BARRIER_SEGMENT_WIDTH &&
+         bY >= segY && bY < segY + HITBOX.BARRIER_SEGMENT_HEIGHT
 }
 
 // ─── Game Config ──────────────────────────────────────────────────────────────
@@ -349,11 +329,12 @@ export type GameEvent =
   | 'score_awarded'
   | 'wave_complete'
   | 'game_over'
+  | 'invasion'
   | 'ufo_spawn'
 
 // ─── Game State ───────────────────────────────────────────────────────────────
 
-export type GameStatus = 'waiting' | 'countdown' | 'playing' | 'game_over'
+export type GameStatus = 'waiting' | 'countdown' | 'wipe_exit' | 'wipe_hold' | 'wipe_reveal' | 'playing' | 'game_over'
 
 export interface GameState {
   roomId: string                    // 6-char base36 (0-9, A-Z)
@@ -376,7 +357,97 @@ export interface GameState {
   score: number
   alienDirection: 1 | -1
 
+  // Wipe state: server-controlled transition timing
+  wipeTicksRemaining: number | null  // Countdown for current wipe phase
+  wipeWaveNumber: number | null      // Wave number to display during wipe
+
+  // Debug flag: completely disable alien shooting
+  alienShootingDisabled: boolean
+
   config: GameConfig
+}
+
+// ─── Wipe Timing Constants ────────────────────────────────────────────────────
+// Server-side wipe phase durations at 30Hz tick rate
+// These are the canonical values - client should derive from these
+
+export const WIPE_TIMING = {
+  /** Ticks for iris closing (1 second at 30Hz) */
+  EXIT_TICKS: 30,
+  /** Ticks for black screen with wave title (1 second at 30Hz) */
+  HOLD_TICKS: 30,
+  /** Ticks for iris opening + aliens entering (2 seconds at 30Hz) */
+  REVEAL_TICKS: 60,
+} as const
+
+// ─── Barrier Factory ──────────────────────────────────────────────────────────
+
+/** Canonical barrier shape - arch with gap in center bottom */
+export const BARRIER_SHAPE = [
+  [1, 1, 1, 1, 1],  // Top row: solid
+  [1, 1, 0, 1, 1],  // Bottom row: gap in center (arch)
+] as const
+
+/**
+ * Create barrier segments from the canonical shape.
+ * Each segment starts with health=4.
+ */
+export function createBarrierSegments(): BarrierSegment[] {
+  const segments: BarrierSegment[] = []
+  for (let row = 0; row < BARRIER_SHAPE.length; row++) {
+    for (let col = 0; col < BARRIER_SHAPE[row].length; col++) {
+      if (BARRIER_SHAPE[row][col]) {
+        segments.push({ offsetX: col, offsetY: row, health: 4 })
+      }
+    }
+  }
+  return segments
+}
+
+// ─── Alien Formation Factory ──────────────────────────────────────────────────
+
+/**
+ * Create an alien formation grid.
+ * This is the canonical formation creation logic - use this everywhere.
+ *
+ * @param cols - Number of columns
+ * @param rows - Number of rows
+ * @param screenWidth - Screen width for centering (default: STANDARD_WIDTH)
+ * @param idGenerator - Function to generate unique IDs (default: counter-based)
+ * @returns Array of AlienEntity objects
+ */
+export function createAlienFormation(
+  cols: number,
+  rows: number,
+  screenWidth: number = STANDARD_WIDTH,
+  idGenerator?: () => string
+): AlienEntity[] {
+  const aliens: AlienEntity[] = []
+  // Calculate grid width using sprite width
+  const gridWidth = (cols - 1) * LAYOUT.ALIEN_COL_SPACING + LAYOUT.ALIEN_WIDTH
+  const startX = Math.floor((screenWidth - gridWidth) / 2)
+
+  let idCounter = 0
+  const generateId = idGenerator || (() => `alien-${idCounter++}`)
+
+  for (let row = 0; row < rows; row++) {
+    const type = FORMATION_ROWS[row] || 'octopus'
+    for (let col = 0; col < cols; col++) {
+      aliens.push({
+        kind: 'alien',
+        id: generateId(),
+        type,
+        row,
+        col,
+        x: startX + col * LAYOUT.ALIEN_COL_SPACING,
+        y: LAYOUT.ALIEN_START_Y + row * LAYOUT.ALIEN_ROW_SPACING,
+        alive: true,
+        points: ALIEN_REGISTRY[type].points,
+        entering: false,
+      })
+    }
+  }
+  return aliens
 }
 
 // ─── Seeded RNG ───────────────────────────────────────────────────────────────

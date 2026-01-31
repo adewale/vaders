@@ -18,6 +18,7 @@ export type ClientMessage =
   | { type: 'ready' }
   | { type: 'unready' }
   | { type: 'start_solo' }
+  | { type: 'forfeit' }                                // End game early (go to game_over)
   | { type: 'input'; held: InputState }               // Held-state networking (no seq needed)
   | { type: 'move'; direction: 'left' | 'right' }     // Discrete movement (one step per message)
   | { type: 'shoot' }                                  // Discrete action (rate-limited server-side)
@@ -39,6 +40,7 @@ export type ServerEvent =
   | { type: 'event'; name: 'score_awarded'; data: { playerId: string | null; points: number; source: 'alien' | 'ufo' | 'commander' | 'wave_bonus' } }
   | { type: 'event'; name: 'wave_complete'; data: { wave: number } }
   | { type: 'event'; name: 'game_over'; data: { result: 'victory' | 'defeat' } }
+  | { type: 'event'; name: 'invasion'; data?: undefined }
   | { type: 'event'; name: 'ufo_spawn'; data: { x: number } }
 
 export type ServerMessage =

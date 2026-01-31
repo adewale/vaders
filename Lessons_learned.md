@@ -629,6 +629,109 @@ if (
 }
 ```
 
+### Entity-Specific Hitbox Functions
+
+**Problem:** A generic `checkBulletCollision()` function with magic `offsetX` parameters produced wrong results because different entities use different coordinate conventions:
+
+- **Player**: `x` is CENTER of sprite
+- **Alien/UFO**: `x` is LEFT EDGE of sprite
+- **Barrier segments**: Used 1x offset multiplier in collision but 2x in rendering
+
+```typescript
+// OLD: Generic function with confusing offset parameter
+checkBulletCollision(bullet.x, bullet.y, target.x, target.y, offsetX = 1)
+// What does offsetX=1 mean? Different for each entity type!
+```
+
+**Solution:** Create entity-specific collision functions that encode the coordinate convention:
+
+```typescript
+// NEW: Self-documenting functions that match visual rendering
+export const HITBOX = {
+  PLAYER_HALF_WIDTH: 2,      // Player.x is center
+  ALIEN_WIDTH: 5,            // Alien.x is left edge
+  BARRIER_SEGMENT_WIDTH: 2,  // Each segment is 2 chars wide
+} as const
+
+export function checkPlayerHit(bX, bY, pX, pY): boolean {
+  return bX >= pX - HITBOX.PLAYER_HALF_WIDTH &&
+         bX < pX + HITBOX.PLAYER_HALF_WIDTH + 1 &&
+         Math.abs(bY - pY) < LAYOUT.COLLISION_V
+}
+
+export function checkAlienHit(bX, bY, aX, aY): boolean {
+  return bX >= aX && bX < aX + HITBOX.ALIEN_WIDTH &&
+         Math.abs(bY - aY) < LAYOUT.COLLISION_V
+}
+```
+
+**Lesson:** Entity-specific functions are harder to misuse than generic functions with offset parameters. The function name documents what it does.
+
+### Visual Rendering Code is the Source of Truth
+
+**Problem:** Barrier collision used `barrier.x + seg.offsetX` (1x multiplier) but rendering used `barrier.x + seg.offsetX * 2` (2x multiplier). Bullets passed through visually-solid barriers.
+
+**Solution:** Copy the exact formula from rendering code into collision code:
+
+```typescript
+// Client rendering (GameScreen.tsx)
+left={barrier.x + seg.offsetX * SPRITE_SIZE.barrier.width}
+
+// Server collision (reducer.ts) - must match!
+const segX = barrier.x + seg.offsetX * HITBOX.BARRIER_SEGMENT_WIDTH
+```
+
+**Lesson:** When visual and collision drift apart, always trust the visual rendering code - that's what players see and expect.
+
+### Tests That Document Bugs Can Mask Problems
+
+**Problem:** Tests like `it('MISMATCH: bullet at visual right edge misses alien')` asserted the *buggy* behavior. They passed, giving false confidence that collision was "working."
+
+```typescript
+// BAD: Test documents and asserts bug
+it('MISMATCH: bullet at visual right edge misses alien', () => {
+  // ... setup bullet at right edge of alien sprite ...
+  expect(alienAfter.alive).toBe(true)  // Documents bug: right edge misses
+})
+```
+
+**Solution:** Either skip tests for known bugs OR write tests that assert correct behavior and let them fail:
+
+```typescript
+// GOOD: Test asserts correct behavior, skip until fixed
+it.skip('bullet at visual right edge should hit alien', () => {
+  expect(alienAfter.alive).toBe(false)  // Correct behavior
+})
+```
+
+**Lesson:** A passing test suite with bug-documenting tests is worse than a failing test suite with correct assertions.
+
+### Y-Axis Tolerance is Intentional
+
+**Problem:** Initial fix made Y-axis collision strict (`bY >= aY && bY < aY + height`), which broke existing tests.
+
+**Root cause:** Bullets move BEFORE collision detection. A bullet at y=10 moves to y=9, then collision is checked. Strict bounds meant bullets "tunneled" through entities.
+
+```typescript
+// Bullet moves first
+bullet.y += bullet.dy  // y=10 → y=9
+
+// Then collision is checked against alien at y=10
+// Strict: 9 >= 10? No → MISS (bullet tunneled through!)
+// Tolerant: |9 - 10| < 2? Yes → HIT (correct)
+```
+
+**Solution:** Keep Y tolerance for bullet movement, only fix X bounds:
+
+```typescript
+export function checkAlienHit(bX, bY, aX, aY): boolean {
+  return bX >= aX && bX < aX + HITBOX.ALIEN_WIDTH &&  // Fixed X bounds
+         Math.abs(bY - aY) < LAYOUT.COLLISION_V       // Keep Y tolerance
+}
+```
+
+**Lesson:** Understand WHY existing code has "tolerance" before removing it. It may compensate for timing in the game loop.
+
 ---
 
 ## 9. Testing Gaps Discovered
@@ -763,3 +866,7 @@ if (msg.name === 'game_over') {
 11. **Integration tests across protocol boundaries.** Unit tests that verify "message sent" don't catch "message ignored." Test the full client-server flow.
 
 12. **Document coordinate system contracts.** When client and server share spatial semantics, add explicit tests that enforce the same interpretation (center vs left edge, etc.).
+
+13. **Use entity-specific collision functions.** Generic collision functions with offset parameters are error-prone. Named functions like `checkAlienHit()` encode coordinate conventions and are harder to misuse.
+
+14. **Visual rendering is the source of truth for hitboxes.** When collision and rendering formulas drift apart, copy the rendering formula into collision code - that's what players see and expect.
