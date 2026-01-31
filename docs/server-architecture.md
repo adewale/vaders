@@ -201,6 +201,41 @@ alarm() fires every 33ms
 
 A pure state machine that computes the next game state.
 
+### Quick Reference
+
+```
+                    ┌──────────────┐
+                    │  GameAction  │
+                    └──────┬───────┘
+                           │
+                           ▼
+┌──────────────────────────────────────────────────────────────┐
+│                   gameReducer(state, action)                  │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │  STATE MACHINE: canTransition(status, action) ?        │  │
+│  │                                                        │  │
+│  │  waiting ──┬── START_SOLO ────────────▶ playing        │  │
+│  │            └── START_COUNTDOWN ───────▶ countdown      │  │
+│  │  countdown ─── COUNTDOWN_TICK ────────▶ playing        │  │
+│  │  playing ───── TICK ──────────────────▶ playing/over   │  │
+│  │  game_over ─── (terminal)                              │  │
+│  └────────────────────────────────────────────────────────┘  │
+│                           │                                   │
+│                           ▼                                   │
+│  TICK ──▶ tickReducer() @ 30Hz                               │
+│    1. Move players (apply inputState)                        │
+│    2. Move bullets (player: up, alien: down)                 │
+│    3. Collision detection (bullets vs entities)              │
+│    4. Move aliens (periodic, reverse at walls)               │
+│    5. Alien shooting (seeded RNG)                            │
+│    6. UFO logic (spawn/move)                                 │
+│    7. End conditions (wave complete / game over)             │
+│                           │                                   │
+│                           ▼                                   │
+│              ReducerResult { state, events[], persist }       │
+└──────────────────────────────────────────────────────────────┘
+```
+
 ### TICK Action (Main Loop)
 
 Each tick performs these steps in order:

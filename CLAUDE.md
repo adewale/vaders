@@ -14,43 +14,6 @@ The project has three main parts:
 2. **Client** (`client/`) - Bun + OpenTUI React app that renders the TUI, handles keyboard input, and maintains WebSocket connection
 3. **Shared** (`shared/`) - TypeScript types (`GameState`, `Player`, `Alien`, etc.) and WebSocket protocol definitions
 
-### Game Reducer Architecture
-
-All game logic flows through a pure reducer with state machine guards:
-
-```
-                    ┌──────────────┐
-                    │  GameAction  │
-                    └──────┬───────┘
-                           │
-                           ▼
-┌──────────────────────────────────────────────────────────────┐
-│                   gameReducer(state, action)                  │
-│  ┌────────────────────────────────────────────────────────┐  │
-│  │  STATE MACHINE: canTransition(status, action) ?        │  │
-│  │                                                        │  │
-│  │  waiting ──┬── START_SOLO ────────────▶ playing        │  │
-│  │            └── START_COUNTDOWN ───────▶ countdown      │  │
-│  │  countdown ─── COUNTDOWN_TICK ────────▶ playing        │  │
-│  │  playing ───── TICK ──────────────────▶ playing/over   │  │
-│  │  game_over ─── (terminal)                              │  │
-│  └────────────────────────────────────────────────────────┘  │
-│                           │                                   │
-│                           ▼                                   │
-│  TICK ──▶ tickReducer() @ 30Hz                               │
-│    1. Move players (apply inputState)                        │
-│    2. Move bullets (player: up, alien: down)                 │
-│    3. Collision detection (bullets vs entities)              │
-│    4. Move aliens (periodic, reverse at walls)               │
-│    5. Alien shooting (seeded RNG)                            │
-│    6. UFO logic (spawn/move)                                 │
-│    7. End conditions (wave complete / game over)             │
-│                           │                                   │
-│                           ▼                                   │
-│              ReducerResult { state, events[], persist }       │
-└──────────────────────────────────────────────────────────────┘
-```
-
 ## Quick Start
 
 ```bash
