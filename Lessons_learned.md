@@ -176,7 +176,6 @@ Use a `kind` discriminator for type-safe entity handling:
 ```typescript
 export type Entity =
   | AlienEntity
-  | CommanderEntity
   | BulletEntity
   | BarrierEntity
   | UFOEntity

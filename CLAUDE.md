@@ -10,9 +10,46 @@ Multiplayer TUI Space Invaders clone (1-4 players) using OpenTUI for terminal re
 
 The project has three main parts:
 
-1. **Worker** (`worker/`) - Cloudflare Worker with Durable Object (`GameRoom`) that manages game state, runs the ~30Hz game loop, and broadcasts delta updates via WebSocket
+1. **Worker** (`worker/`) - Cloudflare Worker with Durable Object (`GameRoom`) that manages game state, runs the 30Hz game loop, and broadcasts full state via WebSocket
 2. **Client** (`client/`) - Bun + OpenTUI React app that renders the TUI, handles keyboard input, and maintains WebSocket connection
 3. **Shared** (`shared/`) - TypeScript types (`GameState`, `Player`, `Alien`, etc.) and WebSocket protocol definitions
+
+### Game Reducer Architecture
+
+All game logic flows through a pure reducer with state machine guards:
+
+```
+                    ┌──────────────┐
+                    │  GameAction  │
+                    └──────┬───────┘
+                           │
+                           ▼
+┌──────────────────────────────────────────────────────────────┐
+│                   gameReducer(state, action)                  │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │  STATE MACHINE: canTransition(status, action) ?        │  │
+│  │                                                        │  │
+│  │  waiting ──┬── START_SOLO ────────────▶ playing        │  │
+│  │            └── START_COUNTDOWN ───────▶ countdown      │  │
+│  │  countdown ─── COUNTDOWN_TICK ────────▶ playing        │  │
+│  │  playing ───── TICK ──────────────────▶ playing/over   │  │
+│  │  game_over ─── (terminal)                              │  │
+│  └────────────────────────────────────────────────────────┘  │
+│                           │                                   │
+│                           ▼                                   │
+│  TICK ──▶ tickReducer() @ 30Hz                               │
+│    1. Move players (apply inputState)                        │
+│    2. Move bullets (player: up, alien: down)                 │
+│    3. Collision detection (bullets vs entities)              │
+│    4. Move aliens (periodic, reverse at walls)               │
+│    5. Alien shooting (seeded RNG)                            │
+│    6. UFO logic (spawn/move)                                 │
+│    7. End conditions (wave complete / game over)             │
+│                           │                                   │
+│                           ▼                                   │
+│              ReducerResult { state, events[], persist }       │
+└──────────────────────────────────────────────────────────────┘
+```
 
 ## Quick Start
 
@@ -57,10 +94,10 @@ cd worker && bunx wrangler deploy
 ## Key Technical Details
 
 - **Game tick rate**: 33ms intervals (~30Hz) in Durable Object
-- **State sync**: Full sync on join, delta updates on each tick
+- **State sync**: Full state sync on every tick (30Hz)
 - **Screen size**: Fixed 120×36 terminal grid
 - **Sprites**: 2-line tall, 5-character wide for all entities
-- **Player colors**: cyan (P1), orange (P2), magenta (P3), lime (P4)
+- **Player colors**: green (P1), cyan (P2), yellow (P3), magenta (P4)
 - **Movement**: Space Invaders-style (1 cell/tick, no inertia)
 
 ### Scaling by Player Count
@@ -74,8 +111,8 @@ cd worker && bunx wrangler deploy
 
 ### WebSocket Protocol
 
-- Client sends: `join`, `ready`, `unready`, `start_solo`, `input` (left/right/shoot)
-- Server sends: `sync` (full state), `tick` (delta), `event` (game events), `error`
+- Client sends: `join`, `ready`, `unready`, `start_solo`, `input` (held keys), `move` (discrete), `shoot`, `ping`
+- Server sends: `sync` (full state), `event` (game events), `error`, `pong`
 
 ### OpenTUI Patterns
 
