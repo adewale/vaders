@@ -96,7 +96,7 @@ OpenTUI is pre-1.0:
 
 Enhanced behaviors are additive via:
 - Mode strategy object (`GameMode` interface)
-- ECS systems registered by mode
+- Additional logic phases registered by mode
 
 Do NOT scatter `if (enhancedMode)` checks throughout the tick loop.
 
@@ -764,20 +764,20 @@ function plasmaColor(value: number): [number, number, number] {
 │        │          │                                   │  └────────────────┘  │
 │        ▼          │                                   │          │           │
 │  ┌─────────────┐  │                                   │          ▼           │
-│  │  useGame()  │  │                                   │  ┌────────────────┐  │
-│  │  Hook       │  │                                   │  │    GameRoom    │  │
+│  │ useGame    │  │                                   │  ┌────────────────┐  │
+│  │ Connection │  │                                   │  │    GameRoom    │  │
 │  │  • state    │  │         ┌─────────────┐          │  │ (Imper. Shell) │  │
 │  │  • send()   │  │         │  Full State │          │  │ ┌────────────┐ │  │
 │  └─────────────┘  │◄────────│  Sync @30Hz │◄─────────│  │ │InputQueue  │ │  │
 │        │          │         └─────────────┘          │  │ └─────┬──────┘ │  │
 │        ▼          │                                   │  │       ▼        │  │
 │  ┌─────────────┐  │         ┌─────────────┐          │  │ ┌────────────┐ │  │
-│  │ Zig Native  │  │────────►│ InputState  │─────────►│  │ │gameReducer │ │  │
-│  │ • diffing   │  │         │ {left,right}│          │  │ │(Pure Core) │ │  │
-│  │ • ANSI      │  │         │ + seq + shoot│         │  │ └─────┬──────┘ │  │
+│  │  OpenTUI    │  │────────►│ InputState  │─────────►│  │ │gameReducer │ │  │
+│  │  Renderer   │  │         │ {left,right}│          │  │ │(Pure Core) │ │  │
+│  │  • diffing  │  │         │ + shoot     │          │  │ └─────┬──────┘ │  │
 │  └─────────────┘  │         └─────────────┘          │  │       ▼        │  │
 │        │          │                                   │  │ ┌────────────┐ │  │
-│        ▼          │                                   │  │ │ECS Systems │ │  │
+│        ▼          │                                   │  │ │TickPhases  │ │  │
 │   ┌─────────┐     │                                   │  │ └────────────┘ │  │
 │   │ stdout  │     │                                   │  └────────────────┘  │
 │   │ 120×36  │     │                                   │          │           │
@@ -821,11 +821,11 @@ function plasmaColor(value: number): [number, number, number] {
      │         │    gameReducer(s,a)  │      state = gameReducer(state, action)
      │         │                      │    inputQueue = []
      │         │ 2. Run tick action:  │
-     │         │    gameReducer(s,TICK)│   // ECS pipeline:
-     │         │    ├─ inputSystem    │   //   Input → Physics → Collision
-     │         │    ├─ physicsSystem  │   //   → Behavior → Spawn → Cleanup
-     │         │    ├─ collisionSystem│
-     │         │    └─ behaviorSystem │
+     │         │    gameReducer(s,TICK)│   // Tick phases:
+     │         │    ├─ movement       │   //   Movement → Physics → Collision
+     │         │    ├─ physics        │   //   → Spawning → End conditions
+     │         │    ├─ collision      │
+     │         │    └─ endConditions  │
      │         └──────────────────────┤  }
      │                                │
      │◄─── { type: "sync", state,    │  Full state @30Hz
@@ -851,11 +851,11 @@ function plasmaColor(value: number): [number, number, number] {
 CLIENT (Bun + OpenTUI)
 ├── App.tsx ─────────────── Root component, screen routing
 ├── input.ts ────────────── Input adapter (normalizes OpenTUI → VadersKey)
-├── useGame() ───────────── WebSocket connection, state management
+├── useGameConnection() ─── WebSocket connection, state management
 ├── GameScreen.tsx ──────── Main gameplay rendering
 ├── LobbyScreen.tsx ─────── Room code display, ready state
-├── AudioEngine ─────────── Terminal bell + optional native FFI
-└── Zig Native ──────────── Buffer diffing, ANSI escape codes
+├── useGameAudio() ──────── Sound effects triggered by state changes
+└── OpenTUI Renderer ────── React-based TUI with automatic diffing
 
 ### Input Adapter Layer
 
@@ -908,7 +908,7 @@ SERVER (Cloudflare) - Functional Core / Imperative Shell
 │   ├── gameReducer() ───── (state, action) → {state, events, persist}
 │   ├── stateMachine ────── Guards status transitions
 │   ├── GameMode ────────── Strategy: classic vs enhanced behaviors
-│   └── ECS Systems ─────── Input → Physics → Collision → Behavior
+│   └── Tick Phases ─────── Movement → Physics → Collision → Spawning
 │
 └── Durable Object: Matchmaker
     ├── rooms Map ───────── In-memory room registry
@@ -1049,7 +1049,7 @@ The client implements three techniques for smooth 60fps rendering despite 30Hz s
 
 > **Implementation Note:** This section describes the **reference architecture** using a pure reducer pattern. The **GameRoom implementation** below uses a simpler imperative approach for clarity. Both are valid - the reducer pattern is more testable; the imperative pattern is easier to follow. Choose based on project needs.
 
-The game engine uses a **Functional Core, Imperative Shell** architecture with ECS-inspired systems. This separates pure game logic from I/O concerns, making the engine deterministic and fully testable without a network.
+The game engine uses a **Functional Core, Imperative Shell** architecture with a procedural tick reducer. This separates pure game logic from I/O concerns, making the engine deterministic and fully testable without a network.
 
 ### Functional Core, Imperative Shell
 
@@ -1089,7 +1089,7 @@ The game engine uses a **Functional Core, Imperative Shell** architecture with E
 │           │                                                                 │
 │           ▼                                                                 │
 │  ┌──────────────────────┐  ┌──────────────────────┐                        │
-│  │   State Machine      │  │   ECS Systems        │                        │
+│  │   State Machine      │  │   Tick Phases        │                        │
 │  │   (status guards)    │  │   (entity updates)   │                        │
 │  └──────────────────────┘  └──────────────────────┘                        │
 └─────────────────────────────────────────────────────────────────────────────┘
