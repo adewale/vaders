@@ -6,7 +6,7 @@
 // - x: 0 = left edge, increases rightward
 // - y: 0 = top edge, increases downward
 // - Entity sprites render from their (x, y) position rightward/downward
-// Screen is 80×24 cells (columns × rows)
+// Screen is 120×36 cells (columns × rows)
 
 export interface Position {
   x: number  // Top-left x coordinate

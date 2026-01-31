@@ -155,7 +155,7 @@ vaders --room ABC123 --name "Alice"
 
 On startup, players see a full-screen launch experience with logo, mode selection, and controls reference.
 
-### Layout (80×24)
+### Layout (120×36)
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
@@ -296,7 +296,7 @@ export function LaunchScreen({ onStartSolo, onCreateRoom, onJoinRoom, onMatchmak
   useKeyboard(handleKeyInput)
 
   return (
-    <box flexDirection="column" width={80} height={24} padding={1}>
+    <box flexDirection="column" width={120} height={36} padding={1}>
       <Logo />
       <box height={1} />
 
@@ -443,6 +443,8 @@ When player presses `[3]`, show inline room code input:
 ---
 
 ## Enhanced Mode
+
+> **NOTE: Enhanced Mode is NOT IMPLEMENTED.** The following section documents a planned feature that has not been built. Commander, DiveBomber, and Transform entity types exist in `shared/types.ts` but are never instantiated or processed by the game reducer. The game currently only supports classic Space Invaders gameplay with squid/crab/octopus aliens and UFO bonus enemies.
 
 Enhanced Mode adds two additional rows of enemies above the classic formation, featuring attack patterns inspired by Galaga and Galaxian. Enable with `--enhanced` flag.
 
@@ -780,7 +782,7 @@ function plasmaColor(value: number): [number, number, number] {
 │        ▼          │                                   │  │ │ECS Systems │ │  │
 │   ┌─────────┐     │                                   │  │ └────────────┘ │  │
 │   │ stdout  │     │                                   │  └────────────────┘  │
-│   │ 80×24   │     │                                   │          │           │
+│   │ 120×36  │     │                                   │          │           │
 │   └─────────┘     │                                   │          ▼           │
 └───────────────────┘                                   │  ┌────────────────┐  │
                                                         │  │  Matchmaker DO │  │
@@ -1654,7 +1656,7 @@ export class Matchmaker implements DurableObject {
 // - x: 0 = left edge, increases rightward
 // - y: 0 = top edge, increases downward
 // - Entity sprites render from their (x, y) position rightward/downward
-// Screen is 80×24 cells (columns × rows)
+// Screen is 120×36 cells (columns × rows)
 
 interface Position {
   x: number  // Top-left x coordinate
@@ -1811,17 +1813,17 @@ interface GameConfig {
 }
 
 export const DEFAULT_CONFIG: GameConfig = {
-  width: 80,
-  height: 24,
+  width: 120,                            // Standard screen width
+  height: 36,                            // Standard screen height
   maxPlayers: 4,
   tickIntervalMs: 33,                  // ~30Hz server tick
 
   // Tick-based timing
-  baseAlienMoveIntervalTicks: 15,      // Move every 15 ticks (~2Hz at 30Hz tick)
-  baseBulletSpeed: 1,                  // 1 cell per tick
-  baseAlienShootRate: 0.02,            // Use getScaledConfig for actual rate
+  baseAlienMoveIntervalTicks: 18,      // Move every 18 ticks
+  baseBulletSpeed: 1,                  // 1 cell per tick (player bullets)
+  baseAlienShootRate: 0.016,           // Base probability per tick
   playerCooldownTicks: 6,              // ~200ms between shots
-  playerMoveSpeed: 1,                  // 1 cell per tick when holding key
+  playerMoveSpeed: 1,                  // 1 cell per tick when holding key (Space Invaders style)
   respawnDelayTicks: 90,               // 3 seconds at 30Hz
 
 }
@@ -1865,21 +1867,25 @@ type GameEvent =
 
 // ─── Layout Constants ─────────────────────────────────────────────────────────
 
-/** Layout constants for the 80×24 game grid */
+/** Layout constants for the 120×36 game grid */
 const LAYOUT = {
-  PLAYER_Y: 20,              // Y position for player ships
+  PLAYER_Y: 31,              // Y position for player ships (5 rows from bottom)
   PLAYER_MIN_X: 2,           // Left boundary for player movement
-  PLAYER_MAX_X: 77,          // Right boundary for player movement
-  PLAYER_WIDTH: 3,           // Width of player sprite
-  BULLET_SPAWN_OFFSET: 1,    // Bullet spawns this far above player
-  BARRIER_Y: 16,             // Y position for barrier row
-  ALIEN_START_Y: 2,          // Initial Y position for top alien row
-  ALIEN_COL_SPACING: 5,      // Horizontal spacing between alien columns
+  PLAYER_MAX_X: 114,         // Right boundary for player movement (120 - 5 - 1)
+  PLAYER_WIDTH: 5,           // Width of player sprite (2-line sprite)
+  PLAYER_HEIGHT: 2,          // Height of player sprite
+  BULLET_SPAWN_OFFSET: 2,    // Bullet spawns this far above player
+  BARRIER_Y: 25,             // Y position for barrier row
+  ALIEN_START_Y: 3,          // Initial Y position for top alien row
+  ALIEN_COL_SPACING: 7,      // Horizontal spacing between alien columns (wider for 5-char sprites)
+  ALIEN_ROW_SPACING: 3,      // Vertical spacing between alien rows (for 2-line sprites)
   ALIEN_MIN_X: 2,            // Left boundary for alien movement
-  ALIEN_MAX_X: 77,           // Right boundary for alien movement
-  GAME_OVER_Y: 18,           // If aliens reach this Y, game over
-  COLLISION_H: 2,            // Horizontal collision threshold
-  COLLISION_V: 1,            // Vertical collision threshold
+  ALIEN_MAX_X: 114,          // Right boundary for alien movement
+  ALIEN_WIDTH: 5,            // Width of alien sprite
+  ALIEN_HEIGHT: 2,           // Height of alien sprite
+  GAME_OVER_Y: 28,           // If aliens reach this Y, game over
+  COLLISION_H: 3,            // Horizontal collision threshold (for 5-wide sprites)
+  COLLISION_V: 2,            // Vertical collision threshold (for 2-tall sprites)
 } as const
 
 // ─── Player ───────────────────────────────────────────────────────────────────
@@ -3052,7 +3058,7 @@ export function GameScreen({ state, currentPlayerId }: GameScreenProps) {
   const playerCount = Object.keys(players).length
   
   return (
-    <box flexDirection="column" width={80} height={24}>
+    <box flexDirection="column" width={120} height={36}>
       {/* Header */}
       <box height={1} paddingLeft={1} paddingRight={1}>
         <text fg="white"><strong>◀ VADERS ▶</strong></text>
@@ -3319,7 +3325,7 @@ vaders/
 
 ---
 
-## Display Layout (80×24)
+## Display Layout (120×36)
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
@@ -3433,7 +3439,7 @@ See `getScaledConfig()` in Scaling Logic section for canonical values. Summary:
 | Player disconnect | Remove player immediately, broadcast full sync |
 | All players leave | End game, destroy room after 5min via Durable Object alarm |
 | Room full (4 players) | Return HTTP 429 with `room_full` error |
-| Terminal too small | Show "resize terminal to 80×24" message |
+| Terminal too small | Show "resize terminal to 120×36" message |
 | Simultaneous kills | First bullet processed wins (no shared credit) |
 | Reconnect during game | Not supported — no rejoin protocol implemented |
 

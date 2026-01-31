@@ -249,6 +249,176 @@ COUNTDOWN_CANCEL    │ countdown   │ waiting
 TICK                │ playing     │ playing/game_over
 ```
 
+### Reducer Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                            GAME REDUCER ARCHITECTURE                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+                              ┌─────────────────┐
+                              │   GameAction    │
+                              │                 │
+                              │ • TICK          │
+                              │ • PLAYER_JOIN   │
+                              │ • PLAYER_LEAVE  │
+                              │ • PLAYER_INPUT  │
+                              │ • PLAYER_MOVE   │
+                              │ • PLAYER_SHOOT  │
+                              │ • PLAYER_READY  │
+                              │ • PLAYER_UNREADY│
+                              │ • START_SOLO    │
+                              │ • START_COUNTDOWN│
+                              │ • COUNTDOWN_TICK│
+                              │ • COUNTDOWN_CANCEL│
+                              └────────┬────────┘
+                                       │
+                                       ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                              gameReducer()                                    │
+│  ┌────────────────────────────────────────────────────────────────────────┐  │
+│  │                    STATE MACHINE GUARD                                  │  │
+│  │         canTransition(state.status, action.type) ?                     │  │
+│  │                                                                         │  │
+│  │   waiting ──┬── PLAYER_JOIN/LEAVE/READY/UNREADY ──▶ waiting            │  │
+│  │             ├── START_SOLO ──────────────────────▶ playing             │  │
+│  │             └── START_COUNTDOWN ─────────────────▶ countdown           │  │
+│  │                                                                         │  │
+│  │   countdown ─┬─ COUNTDOWN_TICK ──────────────────▶ countdown/playing   │  │
+│  │              └─ COUNTDOWN_CANCEL/PLAYER_LEAVE ───▶ waiting             │  │
+│  │                                                                         │  │
+│  │   playing ───┬─ TICK ────────────────────────────▶ playing/game_over   │  │
+│  │              └─ PLAYER_INPUT/MOVE/SHOOT/LEAVE ───▶ playing             │  │
+│  │                                                                         │  │
+│  │   game_over ─── (terminal state, no transitions)                       │  │
+│  └────────────────────────────────────────────────────────────────────────┘  │
+│                                       │                                       │
+│                                       ▼                                       │
+│  ┌────────────────────────────────────────────────────────────────────────┐  │
+│  │                         ACTION DISPATCH                                 │  │
+│  │                                                                         │  │
+│  │   TICK ─────────────▶ tickReducer()          (main game loop)          │  │
+│  │   PLAYER_JOIN ──────▶ playerJoinReducer()                              │  │
+│  │   PLAYER_LEAVE ─────▶ playerLeaveReducer()                             │  │
+│  │   PLAYER_INPUT ─────▶ inputReducer()         (held keys state)         │  │
+│  │   PLAYER_MOVE ──────▶ moveReducer()          (discrete step)           │  │
+│  │   PLAYER_SHOOT ─────▶ shootReducer()                                   │  │
+│  │   PLAYER_READY ─────▶ readyReducer()                                   │  │
+│  │   PLAYER_UNREADY ───▶ unreadyReducer()                                 │  │
+│  │   START_SOLO ───────▶ startSoloReducer()                               │  │
+│  │   START_COUNTDOWN ──▶ startCountdownReducer()                          │  │
+│  │   COUNTDOWN_TICK ───▶ countdownTickReducer()                           │  │
+│  │   COUNTDOWN_CANCEL ─▶ countdownCancelReducer()                         │  │
+│  └────────────────────────────────────────────────────────────────────────┘  │
+│                                       │                                       │
+│                                       ▼                                       │
+│                            ┌─────────────────┐                                │
+│                            │  ReducerResult  │                                │
+│                            │                 │                                │
+│                            │ • state         │                                │
+│                            │ • events[]      │                                │
+│                            │ • persist       │                                │
+│                            │ • scheduleAlarm?│                                │
+│                            └─────────────────┘                                │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                           tickReducer() DETAIL                                │
+│                         (called every 33ms / ~30Hz)                           │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+     ┌─────────────┐
+     │ GameState   │
+     └──────┬──────┘
+            │
+            ▼
+┌───────────────────────┐
+│ 1. Move Players       │  Apply held input (left/right) via applyPlayerInput()
+│    (continuous)       │
+└───────────┬───────────┘
+            │
+            ▼
+┌───────────────────────┐
+│ 2. Move Bullets       │  Player bullets: y -= 1 (up)
+│                       │  Alien bullets:  y += 1 (down)
+└───────────┬───────────┘
+            │
+            ▼
+┌───────────────────────┐
+│ 3. Move Aliens        │  Every N ticks (alienMoveIntervalTicks):
+│    (periodic)         │  • Move horizontally (alienDirection)
+│                       │  • Reverse + descend at edges
+└───────────┬───────────┘
+            │
+            ▼
+┌───────────────────────┐
+│ 4. Move UFO           │  If UFO exists: x += direction
+│                       │  Random spawn chance per tick
+└───────────┬───────────┘
+            │
+            ▼
+┌───────────────────────┐
+│ 5. Collision Detection│
+│   ┌─────────────────┐ │
+│   │ Player bullets  │ │──▶ checkAlienHit() ──▶ alien killed, score++
+│   │ vs Aliens       │ │
+│   └─────────────────┘ │
+│   ┌─────────────────┐ │
+│   │ Player bullets  │ │──▶ checkUfoHit() ──▶ UFO killed, bonus score
+│   │ vs UFO          │ │
+│   └─────────────────┘ │
+│   ┌─────────────────┐ │
+│   │ Player bullets  │ │──▶ checkBarrierSegmentHit() ──▶ segment.health--
+│   │ vs Barriers     │ │
+│   └─────────────────┘ │
+│   ┌─────────────────┐ │
+│   │ Alien bullets   │ │──▶ checkPlayerHit() ──▶ player dies, respawn timer
+│   │ vs Players      │ │
+│   └─────────────────┘ │
+│   ┌─────────────────┐ │
+│   │ Alien bullets   │ │──▶ checkBarrierSegmentHit() ──▶ segment.health--
+│   │ vs Barriers     │ │
+│   └─────────────────┘ │
+│   ┌─────────────────┐ │
+│   │ Aliens vs       │ │──▶ Contact destroys segments
+│   │ Barriers        │ │
+│   └─────────────────┘ │
+└───────────┬───────────┘
+            │
+            ▼
+┌───────────────────────┐
+│ 6. Alien Shooting     │  Probability-based (alienShootProbability)
+│                       │  Paused when all players respawning
+└───────────┬───────────┘
+            │
+            ▼
+┌───────────────────────┐
+│ 7. Cleanup            │  Remove: off-screen bullets,
+│                       │          dead aliens, dead UFOs
+└───────────┬───────────┘
+            │
+            ▼
+┌───────────────────────┐
+│ 8. End Conditions     │
+│   ┌─────────────────┐ │
+│   │ All aliens dead │ │──▶ wave++, respawn formation
+│   └─────────────────┘ │
+│   ┌─────────────────┐ │
+│   │ Aliens reach    │ │──▶ status = 'game_over' (invasion)
+│   │ GAME_OVER_Y     │ │
+│   └─────────────────┘ │
+│   ┌─────────────────┐ │
+│   │ Lives == 0      │ │──▶ status = 'game_over'
+│   └─────────────────┘ │
+└───────────┬───────────┘
+            │
+            ▼
+     ┌─────────────┐
+     │ReducerResult│
+     └─────────────┘
+```
+
 ---
 
 ## WebSocket Protocol
