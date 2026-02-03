@@ -18,6 +18,9 @@ bun run vaders
 |-----|--------|
 | Arrow Keys | Move left/right |
 | Space | Shoot |
+| Enter | Ready up / Select |
+| S | Start solo game (in lobby) |
+| Escape | Back / Cancel |
 | M | Toggle sound effects |
 | N | Toggle music |
 | Q | Quit |

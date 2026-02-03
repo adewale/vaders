@@ -92,7 +92,7 @@ The core game server. Each room is a separate Durable Object instance.
 {
   roomId: string,
   mode: 'solo' | 'coop',
-  status: 'waiting' | 'countdown' | 'playing' | 'game_over',
+  status: GameStatus,  // 'waiting' | 'countdown' | 'wipe_exit' | 'wipe_hold' | 'wipe_reveal' | 'playing' | 'game_over'
   tick: number,
   rngSeed: number,
   countdownRemaining: number | null,
@@ -103,6 +103,9 @@ The core game server. Each room is a separate Durable Object instance.
   lives: number,
   score: number,
   alienDirection: 1 | -1,
+  wipeTicksRemaining: number | null,   // Countdown for current wipe phase
+  wipeWaveNumber: number | null,       // Wave number to display during wipe
+  alienShootingDisabled: boolean,      // Debug flag to disable alien shooting
   config: GameConfig
 }
 ```
@@ -117,6 +120,7 @@ The core game server. Each room is a separate Durable Object instance.
 | `input` | Continuous key state `{ left: bool, right: bool }` |
 | `move` | Discrete movement for terminals without key release |
 | `shoot` | Fire player bullet (respects cooldown) |
+| `forfeit` | End game early (only during gameplay/wipe phases) |
 | `ping` | Liveness check, server responds with `pong` |
 
 #### Room Lifecycle
@@ -132,11 +136,26 @@ Created (POST /room)
     │ start_solo                    │ 3...2...1...
     │                               │
     ▼                               ▼
-┌─────────┐                   ┌─────────┐
-│ playing │ ◄─────────────────┤ playing │
-└─────────┘                   └─────────┘
+┌───────────┐                 ┌───────────┐
+│ wipe_hold │ ◄───────────────┤ wipe_hold │
+└─────┬─────┘                 └───────────┘
+      │ hold complete (30 ticks)
+      ▼
+┌──────────────┐
+│ wipe_reveal  │  aliens created with entering=true
+└──────┬───────┘
+       │ reveal complete (60 ticks)
+       ▼
+┌─────────┐    wave complete    ┌───────────┐
+│ playing │ ──────────────────► │ wipe_exit │
+└─────────┘                     └─────┬─────┘
+    │                                 │ exit complete (30 ticks)
+    │                                 ▼
+    │                           ┌───────────┐
+    │                           │ wipe_hold │ ─── (loops back to wipe_reveal)
+    │                           └───────────┘
     │
-    │ all aliens dead OR players dead
+    │ all aliens dead OR players dead OR forfeit
     ▼
 ┌───────────┐    5 min timeout    ┌─────────┐
 │ game_over │ ──────────────────► │ cleanup │
@@ -183,15 +202,21 @@ alarm() fires every 33ms
 ┌────────────────────────────────┐
 │  1. Process input queue        │  ← input, move, shoot actions
 ├────────────────────────────────┤
-│  2. Run game reducer           │  ← pure function: state → state
+│  2. Run TICK via game reducer  │  ← pure function: state → state
+│     (or wipeTickReducer        │     (wipe phases have their own
+│      during wipe phases)       │      tick reducer)
 ├────────────────────────────────┤
 │  3. Broadcast events           │  ← alien_killed, player_died, etc.
 ├────────────────────────────────┤
-│  4. Check end conditions       │  ← wave complete? game over?
+│  4. Handle wipe transitions    │  ← create aliens on wipe_hold→wipe_reveal
 ├────────────────────────────────┤
-│  5. Broadcast full state       │  ← all clients get GameState
+│  5. Check end conditions       │  ← wave complete? game over?
 ├────────────────────────────────┤
-│  6. Schedule next alarm        │  ← now + 33ms
+│  6. Registry heartbeat         │  ← update matchmaker every ~60s
+├────────────────────────────────┤
+│  7. Broadcast full state       │  ← all clients get GameState
+├────────────────────────────────┤
+│  8. Schedule next alarm        │  ← now + 33ms
 └────────────────────────────────┘
 ```
 
@@ -214,15 +239,18 @@ A pure state machine that computes the next game state.
 │  ┌────────────────────────────────────────────────────────┐  │
 │  │  STATE MACHINE: canTransition(status, action) ?        │  │
 │  │                                                        │  │
-│  │  waiting ──┬── START_SOLO ────────────▶ playing        │  │
-│  │            └── START_COUNTDOWN ───────▶ countdown      │  │
-│  │  countdown ─── COUNTDOWN_TICK ────────▶ playing        │  │
-│  │  playing ───── TICK ──────────────────▶ playing/over   │  │
-│  │  game_over ─── (terminal)                              │  │
+│  │  waiting ──────┬── START_SOLO ────────▶ wipe_hold      │  │
+│  │                └── START_COUNTDOWN ───▶ countdown      │  │
+│  │  countdown ──── COUNTDOWN_TICK ───────▶ wipe_hold      │  │
+│  │  wipe_exit ──── TICK ─────────────────▶ wipe_hold      │  │
+│  │  wipe_hold ──── TICK ─────────────────▶ wipe_reveal    │  │
+│  │  wipe_reveal ── TICK ─────────────────▶ playing        │  │
+│  │  playing ────── TICK ─────────────────▶ playing/over   │  │
+│  │  game_over ──── (terminal)                              │  │
 │  └────────────────────────────────────────────────────────┘  │
 │                           │                                   │
 │                           ▼                                   │
-│  TICK ──▶ tickReducer() @ 30Hz                               │
+│  TICK (playing) ──▶ tickReducer() @ 30Hz                     │
 │    1. Move players (apply inputState)                        │
 │    2. Move bullets (player: up, alien: down)                 │
 │    3. Collision detection (bullets vs entities)              │
@@ -230,6 +258,10 @@ A pure state machine that computes the next game state.
 │    5. Alien shooting (seeded RNG)                            │
 │    6. UFO logic (spawn/move)                                 │
 │    7. End conditions (wave complete / game over)             │
+│                                                               │
+│  TICK (wipe_*) ──▶ wipeTickReducer() @ 30Hz                 │
+│    1. Increment tick, decrement wipeTicksRemaining           │
+│    2. Transition to next wipe phase when timer expires       │
 │                           │                                   │
 │                           ▼                                   │
 │              ReducerResult { state, events[], persist }       │
@@ -275,13 +307,16 @@ Each tick performs these steps in order:
 ### State Machine Transitions
 
 ```
-Action              │ From        │ To
-────────────────────┼─────────────┼─────────────
-START_SOLO          │ waiting     │ playing
-START_COUNTDOWN     │ waiting     │ countdown
-COUNTDOWN_TICK      │ countdown   │ countdown/playing
-COUNTDOWN_CANCEL    │ countdown   │ waiting
-TICK                │ playing     │ playing/game_over
+Action              │ From         │ To
+────────────────────┼──────────────┼──────────────────
+START_SOLO          │ waiting      │ wipe_hold
+START_COUNTDOWN     │ waiting      │ countdown
+COUNTDOWN_TICK      │ countdown    │ countdown/wipe_hold
+COUNTDOWN_CANCEL    │ countdown    │ waiting
+TICK                │ wipe_exit    │ wipe_exit/wipe_hold
+TICK                │ wipe_hold    │ wipe_hold/wipe_reveal
+TICK                │ wipe_reveal  │ wipe_reveal/playing
+TICK                │ playing      │ playing/game_over
 ```
 
 ### Reducer Architecture Diagram
@@ -315,12 +350,17 @@ TICK                │ playing     │ playing/game_over
 │  │                    STATE MACHINE GUARD                                  │  │
 │  │         canTransition(state.status, action.type) ?                     │  │
 │  │                                                                         │  │
-│  │   waiting ──┬── PLAYER_JOIN/LEAVE/READY/UNREADY ──▶ waiting            │  │
-│  │             ├── START_SOLO ──────────────────────▶ playing             │  │
-│  │             └── START_COUNTDOWN ─────────────────▶ countdown           │  │
+│  │   waiting ──────┬── PLAYER_JOIN/LEAVE/READY/UNREADY ──▶ waiting        │  │
+│  │                 ├── START_SOLO ────────────────────────▶ wipe_hold     │  │
+│  │                 └── START_COUNTDOWN ──────────────────▶ countdown      │  │
 │  │                                                                         │  │
-│  │   countdown ─┬─ COUNTDOWN_TICK ──────────────────▶ countdown/playing   │  │
-│  │              └─ COUNTDOWN_CANCEL/PLAYER_LEAVE ───▶ waiting             │  │
+│  │   countdown ──┬─ COUNTDOWN_TICK ──────▶ countdown/wipe_hold            │  │
+│  │               └─ COUNTDOWN_CANCEL/PLAYER_LEAVE ───▶ waiting            │  │
+│  │                                                                         │  │
+│  │   wipe_exit ──── TICK/PLAYER_INPUT/PLAYER_LEAVE ──▶ wipe_exit          │  │
+│  │   wipe_hold ──── TICK/PLAYER_INPUT/PLAYER_LEAVE ──▶ wipe_hold          │  │
+│  │   wipe_reveal ── TICK/PLAYER_INPUT/PLAYER_LEAVE ──▶ wipe_reveal        │  │
+│  │                  (wipe phases transition via wipeTickReducer timer)     │  │
 │  │                                                                         │  │
 │  │   playing ───┬─ TICK ────────────────────────────▶ playing/game_over   │  │
 │  │              └─ PLAYER_INPUT/MOVE/SHOOT/LEAVE ───▶ playing             │  │
@@ -332,7 +372,8 @@ TICK                │ playing     │ playing/game_over
 │  ┌────────────────────────────────────────────────────────────────────────┐  │
 │  │                         ACTION DISPATCH                                 │  │
 │  │                                                                         │  │
-│  │   TICK ─────────────▶ tickReducer()          (main game loop)          │  │
+│  │   TICK (playing) ───▶ tickReducer()          (main game loop)          │  │
+│  │   TICK (wipe_*) ────▶ wipeTickReducer()     (wipe phase timing)       │  │
 │  │   PLAYER_JOIN ──────▶ playerJoinReducer()                              │  │
 │  │   PLAYER_LEAVE ─────▶ playerLeaveReducer()                             │  │
 │  │   PLAYER_INPUT ─────▶ inputReducer()         (held keys state)         │  │
@@ -437,7 +478,7 @@ TICK                │ playing     │ playing/game_over
 ┌───────────────────────┐
 │ 8. End Conditions     │
 │   ┌─────────────────┐ │
-│   │ All aliens dead │ │──▶ wave++, respawn formation
+│   │ All aliens dead │ │──▶ wave++, start wipe sequence (wipe_exit)
 │   └─────────────────┘ │
 │   ┌─────────────────┐ │
 │   │ Aliens reach    │ │──▶ status = 'game_over' (invasion)
@@ -454,6 +495,24 @@ TICK                │ playing     │ playing/game_over
      └─────────────┘
 ```
 
+### Wipe Phase Timing
+
+Wave transitions use a three-phase wipe animation controlled server-side:
+
+```
+wipe_exit   (30 ticks / 1s)  → iris closing animation
+wipe_hold   (30 ticks / 1s)  → black screen with wave title
+wipe_reveal (60 ticks / 2s)  → iris opening, aliens enter with entering=true
+```
+
+During wipe phases, the `wipeTickReducer` counts down `wipeTicksRemaining` and
+transitions between phases. Aliens are created at the `wipe_hold → wipe_reveal`
+boundary and marked `entering=true` (prevents alien shooting). When `wipe_reveal`
+completes, `entering` is set to `false` and status becomes `playing`.
+
+For game start (solo or countdown), the `wipe_exit` phase is skipped — the game
+goes directly to `wipe_hold`.
+
 ---
 
 ## WebSocket Protocol
@@ -465,6 +524,7 @@ TICK                │ playing     │ playing/game_over
 { type: 'ready' }
 { type: 'unready' }
 { type: 'start_solo' }
+{ type: 'forfeit' }                                // End game early
 { type: 'input', held: { left: boolean, right: boolean } }
 { type: 'move', direction: 'left' | 'right' }
 { type: 'shoot' }
@@ -479,9 +539,10 @@ TICK                │ playing     │ playing/game_over
 
 // Game events
 { type: 'event', name: string, data: any }
-// Event names: player_joined, player_ready, player_unready, countdown_tick,
-//              game_start, alien_killed, player_died, player_respawned,
-//              wave_complete, game_over, player_left
+// Event names: player_joined, player_left, player_ready, player_unready,
+//              player_died, player_respawned, countdown_tick, countdown_cancelled,
+//              game_start, alien_killed, score_awarded, wave_complete,
+//              game_over, invasion, ufo_spawn
 
 // Errors
 { type: 'error', code: string, message: string }
@@ -551,10 +612,15 @@ The server uses **full state sync** - every tick, all connected clients receive 
 
 ```typescript
 // Persisted (important transitions)
-join, ready, game_start, game_over → persist = true
+join, leave, ready, unready,          → persist = true (reducer)
+start_solo, start_countdown,          → persist = true (reducer)
+countdown_tick (at 0), countdown_cancel, → persist = true (reducer)
+wipe phase transitions,               → persist = true (reducer)
+game_start, game_over, next_wave,     → persist = true (GameRoom shell)
+forfeit                               → persist = true (GameRoom shell)
 
 // Not persisted (too frequent)
-tick, input → persist = false
+tick, input, move, shoot              → persist = false
 ```
 
 ### Cold Start Recovery
@@ -609,15 +675,23 @@ setAlarm(now + 33ms) → wakes DO
 ```
 worker/
 ├── src/
-│   ├── index.ts              # HTTP router
-│   ├── GameRoom.ts           # Game Durable Object (~800 lines)
-│   ├── Matchmaker.ts         # Room registry DO (~100 lines)
+│   ├── index.ts                       # HTTP router
+│   ├── GameRoom.ts                    # Game Durable Object (~700 lines)
+│   ├── GameRoom.test.ts               # GameRoom unit tests
+│   ├── Matchmaker.ts                  # Room registry DO (~100 lines)
+│   ├── Matchmaker.test.ts             # Matchmaker unit tests
+│   ├── integration.test.ts            # Integration tests
+│   ├── test-utils.ts                  # Shared test utilities
+│   ├── mocks/
+│   │   └── cloudflare-workers.ts      # Cloudflare API mocks for tests
 │   └── game/
-│       ├── reducer.ts        # Pure game logic (~600 lines)
-│       ├── scaling.ts        # Player count scaling
-│       ├── reducer.test.ts
-│       └── scaling.test.ts
-├── wrangler.jsonc            # DO bindings config
+│       ├── reducer.ts                 # Pure game logic (~740 lines)
+│       ├── scaling.ts                 # Player count scaling
+│       ├── reducer.test.ts            # Reducer unit tests
+│       ├── scaling.test.ts            # Scaling unit tests
+│       └── alien-shooting-proof.test.ts  # Alien shooting verification tests
+├── wrangler.jsonc                     # DO bindings config
+├── tsconfig.json
 ├── package.json
 └── vitest.config.ts
 ```
@@ -634,4 +708,5 @@ worker/
 | **Input Queuing** | Messages queued, processed atomically each tick |
 | **Seeded RNG** | Deterministic alien behavior from tick + seed |
 | **Full State Sync** | Simple correctness over bandwidth optimization |
+| **Server-Controlled Wipe** | Wave transitions timed server-side (wipe_exit → wipe_hold → wipe_reveal) |
 | **Wide Events** | One context-rich JSON log per request |

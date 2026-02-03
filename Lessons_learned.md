@@ -12,14 +12,10 @@ A multiplayer TUI Space Invaders clone with OpenTUI and Cloudflare Durable Objec
 
 ```typescript
 // Simple, effective animation that works within terminal constraints
-const TRACTOR_BEAM_PALETTE = [
-  '#0033ff', '#0066ff', '#0099ff', '#00ccff',
-  '#00ffff', '#66ffff', '#ffffff',
-]
-
-function getTractorBeamColor(tick: number): string {
-  const index = Math.floor(tick / 10) % TRACTOR_BEAM_PALETTE.length
-  return TRACTOR_BEAM_PALETTE[index]
+// From client/src/effects.ts
+export function getUFOColor(tick: number): string {
+  const colors = ['#ff0000', '#ff8800', '#ffff00', '#00ff00', '#00ffff', '#ff00ff']
+  return colors[Math.floor(tick / 5) % colors.length]
 }
 ```
 
@@ -45,7 +41,7 @@ const SPRITES = {
 - Anti-aliasing
 - Partial transparency
 
-**Smooth sub-cell animations.** Movement is inherently "chunky" - entities jump by whole character cells. Accept this limitation rather than fighting it. Aliens moving 2 cells every 15 ticks looks correct for the genre.
+**Smooth sub-cell animations.** Movement is inherently "chunky" - entities jump by whole character cells. Accept this limitation rather than fighting it. Aliens moving 2 cells every 18 ticks looks correct for the genre.
 
 **Complex background patterns.** Background colors apply to entire cells. Tiled patterns or textures are impractical.
 
@@ -82,7 +78,8 @@ export function normalizeKey(event: KeyEvent): VadersKey | null {
 **Handle both press and release events for movement.** Terminal key repeat sends repeated press events. Track held state with timeouts for terminals that do not report releases:
 
 ```typescript
-const KEY_RELEASE_TIMEOUT_MS = 200
+// Timeout varies by terminal - 0 for Kitty (has key release), 40ms default for others
+const KEY_RELEASE_TIMEOUT_MS = getKeyReleaseTimeoutMs()  // from terminal/compatibility.ts
 
 function createHeldKeysTracker() {
   const held = { left: false, right: false }
@@ -126,6 +123,7 @@ The reducer returns:
 - `state`: The new game state
 - `events`: Array of events to broadcast to clients
 - `persist`: Whether to save state to storage
+- `scheduleAlarm?`: Optional alarm to schedule (ms from now)
 
 ### State Machine for Game Status
 
@@ -135,16 +133,21 @@ Guard all transitions explicitly. This prevents race conditions during countdown
 const TRANSITIONS: Record<GameStatus, Partial<Record<GameAction['type'], GameStatus>>> = {
   waiting: {
     PLAYER_JOIN: 'waiting',
-    START_SOLO: 'playing',
+    START_SOLO: 'wipe_hold',        // Game start goes through wipe phases
     START_COUNTDOWN: 'countdown',
   },
   countdown: {
-    COUNTDOWN_TICK: 'countdown',
+    COUNTDOWN_TICK: 'countdown',    // Transitions to wipe_hold when countdown reaches 0
     COUNTDOWN_CANCEL: 'waiting',
   },
+  // Wave transition wipe phases (wipe_exit → wipe_hold → wipe_reveal → playing)
+  wipe_exit: { TICK: 'wipe_exit', PLAYER_INPUT: 'wipe_exit' },
+  wipe_hold: { TICK: 'wipe_hold', PLAYER_INPUT: 'wipe_hold' },
+  wipe_reveal: { TICK: 'wipe_reveal', PLAYER_INPUT: 'wipe_reveal' },
   playing: {
     TICK: 'playing',
     PLAYER_INPUT: 'playing',
+    PLAYER_MOVE: 'playing',
     PLAYER_SHOOT: 'playing',
   },
   game_over: {
@@ -201,18 +204,21 @@ This pattern provides exhaustiveness checking in switch statements and enables I
 Use the Hibernatable WebSockets API. The Durable Object can sleep while maintaining WebSocket connections:
 
 ```typescript
-export class GameRoom extends DurableObject {
+export class GameRoom extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
-
-    // Auto-respond to pings without waking the DO
-    ctx.setWebSocketAutoResponse(
-      new WebSocketRequestResponsePair('{"type":"ping"}', '{"type":"pong"}')
-    )
+    // Load state from SQLite on wake (hibernation-aware)
+    ctx.blockConcurrencyWhile(async () => { /* load from SQLite */ })
   }
 
+  // DO wakes when messages arrive or alarms fire
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
-    // DO wakes only when actual game messages arrive
+    const msg = JSON.parse(message as string)
+    if (msg.type === 'ping') {
+      ws.send(JSON.stringify({ type: 'pong', serverTime: Date.now() }))
+      return  // Quick response, no heavy processing
+    }
+    // Handle game messages...
   }
 }
 ```
@@ -221,7 +227,14 @@ Use alarms instead of `setInterval` for the game tick. Alarms are hibernation-co
 
 ```typescript
 async alarm() {
-  if (this.game?.status === 'playing') {
+  // Countdown ticks (1s interval)
+  if (this.countdownRemaining !== null && this.countdownRemaining > 0) {
+    // Handle countdown...
+    return
+  }
+  // Game ticks at 30Hz during playing AND wipe phases
+  const activeStatuses = ['playing', 'wipe_exit', 'wipe_hold', 'wipe_reveal']
+  if (this.game && activeStatuses.includes(this.game.status)) {
     this.tick()
     await this.ctx.storage.setAlarm(Date.now() + this.game.config.tickIntervalMs)
   }
@@ -233,18 +246,11 @@ async alarm() {
 Start with full state sync. Only optimize if bandwidth becomes a problem:
 
 ```typescript
-// Initial approach: full sync at 30Hz
+// Full sync at 30Hz — simple and correct
 this.broadcast({ type: 'sync', state: this.game })
-
-// Later optimization: delta updates most ticks, full sync periodically
-if (this.game.tick % 30 === 0) {
-  this.broadcastFullState()
-} else {
-  this.broadcastDelta()
-}
 ```
 
-For this game, full state is ~2KB. Delta updates reduce this but add complexity. The optimization was added late and provides modest benefit.
+For this game, full state is ~2KB per tick. At 30Hz with 4 players, this is 120 messages/second, which is well within WebSocket limits. The optimization applied was omitting `playerId` and `config` from subsequent syncs (they're sent once on join), roughly halving payload size. Delta updates were considered but not implemented — the simplicity of full sync outweighs the bandwidth savings at this scale.
 
 ### Input Handling: Held-State vs Discrete Actions
 
@@ -309,9 +315,15 @@ useKeyboard((event) => {
 
 ```typescript
 interface GameConfig {
+  width: number                        // Default: 120
+  height: number                       // Default: 36
+  maxPlayers: number                   // Default: 4
   tickIntervalMs: number               // Default: 33 (~30Hz server tick)
-  baseAlienMoveIntervalTicks: number   // Ticks between alien moves
-  playerCooldownTicks: number          // Ticks between shots
+  baseAlienMoveIntervalTicks: number   // Ticks between alien moves (default: 18)
+  baseBulletSpeed: number              // Cells per tick (default: 1)
+  baseAlienShootRate: number           // Probability per tick
+  playerCooldownTicks: number          // Ticks between shots (default: 6)
+  playerMoveSpeed: number              // Cells per tick (default: 1)
   respawnDelayTicks: number            // Ticks until respawn (90 = 3s at 30Hz)
 }
 ```
@@ -414,7 +426,7 @@ const scaleTable = {
 }
 ```
 
-**Shared lives in co-op.** 5 lives shared (vs 3 solo). Creates team tension without punishing individual deaths too harshly.
+**Per-player lives in co-op.** Each player gets 5 lives in co-op (vs 3 in solo). Game ends when all players are out of lives individually.
 
 **Spread spawn positions.** Players start evenly distributed across the screen width:
 
@@ -466,8 +478,7 @@ At 30Hz with 4 players, the server sends 120 messages/second. Each message is JS
 
 **Optimizations applied:**
 1. Reuse stringified message for all WebSockets in broadcast
-2. Send delta updates 29/30 ticks, full sync 1/30 ticks
-3. Omit config and playerId after initial sync
+2. Omit config and playerId after initial sync (~halves payload)
 
 **Not worth optimizing:**
 - Binary protocol (JSON is fine at this scale)
