@@ -133,23 +133,23 @@ Created (POST /room)
 │ waiting │ ◄────────────────► │ countdown │
 └─────────┘    all ready       └───────────┘
     │                               │
-    │ start_solo                    │ 3...2...1...
+    │ start_solo                    │ 1s countdown
     │                               │
     ▼                               ▼
 ┌───────────┐                 ┌───────────┐
 │ wipe_hold │ ◄───────────────┤ wipe_hold │
 └─────┬─────┘                 └───────────┘
-      │ hold complete (60 ticks)
+      │ hold complete (45 ticks)
       ▼
 ┌──────────────┐
 │ wipe_reveal  │  aliens created with entering=true
 └──────┬───────┘
-       │ reveal complete (120 ticks)
+       │ reveal complete (45 ticks)
        ▼
 ┌─────────┐    wave complete    ┌───────────┐
 │ playing │ ──────────────────► │ wipe_exit │
 └─────────┘                     └─────┬─────┘
-    │                                 │ exit complete (60 ticks)
+    │                                 │ exit complete (45 ticks)
     │                                 ▼
     │                           ┌───────────┐
     │                           │ wipe_hold │ ─── (loops back to wipe_reveal)
@@ -506,9 +506,9 @@ TICK                │ playing      │ playing/game_over
 Wave transitions use a three-phase wipe animation controlled server-side:
 
 ```
-wipe_exit   (60 ticks / 2s)  → iris closing animation
-wipe_hold   (60 ticks / 2s)  → black screen with wave title
-wipe_reveal (120 ticks / 4s) → iris opening, aliens enter with entering=true
+wipe_exit   (45 ticks / 1.5s) → iris closing animation
+wipe_hold   (45 ticks / 1.5s) → black screen with wave title
+wipe_reveal (45 ticks / 1.5s) → iris opening, aliens enter with entering=true
 ```
 
 During wipe phases, the `wipeTickReducer` counts down `wipeTicksRemaining` and
