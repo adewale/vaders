@@ -35,6 +35,9 @@ bun run vaders -- --room ABC123    # Join room directly
 bun run vaders -- --matchmake      # Auto-matchmake directly
 bun run vaders -- --name "Alice"   # Set player name
 bun run vaders -- --local          # Run local server for development
+bun run vaders -- --solo           # Start solo game directly
+bun run vaders -- --check          # Run system diagnostics
+bun run vaders -- --no-audio-check # Skip audio verification
 ```
 
 ## Development Commands
@@ -59,9 +62,10 @@ cd worker && bunx wrangler deploy
 - **Game tick rate**: 33ms intervals (~30Hz) in Durable Object
 - **State sync**: Full state sync on every tick (30Hz)
 - **Screen size**: Fixed 120×36 terminal grid
-- **Sprites**: 2-line tall, 5-character wide for all entities
-- **Player colors**: green (P1), cyan (P2), yellow (P3), magenta (P4)
+- **Sprites**: 2-line tall, 5-char wide for players/aliens/UFO; bullets 1×1; barrier segments 2×2
+- **Player display colors**: cyan (P1), orange (P2), magenta (P3), lime (P4) — note: `PLAYER_COLORS` in types.ts uses different names (green/cyan/yellow/magenta) for protocol-level identification
 - **Movement**: Space Invaders-style (1 cell/tick, no inertia)
+- **Game statuses**: `waiting` → `countdown` → `wipe_hold` → `wipe_reveal` → `playing` → `game_over` (wave transitions add `wipe_exit` → `wipe_hold` → `wipe_reveal` loop)
 
 ### Scaling by Player Count
 
@@ -74,7 +78,7 @@ cd worker && bunx wrangler deploy
 
 ### WebSocket Protocol
 
-- Client sends: `join`, `ready`, `unready`, `start_solo`, `input` (held keys), `move` (discrete), `shoot`, `ping`
+- Client sends: `join`, `ready`, `unready`, `start_solo`, `forfeit`, `input` (held keys), `move` (discrete), `shoot`, `ping`
 - Server sends: `sync` (full state), `event` (game events), `error`, `pong`
 
 ### OpenTUI Patterns
