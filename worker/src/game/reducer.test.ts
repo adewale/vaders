@@ -613,7 +613,7 @@ describe('START_SOLO action', () => {
     expect(result.state.status).toBe('wipe_hold') // Wipe phase before playing
     expect(result.state.mode).toBe('solo')
     expect(result.state.lives).toBe(3)
-    expect(result.state.wipeTicksRemaining).toBe(30) // 2 seconds at 30Hz
+    expect(result.state.wipeTicksRemaining).toBe(60) // 2 seconds at 30Hz
     expect(result.state.wipeWaveNumber).toBe(1)
   })
 
@@ -735,7 +735,7 @@ describe('COUNTDOWN_TICK action', () => {
 
     expect(result.state.status).toBe('wipe_hold') // Wipe phase before playing
     expect(result.state.countdownRemaining).toBeNull()
-    expect(result.state.wipeTicksRemaining).toBe(30)
+    expect(result.state.wipeTicksRemaining).toBe(60)
     expect(result.state.wipeWaveNumber).toBe(1)
     expect(hasEvent(result.events, 'game_start')).toBe(true)
   })
@@ -2269,7 +2269,7 @@ describe('alien entering flag (prevents shooting during wipe_reveal)', () => {
       const result = gameReducer(state, { type: 'START_SOLO' })
 
       expect(result.state.status).toBe('wipe_hold')
-      expect(result.state.wipeTicksRemaining).toBe(30)
+      expect(result.state.wipeTicksRemaining).toBe(60)
       expect(result.state.wipeWaveNumber).toBe(1)
     })
 
@@ -2281,7 +2281,7 @@ describe('alien entering flag (prevents shooting during wipe_reveal)', () => {
       const result = gameReducer(state, { type: 'COUNTDOWN_TICK' })
 
       expect(result.state.status).toBe('wipe_hold')
-      expect(result.state.wipeTicksRemaining).toBe(30)
+      expect(result.state.wipeTicksRemaining).toBe(60)
       expect(result.state.wipeWaveNumber).toBe(1)
     })
 
@@ -2294,7 +2294,7 @@ describe('alien entering flag (prevents shooting during wipe_reveal)', () => {
       const result = gameReducer(state, { type: 'TICK' })
 
       expect(result.state.status).toBe('wipe_reveal')
-      expect(result.state.wipeTicksRemaining).toBe(60) // Reveal duration
+      expect(result.state.wipeTicksRemaining).toBe(120) // Reveal duration
     })
 
     it('wipe_reveal transitions to playing after countdown', () => {
@@ -2324,7 +2324,7 @@ describe('alien entering flag (prevents shooting during wipe_reveal)', () => {
       const result = gameReducer(state, { type: 'TICK' })
 
       expect(result.state.status).toBe('wipe_hold')
-      expect(result.state.wipeTicksRemaining).toBe(30) // Hold duration
+      expect(result.state.wipeTicksRemaining).toBe(60) // Hold duration
     })
 
     it('wipe_hold sets entering=true on aliens when transitioning to wipe_reveal', () => {

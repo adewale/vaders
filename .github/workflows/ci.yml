@@ -28,14 +28,20 @@ jobs:
           cd client && bun install
           cd ../worker && bun install
 
+      - name: Lint & format check
+        run: bun run lint
+
       - name: Type check (client)
         run: cd client && bun run typecheck
 
       - name: Type check (worker)
         run: cd worker && bun run typecheck
 
-      - name: Run tests
+      - name: Run client tests
         run: cd client && bun test
+
+      - name: Run worker tests
+        run: cd worker && bun run test
 
   build:
     name: Build

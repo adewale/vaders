@@ -33,6 +33,36 @@ interface WebSocketAttachment {
   playerId: string
 }
 
+// Rate limiting constants
+const RATE_LIMIT_WINDOW_MS = 1000
+const RATE_LIMIT_MAX_MESSAGES = 60
+
+// Per-connection rate limiting state (not serialized into attachment — lives in memory only)
+interface RateLimitState {
+  count: number
+  windowStart: number
+}
+
+/**
+ * Type guard: validates that a parsed JSON value is a non-null object
+ * with a string `type` field, suitable for use as a ClientMessage.
+ */
+function isValidClientMessage(msg: unknown): msg is { type: string; [key: string]: unknown } {
+  return (
+    typeof msg === 'object' &&
+    msg !== null &&
+    !Array.isArray(msg) &&
+    typeof (msg as Record<string, unknown>).type === 'string'
+  )
+}
+
+/**
+ * Validates that a room code matches the expected format: exactly 6 uppercase alphanumeric characters.
+ */
+function isValidRoomCode(code: unknown): code is string {
+  return typeof code === 'string' && /^[A-Z0-9]{6}$/.test(code)
+}
+
 /**
  * GameRoom Durable Object
  *
@@ -52,6 +82,7 @@ export class GameRoom extends DurableObject<Env> {
   private nextEntityId = 1
   private inputQueue: GameAction[] = []
   private countdownRemaining: number | null = null
+  private rateLimits: Map<WebSocket, RateLimitState> = new Map()
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
@@ -108,7 +139,16 @@ export class GameRoom extends DurableObject<Env> {
       if (this.game !== null) {
         return new Response('Already initialized', { status: 409 })
       }
-      const { roomCode } = await request.json() as { roomCode: string }
+      let body: unknown
+      try {
+        body = await request.json()
+      } catch {
+        return new Response('Invalid JSON body', { status: 400 })
+      }
+      const roomCode = (body as Record<string, unknown>)?.roomCode
+      if (!isValidRoomCode(roomCode)) {
+        return new Response('Invalid room code format (expected 6 uppercase alphanumeric characters)', { status: 400 })
+      }
       this.game = this.createInitialState(roomCode)
       this.persistState()
       return new Response('OK')
@@ -167,8 +207,37 @@ export class GameRoom extends DurableObject<Env> {
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
     if (!this.game) return
 
+    // --- Rate limiting ---
+    const now = Date.now()
+    let rl = this.rateLimits.get(ws)
+    if (!rl) {
+      rl = { count: 0, windowStart: now }
+      this.rateLimits.set(ws, rl)
+    }
+    // Reset window if elapsed
+    if (now - rl.windowStart >= RATE_LIMIT_WINDOW_MS) {
+      rl.count = 0
+      rl.windowStart = now
+    }
+    rl.count++
+    if (rl.count > RATE_LIMIT_MAX_MESSAGES) {
+      // Only send an error on the first exceeded message to avoid amplification
+      if (rl.count === RATE_LIMIT_MAX_MESSAGES + 1) {
+        this.sendError(ws, 'rate_limited', 'Too many messages, slow down')
+      }
+      return
+    }
+
     try {
-      const msg: ClientMessage = JSON.parse(message as string)
+      const parsed: unknown = JSON.parse(message as string)
+
+      // --- Validate message shape ---
+      if (!isValidClientMessage(parsed)) {
+        this.sendError(ws, 'invalid_message', 'Message must be an object with a string "type" field')
+        return
+      }
+
+      const msg = parsed as ClientMessage
       const attachment = ws.deserializeAttachment() as WebSocketAttachment | null
       const playerId = attachment?.playerId
 
@@ -199,11 +268,15 @@ export class GameRoom extends DurableObject<Env> {
             return
           }
 
+          // Validate player name
+          const rawName = (msg as Record<string, unknown>).name
+          const playerName = typeof rawName === 'string' ? rawName.slice(0, 12) : 'Player'
+
           const slot = this.getNextSlot()
           const playerCount = Object.keys(this.game.players).length + 1
           const player: Player = {
             id: crypto.randomUUID(),
-            name: msg.name.slice(0, 12),
+            name: playerName,
             x: getPlayerSpawnX(slot, playerCount, this.game.config.width),
             slot,
             color: PLAYER_COLORS[slot],
@@ -345,6 +418,9 @@ export class GameRoom extends DurableObject<Env> {
    * Hibernatable WebSocket close handler
    */
   async webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean) {
+    // Clean up rate limit state for this connection
+    this.rateLimits.delete(ws)
+
     const attachment = ws.deserializeAttachment() as WebSocketAttachment | null
     const playerId = attachment?.playerId
 

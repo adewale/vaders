@@ -9,6 +9,11 @@ const PING_INTERVAL = 30000
 const PONG_TIMEOUT = 5000
 const SYNC_INTERVAL_MS = 33  // Expected sync rate for lerp calculation
 
+// Reconnection constants
+const RECONNECT_BASE_DELAY = 1000   // Start at 1 second
+const RECONNECT_MAX_DELAY = 10000   // Cap at 10 seconds
+const RECONNECT_MAX_ATTEMPTS = 5
+
 // Event data types for type-safe access
 export type GameEventName = ServerEvent['name']
 export type GameEventData<T extends GameEventName> = Extract<ServerEvent, { name: T }>['data']
@@ -20,6 +25,7 @@ interface ConnectionState {
   playerId: string | null
   config: GameConfig | null
   connected: boolean
+  reconnecting: boolean
   error: string | null
   // Event handling
   lastEvent: ServerEvent | null
@@ -37,6 +43,7 @@ export function useGameConnection(
     playerId: null,
     config: null,
     connected: false,
+    reconnecting: false,
     error: null,
     lastEvent: null,
     gameResult: null,
@@ -47,23 +54,38 @@ export function useGameConnection(
   const pingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const localInputRef = useRef<InputState>({ left: false, right: false })
 
+  // Reconnection refs
+  const intentionalCloseRef = useRef(false)
+  const reconnectAttemptRef = useRef(0)
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const gameStatusRef = useRef<string | null>(null)
+
   // Connect to WebSocket
   useEffect(() => {
+    // Reset reconnection state on fresh mount / roomUrl change
+    intentionalCloseRef.current = false
+    reconnectAttemptRef.current = 0
+
     const connect = () => {
       try {
         const ws = new WebSocket(roomUrl)
         wsRef.current = ws
 
         ws.onopen = () => {
-          setState(s => ({ ...s, connected: true, error: null }))
+          // Successful connection (or reconnection) - reset attempt counter
+          reconnectAttemptRef.current = 0
+          setState(s => ({ ...s, connected: true, reconnecting: false, error: null }))
 
-          // Send join message
+          // Send join message (both on initial connect and reconnect)
           ws.send(JSON.stringify({
             type: 'join',
             name: playerName,
           } satisfies ClientMessage))
 
           // Start ping interval
+          if (pingIntervalRef.current) {
+            clearInterval(pingIntervalRef.current)
+          }
           pingIntervalRef.current = setInterval(() => {
             if (Date.now() - lastPongRef.current > PING_INTERVAL + PONG_TIMEOUT) {
               ws.close()
@@ -83,6 +105,8 @@ export function useGameConnection(
             }
 
             if (msg.type === 'sync') {
+              // Track game status for reconnection decisions
+              gameStatusRef.current = msg.state.status
               setState(s => ({
                 ...s,
                 prevState: s.serverState,
@@ -107,6 +131,7 @@ export function useGameConnection(
                 // Extract game result from game_over event
                 if (msg.name === 'game_over') {
                   updates.gameResult = (msg.data as { result: 'victory' | 'defeat' }).result
+                  gameStatusRef.current = 'game_over'
                 }
 
                 return { ...s, ...updates }
@@ -122,25 +147,68 @@ export function useGameConnection(
           setState(s => ({ ...s, connected: false }))
           if (pingIntervalRef.current) {
             clearInterval(pingIntervalRef.current)
+            pingIntervalRef.current = null
+          }
+
+          // Attempt reconnection if the close was not intentional
+          // and the game is not over
+          if (!intentionalCloseRef.current && gameStatusRef.current !== 'game_over') {
+            scheduleReconnect()
           }
         }
 
         ws.onerror = () => {
-          setState(s => ({ ...s, error: 'Connection error' }))
+          // Only set error if we're not going to retry
+          // (onclose fires after onerror, which will trigger reconnection)
+          if (intentionalCloseRef.current || gameStatusRef.current === 'game_over') {
+            setState(s => ({ ...s, error: 'Connection error' }))
+          }
         }
       } catch (err) {
-        setState(s => ({ ...s, error: 'Failed to connect' }))
+        setState(s => ({ ...s, error: 'Failed to connect', reconnecting: false }))
       }
+    }
+
+    const scheduleReconnect = () => {
+      if (reconnectAttemptRef.current >= RECONNECT_MAX_ATTEMPTS) {
+        setState(s => ({
+          ...s,
+          reconnecting: false,
+          error: 'Connection lost. Could not reconnect after multiple attempts.',
+        }))
+        return
+      }
+
+      reconnectAttemptRef.current += 1
+      const attempt = reconnectAttemptRef.current
+      const delay = Math.min(
+        RECONNECT_BASE_DELAY * Math.pow(2, attempt - 1),
+        RECONNECT_MAX_DELAY
+      )
+
+      setState(s => ({ ...s, reconnecting: true }))
+
+      reconnectTimerRef.current = setTimeout(() => {
+        reconnectTimerRef.current = null
+        connect()
+      }, delay)
     }
 
     connect()
 
     return () => {
+      // Mark as intentional so the close handler doesn't trigger reconnection
+      intentionalCloseRef.current = true
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current)
+        reconnectTimerRef.current = null
+      }
       if (wsRef.current) {
         wsRef.current.close()
       }
       if (pingIntervalRef.current) {
         clearInterval(pingIntervalRef.current)
+        pingIntervalRef.current = null
       }
     }
   }, [roomUrl, playerName])
@@ -224,6 +292,7 @@ export function useGameConnection(
     getRenderState,
     playerId: state.playerId,
     connected: state.connected,
+    reconnecting: state.reconnecting,
     error: state.error,
     lastEvent: state.lastEvent,
     gameResult: state.gameResult,

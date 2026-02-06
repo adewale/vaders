@@ -307,13 +307,6 @@ export interface ScaledConfig {
   lives: number                     // Shared lives (3 solo, 5 coop)
 }
 
-/** Wave configuration for progression */
-export interface WaveConfig {
-  alienCols: number
-  alienRows: number
-  speedMult: number
-}
-
 /** Event names that can be emitted during gameplay (matches ServerEvent.name) */
 export type GameEvent =
   | 'player_joined'
@@ -372,12 +365,12 @@ export interface GameState {
 // These are the canonical values - client should derive from these
 
 export const WIPE_TIMING = {
-  /** Ticks for iris closing (1 second at 30Hz) */
-  EXIT_TICKS: 30,
-  /** Ticks for black screen with wave title (1 second at 30Hz) */
-  HOLD_TICKS: 30,
-  /** Ticks for iris opening + aliens entering (2 seconds at 30Hz) */
-  REVEAL_TICKS: 60,
+  /** Ticks for iris closing (2 seconds at 30Hz) */
+  EXIT_TICKS: 60,
+  /** Ticks for black screen with wave title (2 seconds at 30Hz) */
+  HOLD_TICKS: 60,
+  /** Ticks for iris opening + aliens entering (4 seconds at 30Hz) */
+  REVEAL_TICKS: 120,
 } as const
 
 // ─── Barrier Factory ──────────────────────────────────────────────────────────

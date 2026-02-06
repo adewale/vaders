@@ -1,4 +1,4 @@
-import { describe, test, expect } from 'bun:test'
+import { describe, test, expect } from 'vitest'
 import { gameReducer } from './reducer'
 import { createDefaultGameState } from '../../../shared/state-defaults'
 import { getAliens, getBullets, createAlienFormation } from '../../../shared/types'
@@ -37,11 +37,11 @@ describe('PROOF: Alien shooting works end-to-end', () => {
     state = s2
     console.log('2. After START_SOLO - status:', state.status, 'wipeTicksRemaining:', state.wipeTicksRemaining)
     expect(state.status).toBe('wipe_hold')
-    expect(state.wipeTicksRemaining).toBe(30)
+    expect(state.wipeTicksRemaining).toBe(60)
 
     // 4. Tick through wipe_hold until we transition to wipe_reveal
     let tickCount = 0
-    while (state.status === 'wipe_hold' && tickCount < 50) {
+    while (state.status === 'wipe_hold' && tickCount < 100) {
       const { state: next } = gameReducer(state, { type: 'TICK' })
       state = next
       tickCount++
@@ -66,7 +66,7 @@ describe('PROOF: Alien shooting works end-to-end', () => {
 
     // 6. Tick through wipe_reveal until we transition to playing
     tickCount = 0
-    while (state.status === 'wipe_reveal' && tickCount < 100) {
+    while (state.status === 'wipe_reveal' && tickCount < 200) {
       const { state: next } = gameReducer(state, { type: 'TICK' })
       state = next
       tickCount++

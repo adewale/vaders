@@ -19,7 +19,14 @@
     "build": "cd client && bun run build",
     "deploy": "cd worker && bun run deploy",
     "typecheck": "cd worker && bun run typecheck && cd ../client && bun run typecheck",
-    "install:all": "cd worker && bun install && cd ../client && bun install"
+    "test": "bun run test:client && bun run test:worker && bun run test:shared",
+    "test:client": "cd client && bun test",
+    "test:worker": "cd worker && bun run test",
+    "test:shared": "cd shared && bun test",
+    "install:all": "cd worker && bun install && cd ../client && bun install",
+    "lint": "bunx @biomejs/biome lint .",
+    "lint:check": "bunx @biomejs/biome check .",
+    "format": "bunx @biomejs/biome check --write ."
   },
   "keywords": [
     "space-invaders",
@@ -32,5 +39,8 @@
     "opentui"
   ],
   "author": "",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.14"
+  }
 }

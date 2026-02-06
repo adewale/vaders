@@ -204,7 +204,7 @@ function GameContainer({
   onMainMenu: () => void
 }) {
   const renderer = useRenderer()
-  const { getRenderState, playerId, send, connected, updateInput, move, shoot } = useGameConnection(
+  const { getRenderState, playerId, send, connected, reconnecting, error, updateInput, move, shoot } = useGameConnection(
     roomUrl,
     playerName
   )
@@ -510,6 +510,24 @@ function GameContainer({
 
   // Render appropriate screen
   if (!connected || !state || !playerId) {
+    // Show reconnecting state if we had a connection before
+    if (reconnecting) {
+      return (
+        <box width={terminalWidth} height={terminalHeight} justifyContent="center" alignItems="center" flexDirection="column">
+          <text fg="yellow">Reconnecting...</text>
+        </box>
+      )
+    }
+    // Show error if reconnection failed
+    if (error) {
+      return (
+        <box width={terminalWidth} height={terminalHeight} justifyContent="center" alignItems="center" flexDirection="column">
+          <text fg="red">{error}</text>
+          <box height={1} />
+          <text fg="gray">Press Q to quit</text>
+        </box>
+      )
+    }
     return (
       <box width={terminalWidth} height={terminalHeight} justifyContent="center" alignItems="center">
         <text fg="cyan">Connecting to server...</text>
