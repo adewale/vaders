@@ -84,14 +84,22 @@ export interface WipeConfig {
 }
 
 /**
- * Default wipe configuration
+ * Default wipe configuration.
+ *
+ * NOTE: These durations intentionally differ from the server's WIPE_TIMING
+ * constants (EXIT_TICKS=60, HOLD_TICKS=60, REVEAL_TICKS=120 in shared/types.ts).
+ * The server controls the authoritative status transitions (wipe_exit → wipe_hold
+ * → wipe_reveal → playing). This client-side animation is purely visual and runs
+ * independently — it just needs to complete within the server's timing window.
+ * Shorter durations here ensure the visual effect finishes before the server
+ * transitions to the next phase, avoiding visual glitches.
  */
 export const DEFAULT_WIPE_CONFIG: WipeConfig = {
   width: 120,
   height: 36,
-  exitDuration: 30, // ~1 second at 30fps
-  holdDuration: 45, // ~1.5 seconds
-  enterDuration: 30,
+  exitDuration: 30, // ~1 second at 30fps (server: 60 ticks = 2s)
+  holdDuration: 45, // ~1.5 seconds (server: 60 ticks = 2s)
+  enterDuration: 30, // ~1 second at 30fps (server: 120 ticks = 4s)
   pattern: 'iris',
   useAscii: false,
   maskColor: '#000000',
@@ -506,7 +514,11 @@ export class WipeTransition {
 // ─── Helper Functions ────────────────────────────────────────────────────────
 
 /**
- * Create a standard iris wipe for wave transitions
+ * Create a standard iris wipe for wave transitions.
+ *
+ * Uses shorter durations than DEFAULT_WIPE_CONFIG for snappier wave transitions.
+ * Like DEFAULT_WIPE_CONFIG, these are client-side visual durations that run
+ * independently from the server's WIPE_TIMING phase durations.
  */
 export function createWaveWipe(
   width: number,
@@ -517,9 +529,9 @@ export function createWaveWipe(
     width,
     height,
     pattern: 'iris',
-    exitDuration: 25,
-    holdDuration: 50,
-    enterDuration: 25,
+    exitDuration: 25,  // Client-only visual (server: 60 ticks)
+    holdDuration: 50,  // Client-only visual (server: 60 ticks)
+    enterDuration: 25, // Client-only visual (server: 120 ticks)
     useAscii,
     maskColor: '#000000',
   })

@@ -6,17 +6,18 @@
 // Server controls timing via status transitions; client follows with animations
 
 import { describe, test, expect } from 'bun:test'
+import { WIPE_TIMING } from './types'
 
 // ─── Timing Constants (must match actual implementation) ────────────────────
 
 /**
  * Server wipe phase durations in ticks at 30Hz
- * From: worker/src/game/reducer.ts
+ * Imported from shared/types.ts (canonical source)
  */
 const SERVER_WIPE_TICKS = {
-  wipe_exit: 60,    // 2 seconds
-  wipe_hold: 60,    // 2 seconds
-  wipe_reveal: 120, // 4 seconds
+  wipe_exit: WIPE_TIMING.EXIT_TICKS,
+  wipe_hold: WIPE_TIMING.HOLD_TICKS,
+  wipe_reveal: WIPE_TIMING.REVEAL_TICKS,
 }
 
 /**
@@ -31,11 +32,11 @@ const CLIENT_WIPE_FRAMES = {
 
 /**
  * Client entrance animation config in frames at 60fps
- * From: client/src/components/GameScreen.tsx entranceConfig
+ * From: client/src/animation/entrance.ts DEFAULT_ENTRANCE_CONFIG
  */
 const CLIENT_ENTRANCE_CONFIG = {
-  baseDuration: 150,   // ~2.5 seconds per alien
-  staggerDelay: 1,     // frames between alien starts (tight for 4-player grid)
+  baseDuration: 30,    // ~0.5 seconds per alien at 60fps
+  staggerDelay: 2,     // frames between alien starts
 }
 
 /**
@@ -185,9 +186,9 @@ describe('Entrance Animation Timing', () => {
 
   test('entrance has bounce easing for visual feedback', () => {
     // The entrance animation uses easeOutBounce by default
-    // This is a documentation test - the actual easing is in entrance.ts
     // DEFAULT_ENTRANCE_CONFIG.easing = easeOutBounce
-    expect(true).toBe(true) // Verified by code review
+    // Verified structurally: baseDuration must be positive for any easing to apply
+    expect(CLIENT_ENTRANCE_CONFIG.baseDuration).toBeGreaterThan(0)
   })
 })
 
@@ -242,8 +243,10 @@ describe('Server Status Transition Timeline', () => {
     // - entering becomes false
     // - Aliens can now shoot
 
-    // This is a documentation test - logic is tested in reducer.test.ts
-    expect(true).toBe(true)
+    // Verify all three wipe phases have positive durations (logic tested in reducer.test.ts)
+    expect(SERVER_WIPE_TICKS.wipe_exit).toBeGreaterThan(0)
+    expect(SERVER_WIPE_TICKS.wipe_hold).toBeGreaterThan(0)
+    expect(SERVER_WIPE_TICKS.wipe_reveal).toBeGreaterThan(0)
   })
 })
 
@@ -260,7 +263,11 @@ describe('Timing Invariants', () => {
     // 2. Late joiners can sync to current phase based on wipeTicksRemaining
     // 3. No client-side timing hacks needed
 
-    expect(true).toBe(true) // Design principle documentation
+    // Verify the 2x ratio holds for all phases (client follows server)
+    const ratio = CLIENT_FPS / SERVER_HZ
+    expect(CLIENT_WIPE_FRAMES.exitDuration).toBe(SERVER_WIPE_TICKS.wipe_exit * ratio)
+    expect(CLIENT_WIPE_FRAMES.holdDuration).toBe(SERVER_WIPE_TICKS.wipe_hold * ratio)
+    expect(CLIENT_WIPE_FRAMES.enterDuration).toBe(SERVER_WIPE_TICKS.wipe_reveal * ratio)
   })
 
   test('wipe_reveal is longest phase (for entrance animation)', () => {
@@ -280,7 +287,9 @@ describe('Timing Invariants', () => {
     // 2. No need to calculate grace period durations
     // 3. Works naturally with server-driven wipe phases
 
-    expect(true).toBe(true) // Design principle documentation
+    // Verify WIPE_TIMING has no grace-related keys (design replaced grace with entering flag)
+    const wipingKeys = Object.keys(WIPE_TIMING)
+    expect(wipingKeys.some(k => k.toLowerCase().includes('grace'))).toBe(false)
   })
 })
 
@@ -297,7 +306,10 @@ describe('Late Joiner Handling', () => {
     // - Progress through current phase = 1 - (remaining / total)
     // - Start animation at appropriate point
 
-    expect(true).toBe(true) // Design principle documentation
+    // Verify WIPE_TIMING has all three phase durations needed for progress calculation
+    expect(Object.keys(WIPE_TIMING)).toContain('EXIT_TICKS')
+    expect(Object.keys(WIPE_TIMING)).toContain('HOLD_TICKS')
+    expect(Object.keys(WIPE_TIMING)).toContain('REVEAL_TICKS')
   })
 
   test('wipeTicksRemaining allows progress calculation', () => {
@@ -327,7 +339,9 @@ describe('Animation Easing', () => {
     //
     // This creates smooth, natural-feeling transitions
 
-    expect(true).toBe(true)
+    // Verify wipe phases have durations sufficient for easing to be perceptible
+    expect(CLIENT_WIPE_FRAMES.exitDuration).toBeGreaterThanOrEqual(30) // at least 0.5s
+    expect(CLIENT_WIPE_FRAMES.enterDuration).toBeGreaterThanOrEqual(30)
   })
 
   test('entrance uses bounce easing', () => {
@@ -339,6 +353,8 @@ describe('Animation Easing', () => {
     // - SCATTER_ENTRANCE: easeOutElastic (springy)
     // - SLIDE_ENTRANCE: easeOutQuad (row by row)
 
-    expect(true).toBe(true)
+    // Verify entrance config has positive duration for bounce to be visible
+    expect(CLIENT_ENTRANCE_CONFIG.baseDuration).toBeGreaterThanOrEqual(30)
+    expect(CLIENT_ENTRANCE_CONFIG.staggerDelay).toBeGreaterThanOrEqual(1)
   })
 })

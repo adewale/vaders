@@ -61,9 +61,7 @@ export type ErrorCode =
   | 'room_full'              // 4 players already in room
   | 'game_in_progress'       // Can't join mid-game
   | 'invalid_room'           // Room code doesn't exist
-  | 'invalid_action'         // Action not allowed in current state
   | 'invalid_message'        // Malformed WebSocket message
-  | 'name_taken'             // Player name already in use in room
-  | 'not_in_room'            // Action requires being in room first
+  | 'already_joined'         // Player already has a session in this room
   | 'rate_limited'           // Too many requests
   | 'countdown_in_progress'  // Can't join during countdown

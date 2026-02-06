@@ -8,6 +8,7 @@
   "exports": {
     ".": "./types.ts",
     "./types": "./types.ts",
-    "./protocol": "./protocol.ts"
+    "./protocol": "./protocol.ts",
+    "./state-defaults": "./state-defaults.ts"
   }
 }

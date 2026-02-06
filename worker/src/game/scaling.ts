@@ -76,7 +76,7 @@ export function tickMovementOnly(state: GameState, config: GameConfig): GameStat
     // Check for wall collision and reverse
     const hitWall = aliens.some(a => a.x <= LAYOUT.ALIEN_MIN_X || a.x >= LAYOUT.ALIEN_MAX_X)
     if (hitWall) {
-      next.alienDirection *= -1
+      next.alienDirection = (next.alienDirection * -1) as 1 | -1
       for (const alien of aliens) {
         alien.y += 1
       }

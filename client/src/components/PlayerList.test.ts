@@ -15,7 +15,7 @@ function createMockPlayer(overrides: Partial<Player> = {}): Player {
     id: 'player-1',
     name: 'TestPlayer',
     slot: 1 as PlayerSlot,
-    color: 'green' as const,
+    color: 'cyan' as const,
     x: 60,
     lives: 3,
     alive: true,

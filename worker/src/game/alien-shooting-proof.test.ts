@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'vitest'
 import { gameReducer } from './reducer'
 import { createDefaultGameState } from '../../../shared/state-defaults'
-import { getAliens, getBullets, createAlienFormation } from '../../../shared/types'
+import { DEFAULT_CONFIG, getAliens, getBullets, createAlienFormation } from '../../../shared/types'
 import { getScaledConfig } from './scaling'
 
 describe('PROOF: Alien shooting works end-to-end', () => {
@@ -10,7 +10,6 @@ describe('PROOF: Alien shooting works end-to-end', () => {
     let state = createDefaultGameState('test-room')
 
     // Verify alienShootingDisabled is false
-    console.log('1. Initial alienShootingDisabled:', state.alienShootingDisabled)
     expect(state.alienShootingDisabled).toBe(false)
 
     // 2. Add a player
@@ -24,7 +23,7 @@ describe('PROOF: Alien shooting works end-to-end', () => {
         lives: 3,
         kills: 0,
         alive: true,
-        color: 'green',
+        color: 'cyan',
         lastShotTick: 0,
         inputState: { left: false, right: false },
         respawnAtTick: null
@@ -35,7 +34,6 @@ describe('PROOF: Alien shooting works end-to-end', () => {
     // 3. Start solo game
     const { state: s2 } = gameReducer(state, { type: 'START_SOLO' })
     state = s2
-    console.log('2. After START_SOLO - status:', state.status, 'wipeTicksRemaining:', state.wipeTicksRemaining)
     expect(state.status).toBe('wipe_hold')
     expect(state.wipeTicksRemaining).toBe(60)
 
@@ -46,7 +44,6 @@ describe('PROOF: Alien shooting works end-to-end', () => {
       state = next
       tickCount++
     }
-    console.log('3. After', tickCount, 'ticks - status:', state.status, 'wipeTicksRemaining:', state.wipeTicksRemaining)
     expect(state.status).toBe('wipe_reveal')
 
     // 5. SIMULATE GameRoom: Create aliens when entering wipe_reveal
@@ -60,7 +57,6 @@ describe('PROOF: Alien shooting works end-to-end', () => {
     }
     state.entities.push(...aliens)
 
-    console.log('4. Created', aliens.length, 'aliens with entering=true')
     expect(getAliens(state.entities).length).toBeGreaterThan(0)
     expect(getAliens(state.entities).every(a => a.entering)).toBe(true)
 
@@ -71,12 +67,10 @@ describe('PROOF: Alien shooting works end-to-end', () => {
       state = next
       tickCount++
     }
-    console.log('5. After', tickCount, 'ticks - status:', state.status)
     expect(state.status).toBe('playing')
 
     // 7. Verify aliens now have entering=false
     const aliensAfterReveal = getAliens(state.entities)
-    console.log('6. Aliens entering flags:', aliensAfterReveal.map(a => a.entering))
     expect(aliensAfterReveal.every(a => a.entering === false)).toBe(true)
 
     // 8. Run many ticks and count alien bullets
@@ -98,30 +92,13 @@ describe('PROOF: Alien shooting works end-to-end', () => {
       state = next
     }
 
-    console.log('7. Alien bullets fired in 500 ticks:', alienBulletCount)
-    console.log('8. alienShootingDisabled:', state.alienShootingDisabled)
-    console.log('9. Live aliens:', getAliens(state.entities).filter(a => a.alive).length)
-    console.log('10. Any aliens entering?:', getAliens(state.entities).some(a => a.entering))
-
     // PROOF: Aliens must have fired at least some bullets
     expect(alienBulletCount).toBeGreaterThan(0)
   })
 
   test('Alien shoot probability is non-zero', () => {
-    const scaled = getScaledConfig(1, {
-      width: 120,
-      height: 36,
-      maxPlayers: 4,
-      tickIntervalMs: 33,
-      baseAlienMoveIntervalTicks: 18,
-      baseBulletSpeed: 1,
-      baseAlienShootRate: 0.016,
-      playerCooldownTicks: 6,
-      playerMoveSpeed: 2,
-      respawnDelayTicks: 90,
-    })
+    const scaled = getScaledConfig(1, DEFAULT_CONFIG)
 
-    console.log('alienShootProbability:', scaled.alienShootProbability)
     expect(scaled.alienShootProbability).toBeGreaterThan(0)
     expect(scaled.alienShootProbability).toBeLessThan(1)
   })

@@ -3,11 +3,9 @@
 
 export { GameRoom } from './GameRoom'
 export { Matchmaker } from './Matchmaker'
+export type { Env } from './env'
 
-export interface Env {
-  GAME_ROOM: DurableObjectNamespace
-  MATCHMAKER: DurableObjectNamespace
-}
+import type { Env } from './env'
 
 const ROOM_CODE_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 const ROOM_CODE_LENGTH = 6

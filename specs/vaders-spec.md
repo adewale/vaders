@@ -54,7 +54,7 @@ Put units in names: `respawnDelayTicks`, `tickIntervalMs`.
 
 ### 6. State Machines for Lifecycle Transitions
 
-Guard `waiting → countdown → playing → game_over` with explicit state machine:
+Guard `waiting → countdown → wipe_hold → wipe_reveal → playing → game_over` with explicit state machine:
 - Inputs that don't apply in a state are ignored or rejected
 - Countdown cancellation, join blocking, and game start are impossible to race
 - See `canTransition()` function in reducer
@@ -133,8 +133,8 @@ vaders --room ABC123 --name "Alice"
 
 | Key | Action |
 |-----|--------|
-| `←` / `A` | Move left |
-| `→` / `D` | Move right |
+| `←` | Move left |
+| `→` | Move right |
 | `SPACE` | Shoot |
 | `ENTER` | Ready up (lobby) — *OpenTUI reports as 'return'* |
 | `S` | Start solo (when alone in lobby) |
@@ -177,7 +177,7 @@ On startup, players see a full-screen launch experience with logo, mode selectio
 │  │  [E] ENHANCED MODE   OFF    Galaga/Galaxian enemies + Amiga visuals    │ │
 │  └─────────────────────────────────────────────────────────────────────────┘ │
 │                                                                              │
-│     CONTROLS   ←/→ or A/D Move   SPACE Shoot   M Mute   Q Quit             │
+│     CONTROLS   ←/→ Move   SPACE Shoot   M Mute   Q Quit                    │
 │                                                                              │
 │                         Press 1-4 to select mode                            │
 │                                                                              │
@@ -328,7 +328,7 @@ export function LaunchScreen({ onStartSolo, onCreateRoom, onJoinRoom, onMatchmak
 
       <box height={1} />
       <text fg="#888">
-        {'   '}CONTROLS{'   '}←/→ or A/D Move   SPACE Shoot   M Mute   Q Quit
+        {'   '}CONTROLS{'   '}←/→ Move   SPACE Shoot   M Mute   Q Quit
       </text>
       <box flex={1} />
       <box>
@@ -869,7 +869,7 @@ API changes from leaking into components.
 
 // Internal key event type (stable, not tied to OpenTUI)
 type VadersKey =
-  | { type: 'key'; key: 'left' | 'right' | 'up' | 'down' | 'space' | 'enter' | 'escape' | 'q' | 'm' }
+  | { type: 'key'; key: 'left' | 'right' | 'up' | 'down' | 'space' | 'enter' | 'escape' | 'q' | 'm' | 'n' | 's' | 'r' | 'x' }
   | { type: 'char'; char: string }  // For text input (room codes, names)
 
 // Normalize OpenTUI KeyEvent → VadersKey
@@ -877,6 +877,8 @@ function normalizeKey(event: OpenTUIKeyEvent): VadersKey | null {
   // Map OpenTUI key names to our internal names
   if (event.name === 'left' || event.sequence === '\x1b[D') return { type: 'key', key: 'left' }
   if (event.name === 'right' || event.sequence === '\x1b[C') return { type: 'key', key: 'right' }
+  if (event.name === 'up' || event.sequence === '\x1b[A') return { type: 'key', key: 'up' }
+  if (event.name === 'down' || event.sequence === '\x1b[B') return { type: 'key', key: 'down' }
   if (event.name === 'space' || event.sequence === ' ') return { type: 'key', key: 'space' }
   if (event.name === 'return') return { type: 'key', key: 'enter' }
   if (event.name === 'escape') return { type: 'key', key: 'escape' }
@@ -884,8 +886,10 @@ function normalizeKey(event: OpenTUIKeyEvent): VadersKey | null {
     const char = event.sequence.toLowerCase()
     if (char === 'q') return { type: 'key', key: 'q' }
     if (char === 'm') return { type: 'key', key: 'm' }
-    if (char === 'a') return { type: 'key', key: 'left' }
-    if (char === 'd') return { type: 'key', key: 'right' }
+    if (char === 'n') return { type: 'key', key: 'n' }
+    if (char === 's') return { type: 'key', key: 's' }
+    if (char === 'r') return { type: 'key', key: 'r' }
+    if (char === 'x') return { type: 'key', key: 'x' }
     return { type: 'char', char }
   }
   return null  // Ignore unrecognized keys
@@ -1064,9 +1068,9 @@ The game engine uses a **Functional Core, Imperative Shell** architecture with a
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  GameRoom (Durable Object)                                                   │
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐             │
-│  │ WebSocket I/O   │  │  Timer/Interval │  │  Storage I/O    │             │
-│  │ • onMessage()   │  │  • setInterval  │  │  • storage.get  │             │
-│  │ • broadcast()   │  │  • setAlarm     │  │  • storage.put  │             │
+│  │ WebSocket I/O   │  │  Timer/Alarm    │  │  Storage I/O    │             │
+│  │ • onMessage()   │  │  • setAlarm     │  │  • storage.sql  │             │
+│  │ • broadcast()   │  │  • alarm()      │  │  • storage.put  │             │
 │  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘             │
 │           │                    │                    │                       │
 │           └────────────────────┼────────────────────┘                       │
@@ -1110,10 +1114,11 @@ type GameAction =
   | { type: 'PLAYER_JOIN'; player: Player }
   | { type: 'PLAYER_LEAVE'; playerId: string }
   | { type: 'PLAYER_INPUT'; playerId: string; input: InputState }
+  | { type: 'PLAYER_MOVE'; playerId: string; direction: 'left' | 'right' }  // Discrete movement (one step)
   | { type: 'PLAYER_SHOOT'; playerId: string }
   | { type: 'PLAYER_READY'; playerId: string }
   | { type: 'PLAYER_UNREADY'; playerId: string }
-  | { type: 'START_SOLO'; enhancedMode: boolean }
+  | { type: 'START_SOLO' }
   | { type: 'START_COUNTDOWN' }
   | { type: 'COUNTDOWN_TICK' }
   | { type: 'COUNTDOWN_CANCEL'; reason: string }
@@ -1135,11 +1140,17 @@ export function gameReducer(state: GameState, action: GameAction): ReducerResult
 
   switch (action.type) {
     case 'TICK':
+      // Handle wipe phase ticks separately
+      if (state.status === 'wipe_exit' || state.status === 'wipe_hold' || state.status === 'wipe_reveal') {
+        return wipeTickReducer(state)
+      }
       return tickReducer(state)  // Fixed cadence, no deltaTime
     case 'PLAYER_JOIN':
       return playerJoinReducer(state, action.player)
     case 'PLAYER_INPUT':
       return inputReducer(state, action.playerId, action.input)
+    case 'PLAYER_MOVE':
+      return moveReducer(state, action.playerId, action.direction)
     // ... other actions
     default:
       return { state, events: [], persist: false }
@@ -1156,9 +1167,8 @@ function tickReducer(state: GameState): ReducerResult {
   // 3. Check collisions → emit alien_killed, player_died events
   // 4. Move aliens (at scaled interval) - side-to-side, drop at edges
   // 5. Alien shooting (seeded RNG) - bottom row aliens only
-  // 6. Player respawns (co-op: after respawnDelayTicks)
-  // 7. Enhanced mode systems (commanders, dive bombers, UFOs)
-  // 8. Check end conditions → wave_complete or game_over events
+  // 6. UFO spawning and movement
+  // 7. Check end conditions → wave_complete or game_over events
 
   // Returns: { state, events, persist }
 }
@@ -1169,9 +1179,9 @@ function tickReducer(state: GameState): ReducerResult {
 Status transitions are guarded by an explicit state machine. This prevents race conditions when players join/leave during transitions.
 
 ```typescript
-// worker/src/game/stateMachine.ts
+// worker/src/game/reducer.ts
 
-type GameStatus = 'waiting' | 'countdown' | 'playing' | 'game_over'
+type GameStatus = 'waiting' | 'countdown' | 'wipe_exit' | 'wipe_hold' | 'wipe_reveal' | 'playing' | 'game_over'
 
 // Define valid transitions
 const TRANSITIONS: Record<GameStatus, Partial<Record<GameAction['type'], GameStatus>>> = {
@@ -1180,7 +1190,7 @@ const TRANSITIONS: Record<GameStatus, Partial<Record<GameAction['type'], GameSta
     PLAYER_READY: 'waiting',       // Stay waiting, but check if all ready
     PLAYER_UNREADY: 'waiting',
     PLAYER_INPUT: 'waiting',       // Accept input anytime, store in inputState
-    START_SOLO: 'playing',
+    START_SOLO: 'wipe_hold',       // Skip exit, go straight to hold for game start
     START_COUNTDOWN: 'countdown',
     PLAYER_LEAVE: 'waiting',
   },
@@ -1189,10 +1199,27 @@ const TRANSITIONS: Record<GameStatus, Partial<Record<GameAction['type'], GameSta
     COUNTDOWN_CANCEL: 'waiting',
     PLAYER_LEAVE: 'waiting',       // Cancel countdown if player leaves
     PLAYER_INPUT: 'countdown',     // Accept input anytime, store in inputState
+    PLAYER_MOVE: 'countdown',      // Discrete movement accepted during countdown
+  },
+  wipe_exit: {
+    TICK: 'wipe_exit',
+    PLAYER_INPUT: 'wipe_exit',
+    PLAYER_LEAVE: 'wipe_exit',
+  },
+  wipe_hold: {
+    TICK: 'wipe_hold',
+    PLAYER_INPUT: 'wipe_hold',
+    PLAYER_LEAVE: 'wipe_hold',
+  },
+  wipe_reveal: {
+    TICK: 'wipe_reveal',
+    PLAYER_INPUT: 'wipe_reveal',
+    PLAYER_LEAVE: 'wipe_reveal',
   },
   playing: {
     TICK: 'playing',
     PLAYER_INPUT: 'playing',
+    PLAYER_MOVE: 'playing',        // Discrete movement (one step per message)
     PLAYER_SHOOT: 'playing',
     PLAYER_LEAVE: 'playing',       // Continue playing (or end if last player)
     // Transitions to game_over handled by tick reducer
@@ -1229,30 +1256,23 @@ Messages are queued when they arrive and processed at the start of each tick. Th
 
 ```typescript
 // worker/src/GameRoom.ts (Imperative Shell)
+// Uses Hibernatable WebSockets API and WebSocket attachments (not sessions Map)
 
-export class GameRoom implements DurableObject {
-  private state: DurableObjectState
-  private env: Env
+export class GameRoom extends DurableObject<Env> {
   private game: GameState | null = null
   private inputQueue: GameAction[] = []  // Queue for deterministic processing
-  private sessions: Map<WebSocket, string> = new Map()
 
-  // Messages are queued, not processed immediately
-  private handleMessage(ws: WebSocket, msg: ClientMessage) {
-    const playerId = this.sessions.get(ws)
-    if (!playerId) return
-
-    // Convert client message to game action and queue it
-    const action = this.messageToAction(msg, playerId)
-    if (action) {
-      this.inputQueue.push(action)
-    }
-  }
+  // Messages are queued in webSocketMessage(), not processed immediately
+  // Player ID is stored in WebSocket attachment (survives hibernation):
+  //   ws.serializeAttachment({ playerId })
+  //   const { playerId } = ws.deserializeAttachment()
 
   private messageToAction(msg: ClientMessage, playerId: string): GameAction | null {
     switch (msg.type) {
       case 'input':
         return { type: 'PLAYER_INPUT', playerId, input: msg.held }
+      case 'move':
+        return { type: 'PLAYER_MOVE', playerId, direction: msg.direction }
       case 'shoot':
         return { type: 'PLAYER_SHOOT', playerId }
       case 'ready':
@@ -1260,7 +1280,7 @@ export class GameRoom implements DurableObject {
       case 'unready':
         return { type: 'PLAYER_UNREADY', playerId }
       case 'start_solo':
-        return { type: 'START_SOLO', enhancedMode: msg.enhancedMode ?? false }
+        return { type: 'START_SOLO' }
       default:
         return null
     }
@@ -1275,7 +1295,7 @@ export class GameRoom implements DurableObject {
       const result = gameReducer(this.game, action)
       this.game = result.state
       this.broadcastEvents(result.events)
-      if (result.persist) void this.persistState()
+      if (result.persist) this.persistState()
     }
     this.inputQueue = []
 
@@ -1283,7 +1303,7 @@ export class GameRoom implements DurableObject {
     const result = gameReducer(this.game, { type: 'TICK' })
     this.game = result.state
     this.broadcastEvents(result.events)
-    if (result.persist) void this.persistState()
+    if (result.persist) this.persistState()
 
     // 3. Broadcast full state
     this.broadcastFullState()
@@ -1538,7 +1558,7 @@ function generateRoomCode(): string {
 // Uses Record for JSON serialization (Map doesn't survive structured clone reliably)
 type RoomInfo = { playerCount: number; status: string; updatedAt: number }
 
-export class Matchmaker implements DurableObject {
+export class Matchmaker {
   // Record serializes properly via structured clone (Map doesn't)
   private rooms: Record<string, RoomInfo> = {}
   // Separate set for O(1) average open room lookup
@@ -1672,9 +1692,8 @@ interface GameEntity extends Position {
 interface GameState {
   roomId: string                    // 6-char base36 (0-9, A-Z)
   mode: 'solo' | 'coop'
-  status: 'waiting' | 'countdown' | 'playing' | 'game_over'
+  status: GameStatus
   tick: number
-  enhancedMode: boolean
   rngSeed: number                   // Seeded RNG state for determinism
 
   // Countdown state (only valid when status === 'countdown')
@@ -1686,13 +1705,17 @@ interface GameState {
   // All game entities in a single array with discriminated union
   entities: Entity[]
 
-  // Note: captured players tracked in CommanderEntity.capturedPlayerId (single source of truth)
-  // To find all captured players, filter entities for CommanderEntity with capturedPlayerId !== null
-
   wave: number
   lives: number                     // 3 solo, 5 co-op
   score: number
   alienDirection: 1 | -1
+
+  // Wipe state: server-controlled transition timing
+  wipeTicksRemaining: number | null  // Countdown for current wipe phase
+  wipeWaveNumber: number | null      // Wave number to display during wipe
+
+  // Debug flag: completely disable alien shooting
+  alienShootingDisabled: boolean
 
   config: GameConfig
 }
@@ -1705,54 +1728,27 @@ function seededRandom(state: GameState): number
 // Unified entity type for all game objects (discriminated union on 'kind')
 type Entity =
   | AlienEntity
-  | CommanderEntity
-  | DiveBomberEntity
   | BulletEntity
   | BarrierEntity
-  | TransformEntity
+  | UFOEntity
 
 interface AlienEntity {
   kind: 'alien'
   id: string
-  x: number
+  x: number  // LEFT EDGE of sprite (unlike Player which uses CENTER)
   y: number
   type: ClassicAlienType
   alive: boolean
   row: number
   col: number
   points: number
-}
-
-interface CommanderEntity {
-  kind: 'commander'
-  id: string
-  x: number
-  y: number
-  alive: boolean
-  health: 1 | 2
-  tractorBeamActive: boolean
-  tractorBeamCooldown: number
-  capturedPlayerId: string | null
-  escorts: string[]  // IDs of escorting aliens
-}
-
-interface DiveBomberEntity {
-  kind: 'dive_bomber'  // Matches type in DiveBomber interface
-  id: string
-  x: number
-  y: number
-  alive: boolean
-  diveState: 'formation' | 'diving' | 'returning'
-  divePathProgress: number
-  diveDirection: 1 | -1
-  row: number  // Formation position for returning
-  col: number
+  entering: boolean  // True during wipe_reveal phase, prevents shooting
 }
 
 interface BulletEntity {
   kind: 'bullet'
   id: string
-  x: number
+  x: number  // CENTER of bullet (spawns from center of player/alien)
   y: number
   ownerId: string | null  // null = alien bullet
   dy: -1 | 1              // -1 = up (player), 1 = down (alien)
@@ -1766,25 +1762,19 @@ interface BarrierEntity {
   segments: BarrierSegment[]
 }
 
-interface TransformEntity {
-  kind: 'transform'
+interface UFOEntity {
+  kind: 'ufo'
   id: string
-  x: number
-  y: number
-  type: TransformType
-  velocity: Position
-  lifetime: number
+  x: number  // LEFT EDGE of sprite (unlike Player which uses CENTER)
+  y: number  // Always 1 (top row)
+  direction: 1 | -1  // 1 = right, -1 = left
+  alive: boolean
+  points: number     // 50-300 (mystery score)
 }
 
 // Helper functions to filter entities by kind
 function getAliens(entities: Entity[]): AlienEntity[] {
   return entities.filter((e): e is AlienEntity => e.kind === 'alien')
-}
-function getCommanders(entities: Entity[]): CommanderEntity[] {
-  return entities.filter((e): e is CommanderEntity => e.kind === 'commander')
-}
-function getDiveBombers(entities: Entity[]): DiveBomberEntity[] {
-  return entities.filter((e): e is DiveBomberEntity => e.kind === 'dive_bomber')
 }
 function getBullets(entities: Entity[]): BulletEntity[] {
   return entities.filter((e): e is BulletEntity => e.kind === 'bullet')
@@ -1792,13 +1782,13 @@ function getBullets(entities: Entity[]): BulletEntity[] {
 function getBarriers(entities: Entity[]): BarrierEntity[] {
   return entities.filter((e): e is BarrierEntity => e.kind === 'barrier')
 }
-function getTransforms(entities: Entity[]): TransformEntity[] {
-  return entities.filter((e): e is TransformEntity => e.kind === 'transform')
+function getUFOs(entities: Entity[]): UFOEntity[] {
+  return entities.filter((e): e is UFOEntity => e.kind === 'ufo')
 }
 
 interface GameConfig {
-  width: number                        // Default: 80
-  height: number                       // Default: 24
+  width: number                        // Default: 120
+  height: number                       // Default: 36
   maxPlayers: number                   // Default: 4
   tickIntervalMs: number               // Default: 33 (~30Hz tick rate)
 
@@ -1837,17 +1827,6 @@ interface ScaledConfig {
   lives: number                     // Shared lives (3 solo, 5 coop)
 }
 
-/** Wave configuration for Enhanced mode progression */
-interface WaveConfig {
-  alienCols: number
-  alienRows: number
-  speedMult: number
-  hasCommanders: boolean
-  hasDiveBombers: boolean
-  hasTransforms: boolean
-  isChallenging: boolean            // Bonus wave with no shooting
-}
-
 /** Event names that can be emitted during gameplay (matches ServerEvent.name) */
 type GameEvent =
   | 'player_joined'
@@ -1863,6 +1842,7 @@ type GameEvent =
   | 'score_awarded'
   | 'wave_complete'
   | 'game_over'
+  | 'invasion'
   | 'ufo_spawn'
 
 // ─── Layout Constants ─────────────────────────────────────────────────────────
@@ -1903,12 +1883,13 @@ const PLAYER_COLORS: Record<PlayerSlot, PlayerColor> = {
 interface Player {
   id: string
   name: string
-  x: number                         // Horizontal position (y is always LAYOUT.PLAYER_Y)
+  x: number                         // Horizontal position CENTER of sprite (y is always LAYOUT.PLAYER_Y)
   slot: PlayerSlot
   color: PlayerColor
   lastShotTick: number              // Tick of last shot (for cooldown)
   alive: boolean
-  respawnAtTick: number | null      // Tick to respawn (co-op only)
+  lives: number                     // Individual lives (starts at 3)
+  respawnAtTick: number | null      // Tick to respawn after death
   kills: number
 
   // Input state (server-authoritative, updated from client input messages)
@@ -1946,10 +1927,6 @@ interface BarrierSegment {
                                     // Visual: █(4) → ▓(3) → ▒(2) → ░(1) → gone(0)
 }
 
-// ─── Transform Enemies (Enhanced Mode) ────────────────────────────────────────
-
-type TransformType = 'scorpion' | 'stingray' | 'mini_commander'
-
 // ─── Exports ─────────────────────────────────────────────────────────────────
 
 // Re-export protocol types for convenience (single import source)
@@ -1962,21 +1939,16 @@ export type {
   GameState,
   GameConfig,
   ScaledConfig,
-  WaveConfig,
   GameEvent,
   Entity,
   AlienEntity,
-  CommanderEntity,
-  DiveBomberEntity,
   BulletEntity,
   BarrierEntity,
-  TransformEntity,
+  UFOEntity,
   Player,
   PlayerSlot,
   PlayerColor,
   ClassicAlienType,
-  TransformType,
-  Barrier,
   BarrierSegment,
 }
 
@@ -1990,9 +1962,7 @@ export {
   getAliens,
   getBullets,
   getBarriers,
-  getCommanders,
-  getDiveBombers,
-  getTransforms,
+  getUFOs,
 }
 ```
 
@@ -2096,11 +2066,13 @@ export function tickMovementOnly(state: GameState, config: GameConfig): GameStat
 
 // Client → Server
 type ClientMessage =
-  | { type: 'join'; name: string; enhancedMode?: boolean }
+  | { type: 'join'; name: string }
   | { type: 'ready' }
   | { type: 'unready' }
-  | { type: 'start_solo'; enhancedMode?: boolean }
+  | { type: 'start_solo' }
+  | { type: 'forfeit' }                                // End game early (go to game_over)
   | { type: 'input'; held: InputState }               // Held-state networking (no seq needed)
+  | { type: 'move'; direction: 'left' | 'right' }     // Discrete movement (one step per message)
   | { type: 'shoot' }                                  // Discrete action (rate-limited server-side)
   | { type: 'ping' }
 
@@ -2125,6 +2097,7 @@ type ServerEvent =
   | { type: 'event'; name: 'score_awarded'; data: { playerId: string | null; points: number; source: 'alien' | 'ufo' | 'commander' | 'wave_bonus' } }
   | { type: 'event'; name: 'wave_complete'; data: { wave: number } }
   | { type: 'event'; name: 'game_over'; data: { result: 'victory' | 'defeat' } }
+  | { type: 'event'; name: 'invasion'; data?: undefined }
   | { type: 'event'; name: 'ufo_spawn'; data: { x: number } }
 
 type ServerMessage =
@@ -2148,6 +2121,7 @@ type ErrorCode =
   | 'name_taken'             // Player name already in use in room
   | 'not_in_room'            // Action requires being in room first
   | 'rate_limited'           // Too many requests
+  | 'countdown_in_progress'  // Can't join during countdown
 
 export type { ClientMessage, ServerMessage, ServerEvent, InputState, ErrorCode }
 ```
@@ -2186,25 +2160,41 @@ ws.onmessage = (event) => {
 ```typescript
 // worker/src/GameRoom.ts
 
-export class GameRoom implements DurableObject {
-  private state: DurableObjectState
-  private env: Env
-  private sessions = new Map<WebSocket, string>()
+import { DurableObject } from 'cloudflare:workers'
+
+// WebSocket attachment for player session data
+interface WebSocketAttachment {
+  playerId: string
+}
+
+export class GameRoom extends DurableObject<Env> {
   private game: GameState | null = null
-  private interval: ReturnType<typeof setInterval> | null = null
-  private countdownInterval: ReturnType<typeof setInterval> | null = null
   private nextEntityId = 1  // Monotonic counter for entity IDs
   private inputQueue: GameAction[] = []  // Queued actions processed on tick
+  private countdownRemaining: number | null = null
 
-  constructor(state: DurableObjectState, env: Env) {
-    this.state = state
-    this.env = env
-    // Restore game state and entity ID counter from storage on construction
-    this.state.blockConcurrencyWhile(async () => {
-      const stored = await this.state.storage.get<{ game: GameState; nextEntityId: number }>('state')
-      if (stored) {
-        this.game = stored.game
-        this.nextEntityId = stored.nextEntityId
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env)
+
+    // Load state from SQLite on wake (hibernation-aware)
+    ctx.blockConcurrencyWhile(async () => {
+      // Initialize SQLite schema if needed
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS game_state (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          data TEXT NOT NULL,
+          next_entity_id INTEGER NOT NULL DEFAULT 1
+        )
+      `)
+
+      // Load existing state if any
+      const rows = this.ctx.storage.sql.exec<{ data: string; next_entity_id: number }>(
+        'SELECT data, next_entity_id FROM game_state WHERE id = 1'
+      ).toArray()
+
+      if (rows.length > 0) {
+        this.game = JSON.parse(rows[0].data)
+        this.nextEntityId = rows[0].next_entity_id
       }
     })
   }
@@ -2214,32 +2204,17 @@ export class GameRoom implements DurableObject {
   }
 
   // Persist on key state transitions (not every tick)
-  // Called on: init, join, leave, ready, countdown start/cancel, game start/end, wave complete
-  private async persistState() {
-    await this.state.storage.put('state', {
-      game: this.game,
-      nextEntityId: this.nextEntityId,
-    })
+  private persistState() {
+    if (!this.game) return
+    this.ctx.storage.sql.exec(
+      `INSERT OR REPLACE INTO game_state (id, data, next_entity_id) VALUES (1, ?, ?)`,
+      JSON.stringify(this.game),
+      this.nextEntityId
+    )
   }
 
   private createInitialState(roomCode: string): GameState {
-    return {
-      roomId: roomCode,  // Passed from Worker router, not generated here
-      mode: 'solo',
-      status: 'waiting',
-      tick: 0,
-      rngSeed: Date.now(),  // Seed for deterministic random (advances each use)
-      countdownRemaining: null,
-      players: {},
-      readyPlayerIds: [],
-      entities: [],  // All game entities (aliens, bullets, barriers, etc.)
-      wave: 1,
-      lives: 3,
-      score: 0,
-      alienDirection: 1,
-      enhancedMode: false,
-      config: DEFAULT_CONFIG,
-    }
+    return createDefaultGameState(roomCode)
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -2278,8 +2253,13 @@ export class GameRoom implements DurableObject {
         })
       }
 
+      // Create WebSocket pair and accept with hibernation
       const pair = new WebSocketPair()
-      await this.handleSession(pair[1])
+
+      // Accept WebSocket with hibernation support (DO can sleep while connection stays open)
+      // Attachment stores player session data that survives hibernation
+      this.ctx.acceptWebSocket(pair[1])
+
       return new Response(null, { status: 101, webSocket: pair[0] })
     }
 
@@ -2298,74 +2278,59 @@ export class GameRoom implements DurableObject {
     return new Response('Not Found', { status: 404 })
   }
 
-  private async handleSession(ws: WebSocket) {
-    ws.accept()
-
-    ws.addEventListener('message', async (event) => {
-      const msg: ClientMessage = JSON.parse(event.data as string)
-      await this.handleMessage(ws, msg)
-    })
-
-    ws.addEventListener('close', async () => {
-      const playerId = this.sessions.get(ws)
-      if (playerId && this.game?.players[playerId]) {
-        this.sessions.delete(ws)
-
-        // Cancel countdown if a player disconnects during it
-        if (this.game.status === 'countdown') {
-          await this.cancelCountdown('Player disconnected')
-        }
-
-        // Remove player immediately (no grace period)
-        await this.removePlayer(playerId)
-        this.broadcastFullState()  // Full sync after lobby mutation
-      }
-    })
-  }
-
-  private async handleMessage(ws: WebSocket, msg: ClientMessage) {
+  /**
+   * Hibernatable WebSocket message handler
+   * Called when any connected WebSocket receives a message, waking the DO if hibernating
+   */
+  async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
     if (!this.game) return
-    const playerId = this.sessions.get(ws)
+
+    const msg = JSON.parse(message as string) as ClientMessage
+    const attachment = ws.deserializeAttachment() as WebSocketAttachment | null
+    const playerId = attachment?.playerId
 
     switch (msg.type) {
       case 'join': {
-        // Reject joins during countdown (lobby locked)
+        // Prevent duplicate joins
+        if (attachment?.playerId) return
+
         if (this.game.status === 'countdown') {
-          ws.send(JSON.stringify({ type: 'error', code: 'countdown_in_progress', message: 'Game starting, try again' }))
+          this.sendError(ws, 'countdown_in_progress', 'Game starting, try again')
           return
         }
         if (Object.keys(this.game.players).length >= 4) {
-          ws.send(JSON.stringify({ type: 'error', code: 'room_full', message: 'Room is full' }))
+          this.sendError(ws, 'room_full', 'Room is full')
           return
         }
 
-        // Set enhanced mode from first player's preference
-        if (Object.keys(this.game.players).length === 0 && msg.enhancedMode !== undefined) {
-          this.game.enhancedMode = msg.enhancedMode
-        }
-
+        const playerName = typeof msg.name === 'string' ? msg.name.slice(0, 12) : 'Player'
         const slot = this.getNextSlot()
+        const playerCount = Object.keys(this.game.players).length + 1
         const player: Player = {
           id: crypto.randomUUID(),
-          name: msg.name.slice(0, 12),
-          x: getPlayerSpawnX(slot, Object.keys(this.game.players).length + 1, 80),
+          name: playerName,
+          x: getPlayerSpawnX(slot, playerCount, this.game.config.width),
           slot,
           color: PLAYER_COLORS[slot],
           lastShotTick: 0,
           alive: true,
+          lives: 5,
           respawnAtTick: null,
           kills: 0,
           inputState: { left: false, right: false },
         }
 
         this.game.players[player.id] = player
-        this.sessions.set(ws, player.id)
         this.game.mode = Object.keys(this.game.players).length === 1 ? 'solo' : 'coop'
 
+        // Store playerId in WebSocket attachment (survives hibernation)
+        ws.serializeAttachment({ playerId: player.id } satisfies WebSocketAttachment)
+
+        // Send initial sync with playerId and config (only on join)
         ws.send(JSON.stringify({ type: 'sync', state: this.game, playerId: player.id, config: this.game.config }))
         this.broadcast({ type: 'event', name: 'player_joined', data: { player } })
-        this.broadcastFullState()  // Full sync after lobby mutation
-        await this.persistState()
+        this.broadcastFullState()
+        this.persistState()
         await this.updateRoomRegistry()
         break
       }
@@ -2374,10 +2339,18 @@ export class GameRoom implements DurableObject {
         if (Object.keys(this.game.players).length === 1 && playerId) {
           this.game.mode = 'solo'
           this.game.lives = 3
-          if (msg.enhancedMode !== undefined) {
-            this.game.enhancedMode = msg.enhancedMode
-          }
           await this.startGame()
+        }
+        break
+      }
+
+      case 'forfeit': {
+        // End game early - only allowed during gameplay
+        const playableStatuses = ['playing', 'wipe_exit', 'wipe_hold', 'wipe_reveal']
+        if (playableStatuses.includes(this.game.status)) {
+          this.endGame('defeat')
+          this.broadcastFullState()
+          this.persistState()
         }
         break
       }
@@ -2386,9 +2359,9 @@ export class GameRoom implements DurableObject {
         if (playerId && this.game.players[playerId] && !this.game.readyPlayerIds.includes(playerId)) {
           this.game.readyPlayerIds.push(playerId)
           this.broadcast({ type: 'event', name: 'player_ready', data: { playerId } })
-          this.broadcastFullState()  // Full sync after lobby mutation
-          await this.persistState()
-          this.checkStartConditions()
+          this.broadcastFullState()
+          this.persistState()
+          await this.checkStartConditions()
         }
         break
       }
@@ -2398,28 +2371,33 @@ export class GameRoom implements DurableObject {
           const wasReady = this.game.readyPlayerIds.includes(playerId)
           this.game.readyPlayerIds = this.game.readyPlayerIds.filter(id => id !== playerId)
           this.broadcast({ type: 'event', name: 'player_unready', data: { playerId } })
-          this.broadcastFullState()  // Full sync after lobby mutation
+          this.broadcastFullState()
 
-          // Cancel countdown if someone unreadies during it
           if (wasReady && this.game.status === 'countdown') {
             await this.cancelCountdown('Player unreadied')
           } else {
-            await this.persistState()
+            this.persistState()
           }
         }
         break
       }
 
       case 'input': {
-        // Queue input action - accepted in any state, reducer applies movement only in 'playing'
         if (playerId && this.game.players[playerId]) {
           this.inputQueue.push({ type: 'PLAYER_INPUT', playerId, input: msg.held })
         }
         break
       }
 
+      case 'move': {
+        // Discrete movement - one step per message (for terminals without key release events)
+        if (playerId && this.game.players[playerId] && (this.game.status === 'playing' || this.game.status === 'countdown')) {
+          this.inputQueue.push({ type: 'PLAYER_MOVE', playerId, direction: msg.direction })
+        }
+        break
+      }
+
       case 'shoot': {
-        // Queue shoot action (processed on next tick via reducer)
         if (playerId && this.game.players[playerId] && this.game.status === 'playing') {
           this.inputQueue.push({ type: 'PLAYER_SHOOT', playerId })
         }
@@ -2430,6 +2408,22 @@ export class GameRoom implements DurableObject {
         ws.send(JSON.stringify({ type: 'pong', serverTime: Date.now() }))
         break
       }
+    }
+  }
+
+  /**
+   * Hibernatable WebSocket close handler
+   */
+  async webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean) {
+    const attachment = ws.deserializeAttachment() as WebSocketAttachment | null
+    const playerId = attachment?.playerId
+
+    if (playerId && this.game?.players[playerId]) {
+      if (this.game.status === 'countdown') {
+        await this.cancelCountdown('Player disconnected')
+      }
+      await this.removePlayer(playerId)
+      this.broadcastFullState()
     }
   }
 
@@ -2455,45 +2449,26 @@ export class GameRoom implements DurableObject {
     if (!this.game) return
     this.game.status = 'countdown'
     this.game.countdownRemaining = 3
+    this.countdownRemaining = 3
 
-    await this.persistState()
+    this.persistState()
     await this.updateRoomRegistry()
     this.broadcast({ type: 'event', name: 'countdown_tick', data: { count: 3 } })
-    this.broadcastFullState()  // Full sync after lobby mutation
+    this.broadcastFullState()
 
-    this.countdownInterval = setInterval(() => {
-      // Guard: interval can fire after cancellation due to timing
-      if (!this.game || this.game.status !== 'countdown' || !this.countdownInterval) return
-
-      this.game.countdownRemaining!--
-      if (this.game.countdownRemaining === 0) {
-        clearInterval(this.countdownInterval)
-        this.countdownInterval = null
-        void this.startGame().catch((err) => {
-          console.error(JSON.stringify({
-            event: 'startGame_failed',
-            roomId: this.game?.roomId,
-            error: err instanceof Error ? err.message : String(err),
-          }))
-        })
-      } else {
-        this.broadcast({ type: 'event', name: 'countdown_tick', data: { count: this.game.countdownRemaining } })
-        this.broadcastFullState()  // Full sync after each countdown tick
-      }
-    }, 1000)
+    // Use alarm for countdown ticks (hibernation-compatible, no setInterval)
+    await this.ctx.storage.setAlarm(Date.now() + 1000)
   }
 
   private async cancelCountdown(reason: string) {
     if (!this.game) return
-    if (this.countdownInterval) {
-      clearInterval(this.countdownInterval)
-      this.countdownInterval = null
-    }
+    this.countdownRemaining = null
     this.game.status = 'waiting'
     this.game.countdownRemaining = null
+    await this.ctx.storage.deleteAlarm()
     this.broadcast({ type: 'event', name: 'countdown_cancelled', data: { reason } })
-    this.broadcastFullState()  // Full sync after lobby mutation
-    await this.persistState()
+    this.broadcastFullState()
+    this.persistState()
   }
 
   private async updateRoomRegistry() {
@@ -2510,51 +2485,46 @@ export class GameRoom implements DurableObject {
     }))
   }
 
-  // Transactional status change: mutate → persist → registry → broadcast
-  private async setStatus(
-    newStatus: GameState['status'],
-    options?: { broadcast?: ServerMessage }
-  ): Promise<void> {
-    if (!this.game) return
-    this.game.status = newStatus
-    await this.persistState()
-    await this.updateRoomRegistry()
-    if (options?.broadcast) {
-      this.broadcast(options.broadcast)
-    }
-  }
-
   private async startGame() {
     if (!this.game) return
     const playerCount = Object.keys(this.game.players).length
     const scaled = getScaledConfig(playerCount, this.game.config)
 
-    this.game.status = 'playing'
+    // Start in wipe_hold phase (skip exit for game start)
+    this.game.status = 'wipe_hold'
     this.game.countdownRemaining = null
+    this.countdownRemaining = null
     this.game.lives = scaled.lives
     this.game.tick = 0
+    this.game.wipeTicksRemaining = WIPE_TIMING.HOLD_TICKS
+    this.game.wipeWaveNumber = 1
 
-    // Initialize entities: aliens + barriers (bullets added during gameplay)
+    // Initialize barriers only - aliens created at wipe_hold→wipe_reveal transition
     this.game.entities = [
-      ...this.createAlienFormation(scaled.alienCols, scaled.alienRows),
       ...this.createBarriers(playerCount),
     ]
 
-    this.broadcast({ type: 'event', name: 'game_start' })
+    this.broadcast({ type: 'event', name: 'game_start', data: undefined })
     this.broadcastFullState()
-    await this.persistState()
-    await this.updateRoomRegistry()  // Update matchmaker: status → playing
+    this.persistState()
+    await this.updateRoomRegistry()
 
-    // Game loop at 30Hz - full state broadcast every tick
-    this.interval = setInterval(() => this.tick(), this.game.config.tickIntervalMs)
+    // Use alarm for game tick (hibernation-compatible)
+    // Game runs at 30Hz (33ms per tick) during wipe phases too
+    await this.ctx.storage.setAlarm(Date.now() + this.game.config.tickIntervalMs)
   }
 
   private tick() {
-    if (!this.game || this.game.status !== 'playing') return
+    if (!this.game) return
+
+    const activeStatuses = ['playing', 'wipe_exit', 'wipe_hold', 'wipe_reveal']
+    if (!activeStatuses.includes(this.game.status)) return
+
+    const prevStatus = this.game.status
 
     // 1. Process queued input actions via reducer
     const queuedActions = this.inputQueue
-    this.inputQueue = []  // Clear queue
+    this.inputQueue = []
 
     for (const action of queuedActions) {
       const result = gameReducer(this.game, action)
@@ -2562,109 +2532,93 @@ export class GameRoom implements DurableObject {
       for (const event of result.events) {
         this.broadcast(event)
       }
-      if (result.persist) void this.persistState()
+      if (result.persist) this.persistState()
     }
 
-    // 2. Run TICK action via reducer (movement, collisions, AI, respawns, end conditions)
-    // All game logic is in the pure reducer - shell only handles I/O
+    // 2. Run TICK action via reducer
     const tickResult = gameReducer(this.game, { type: 'TICK' })
     this.game = tickResult.state
     for (const event of tickResult.events) {
       this.broadcast(event)
-      // Handle events that require shell I/O
-      if (event.name === 'wave_complete') {
+      if (event.type === 'event' && event.name === 'wave_complete') {
         this.nextWave()
       }
     }
-    if (tickResult.persist) void this.persistState()
+    if (tickResult.persist) this.persistState()
 
-    // 3. Handle game_over status (reducer sets status, shell handles I/O cleanup)
-    if (this.game.status === 'game_over') {
-      this.endGame(this.game.lives <= 0 ? 'defeat' : 'victory')
-      return  // Stop processing this tick
+    // 3. Handle wipe phase transitions - create aliens when entering wipe_reveal
+    if (prevStatus === 'wipe_hold' && this.game.status === 'wipe_reveal') {
+      const playerCount = Object.keys(this.game.players).length
+      const scaled = getScaledConfig(playerCount, this.game.config)
+      const aliens = this.createAlienFormationWithIds(scaled.alienCols, scaled.alienRows)
+      for (const alien of aliens) { alien.entering = true }
+      this.game.entities.push(...aliens)
     }
 
-    // 4. Heartbeat: update registry every ~60s to prevent staleness eviction
-    // At 30Hz, 1800 ticks ≈ 60 seconds
+    // 4. Handle game_over status
+    if (this.game.status === 'game_over') {
+      this.endGame(this.game.lives <= 0 ? 'defeat' : 'victory')
+      return
+    }
+
+    // 5. Heartbeat: update registry every ~60s (1800 ticks at 30Hz)
     if (this.game.tick % 1800 === 0) {
       void this.updateRoomRegistry()
     }
 
-    // Full state sync every tick (30Hz)
+    // Full state sync every tick
     this.broadcastFullState()
   }
 
   private broadcastFullState() {
     if (!this.game) return
-    // Broadcast full game state to all connected clients
-    for (const [ws, playerId] of this.sessions) {
-      try {
-        ws.send(JSON.stringify({ type: 'sync', state: this.game, playerId }))
-      } catch {
-        // WebSocket may be closed
-      }
+    const syncMessage = { type: 'sync', state: this.game }
+    const data = JSON.stringify(syncMessage)
+    // Use ctx.getWebSockets() for hibernatable WebSockets
+    for (const ws of this.ctx.getWebSockets()) {
+      try { ws.send(data) } catch {}
     }
   }
 
-  // Synchronous state mutation; called when reducer emits wave_complete event
-  // NOTE: Reducer emits wave_complete; shell mutates state but does NOT re-emit
   private nextWave() {
     if (!this.game) return
     this.game.wave++
-    const playerCount = Object.keys(this.game.players).length
-    const scaled = getScaledConfig(playerCount, this.game.config)
 
-    // Remove bullets, keep barriers, replace aliens with new formation
+    // Remove bullets, keep barriers, remove old aliens (new ones created during wipe_reveal)
     const barriers = getBarriers(this.game.entities)
-    this.game.entities = [
-      ...this.createAlienFormation(scaled.alienCols, scaled.alienRows),
-      ...barriers,
-    ]
+    this.game.entities = [...barriers]
     this.game.alienDirection = 1
 
-    // Fire-and-forget persistence (no await - nextWave must be synchronous)
-    void this.persistState()
+    // Start wave transition wipe (exit → hold → reveal)
+    this.game.status = 'wipe_exit'
+    this.game.wipeTicksRemaining = WIPE_TIMING.EXIT_TICKS
+    this.game.wipeWaveNumber = this.game.wave
+
+    this.persistState()
   }
 
-  // Synchronous state change + teardown; async persistence is fire-and-forget
   private endGame(result: 'victory' | 'defeat') {
     if (!this.game) return
     this.game.status = 'game_over'
-    if (this.interval) {
-      clearInterval(this.interval)
-      this.interval = null
-    }
+    // No need to clear interval - we use alarms which auto-stop
     this.broadcast({ type: 'event', name: 'game_over', data: { result } })
-    // Fire-and-forget persistence and registry update (no await - endGame must be synchronous)
-    void this.persistState()
-    void this.updateRoomRegistry()  // Update matchmaker: status → game_over
+    this.broadcastFullState()
+    this.persistState()
+    void this.updateRoomRegistry()
+
+    // Schedule cleanup alarm for 5 minutes
+    void this.ctx.storage.setAlarm(Date.now() + 5 * 60 * 1000)
   }
 
-  private createAlienFormation(cols: number, rows: number): AlienEntity[] {
+  private createAlienFormationWithIds(cols: number, rows: number): AlienEntity[] {
     if (!this.game) return []
-    const aliens: AlienEntity[] = []
-    // Grid width = (cols - 1) * spacing + spriteWidth (3 chars)
-    // Center: (screenWidth - gridWidth) / 2
-    const gridWidth = (cols - 1) * LAYOUT.ALIEN_COL_SPACING + 3
-    const startX = Math.floor((this.game.config.width - gridWidth) / 2)
-
-    for (let row = 0; row < rows; row++) {
-      const type = FORMATION_ROWS[row] || 'octopus'
-      for (let col = 0; col < cols; col++) {
-        aliens.push({
-          kind: 'alien',
-          id: this.generateEntityId(),  // String ID from monotonic counter
-          type,
-          row,
-          col,
-          x: startX + col * LAYOUT.ALIEN_COL_SPACING,
-          y: LAYOUT.ALIEN_START_Y + row * 2,
-          alive: true,
-          points: ALIEN_REGISTRY[type].points,
-        })
-      }
-    }
-    return aliens
+    // Use shared createAlienFormation with custom ID generator
+    return createAlienFormation(
+      cols,
+      rows,
+      this.game.config.width,
+      () => this.generateEntityId()
+    )
   }
 
   private createBarriers(playerCount: number, screenWidth?: number): BarrierEntity[] {
@@ -2710,35 +2664,71 @@ export class GameRoom implements DurableObject {
     const playerCount = Object.keys(this.game.players).length
 
     if (playerCount === 0) {
-      // All players left - end the game (no pause/resume support)
       if (this.game.status === 'playing') {
-        this.endGame('defeat')  // Synchronous - no await needed
+        this.endGame('defeat')
       }
-      // Set alarm for cleanup in 5 minutes
-      this.state.storage.setAlarm(Date.now() + 5 * 60 * 1000)
+      // Schedule cleanup
+      await this.ctx.storage.setAlarm(Date.now() + 5 * 60 * 1000)
     } else if (playerCount === 1 && this.game.status === 'waiting') {
       this.game.mode = 'solo'
     }
 
     this.broadcast({ type: 'event', name: 'player_left', data: { playerId } })
-    await this.persistState()  // Persist after removing player
+    this.persistState()
     await this.updateRoomRegistry()
   }
 
   private broadcast(msg: ServerMessage) {
     const data = JSON.stringify(msg)
-    for (const ws of this.sessions.keys()) {
+    for (const ws of this.ctx.getWebSockets()) {
       try { ws.send(data) } catch {}
     }
   }
 
-  private serializeState(): GameState {
-    return { ...this.game }  // readyPlayerIds is already JSON-serializable
+  private sendError(ws: WebSocket, code: string, message: string) {
+    ws.send(JSON.stringify({ type: 'error', code, message }))
   }
 
+  /**
+   * Alarm handler - runs game tick or countdown
+   * Using alarms instead of setInterval allows DO to hibernate between ticks
+   */
   async alarm() {
-    // Cleanup: This alarm fires 5 minutes after the last player leaves.
-    // Unregister from Matchmaker so /matchmake doesn't return dead rooms.
+    // Handle countdown
+    if (this.countdownRemaining !== null && this.countdownRemaining > 0) {
+      this.countdownRemaining--
+      if (this.game) this.game.countdownRemaining = this.countdownRemaining
+
+      if (this.countdownRemaining === 0) {
+        this.countdownRemaining = null
+        await this.startGame()
+      } else {
+        this.broadcast({ type: 'event', name: 'countdown_tick', data: { count: this.countdownRemaining } })
+        this.broadcastFullState()
+        await this.ctx.storage.setAlarm(Date.now() + 1000)
+      }
+      return
+    }
+
+    // Handle game tick (including wipe phases)
+    const activeStatuses = ['playing', 'wipe_exit', 'wipe_hold', 'wipe_reveal']
+    if (!this.game || !activeStatuses.includes(this.game.status)) {
+      // Room cleanup if empty
+      if (this.game && Object.keys(this.game.players).length === 0) {
+        await this.cleanup()
+      }
+      return
+    }
+
+    this.tick()
+
+    // Schedule next tick if still in an active status
+    if (this.game && activeStatuses.includes(this.game.status)) {
+      await this.ctx.storage.setAlarm(Date.now() + this.game.config.tickIntervalMs)
+    }
+  }
+
+  private async cleanup() {
     if (this.game) {
       const matchmaker = this.env.MATCHMAKER.get(this.env.MATCHMAKER.idFromName('global'))
       await matchmaker.fetch(new Request('https://internal/unregister', {
@@ -2746,11 +2736,8 @@ export class GameRoom implements DurableObject {
         body: JSON.stringify({ roomCode: this.game.roomId })
       }))
     }
-    // Clear alarms first per Durable Objects best practices
-    await this.state.storage.deleteAlarm()
-    // Clear stored state - DO instance will be evicted by runtime
-    await this.state.storage.deleteAll()
-    // Clear in-memory state to prevent stale references
+    await this.ctx.storage.deleteAlarm()
+    this.ctx.storage.sql.exec('DELETE FROM game_state')
     this.game = null
   }
 }
@@ -2888,7 +2875,7 @@ export function App({ roomUrl, playerName, enhanced }: AppProps) {
     const isRelease = event.eventType === 'release'
 
     // Movement keys update held state
-    if (event.name === 'left' || event.name === 'a') {
+    if (event.name === 'left') {
       if (isPress && !heldKeys.current.left) {
         heldKeys.current.left = true
         updateInput(heldKeys.current)
@@ -2899,7 +2886,7 @@ export function App({ roomUrl, playerName, enhanced }: AppProps) {
       return
     }
 
-    if (event.name === 'right' || event.name === 'd') {
+    if (event.name === 'right') {
       if (isPress && !heldKeys.current.right) {
         heldKeys.current.right = true
         updateInput(heldKeys.current)

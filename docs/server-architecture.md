@@ -139,17 +139,17 @@ Created (POST /room)
 ┌───────────┐                 ┌───────────┐
 │ wipe_hold │ ◄───────────────┤ wipe_hold │
 └─────┬─────┘                 └───────────┘
-      │ hold complete (30 ticks)
+      │ hold complete (60 ticks)
       ▼
 ┌──────────────┐
 │ wipe_reveal  │  aliens created with entering=true
 └──────┬───────┘
-       │ reveal complete (60 ticks)
+       │ reveal complete (120 ticks)
        ▼
 ┌─────────┐    wave complete    ┌───────────┐
 │ playing │ ──────────────────► │ wipe_exit │
 └─────────┘                     └─────┬─────┘
-    │                                 │ exit complete (30 ticks)
+    │                                 │ exit complete (60 ticks)
     │                                 ▼
     │                           ┌───────────┐
     │                           │ wipe_hold │ ─── (loops back to wipe_reveal)

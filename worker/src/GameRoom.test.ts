@@ -909,7 +909,7 @@ describe('Player Slot Assignment', () => {
 
   it('assigns correct colors based on slot', async () => {
     const { gameRoom, ctx } = await createInitializedGameRoom()
-    const expectedColors = ['green', 'cyan', 'yellow', 'magenta']
+    const expectedColors = ['cyan', 'orange', 'magenta', 'lime']
     const playerColors: string[] = []
 
     for (let i = 0; i < 4; i++) {

@@ -9,6 +9,8 @@ import type {
   ServerMessage,
   ClientMessage,
   PlayerSlot,
+  ErrorCode,
+  InputState,
 } from '../../shared/types'
 import {
   DEFAULT_CONFIG,
@@ -22,11 +24,9 @@ import {
 import { getScaledConfig, getPlayerSpawnX } from './game/scaling'
 import { gameReducer, type GameAction } from './game/reducer'
 import { createDefaultGameState, migrateGameState } from '../../shared/state-defaults'
+import type { Env } from './env'
 
-export interface Env {
-  GAME_ROOM: DurableObjectNamespace
-  MATCHMAKER: DurableObjectNamespace
-}
+export type { Env }
 
 // WebSocket attachment for player session data
 interface WebSocketAttachment {
@@ -61,6 +61,25 @@ function isValidClientMessage(msg: unknown): msg is { type: string; [key: string
  */
 function isValidRoomCode(code: unknown): code is string {
   return typeof code === 'string' && /^[A-Z0-9]{6}$/.test(code)
+}
+
+/**
+ * Validates that a value is a valid InputState: an object with boolean `left` and `right` properties.
+ */
+function isValidInputState(held: unknown): held is InputState {
+  return (
+    typeof held === 'object' &&
+    held !== null &&
+    typeof (held as Record<string, unknown>).left === 'boolean' &&
+    typeof (held as Record<string, unknown>).right === 'boolean'
+  )
+}
+
+/**
+ * Validates that a value is a valid move direction: exactly 'left' or 'right'.
+ */
+function isValidMoveDirection(direction: unknown): direction is 'left' | 'right' {
+  return direction === 'left' || direction === 'right'
 }
 
 /**
@@ -362,6 +381,7 @@ export class GameRoom extends DurableObject<Env> {
         }
 
         case 'input': {
+          if (!isValidInputState(msg.held)) break
           const inputAccepted = !!(playerId && this.game.players[playerId])
           if (!inputAccepted) {
             console.log('[INPUT] DROPPED', { playerId: playerId ?? 'NULL', reason: !playerId ? 'no playerId' : 'player not found' })
@@ -374,6 +394,7 @@ export class GameRoom extends DurableObject<Env> {
 
         case 'move': {
           // Discrete movement - one step per message (for terminals without key release events)
+          if (!isValidMoveDirection(msg.direction)) break
           const moveAccepted = !!(playerId && this.game.players[playerId] && (this.game.status === 'playing' || this.game.status === 'countdown'))
           if (!moveAccepted) {
             console.log('[MOVE] DROPPED', {
@@ -758,7 +779,7 @@ export class GameRoom extends DurableObject<Env> {
    * Send an error message to a specific WebSocket.
    * Centralizes error response formatting.
    */
-  private sendError(ws: WebSocket, code: string, message: string) {
+  private sendError(ws: WebSocket, code: ErrorCode, message: string) {
     ws.send(JSON.stringify({ type: 'error', code, message }))
   }
 

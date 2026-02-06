@@ -8,12 +8,12 @@
 // - Entity sprites render from their (x, y) position rightward/downward
 // Screen is 120×36 cells (columns × rows)
 
-export interface Position {
+interface Position {
   x: number  // Top-left x coordinate
   y: number  // Top-left y coordinate
 }
 
-export interface GameEntity extends Position {
+interface GameEntity extends Position {
   id: string  // Monotonic string ID: "e_1", "e_2", etc.
 }
 
@@ -60,13 +60,13 @@ export const HITBOX = {
 // ─── Player ───────────────────────────────────────────────────────────────────
 
 export type PlayerSlot = 1 | 2 | 3 | 4
-export type PlayerColor = 'green' | 'cyan' | 'yellow' | 'magenta'
+export type PlayerColor = 'cyan' | 'orange' | 'magenta' | 'lime'
 
 export const PLAYER_COLORS: Record<PlayerSlot, PlayerColor> = {
-  1: 'green',
-  2: 'cyan',
-  3: 'yellow',
-  4: 'magenta',
+  1: 'cyan',
+  2: 'orange',
+  3: 'magenta',
+  4: 'lime',
 }
 
 export interface Player {
@@ -77,7 +77,10 @@ export interface Player {
   color: PlayerColor
   lastShotTick: number              // Tick of last shot (for cooldown)
   alive: boolean
-  lives: number                     // Individual lives (starts at 3)
+  lives: number                     // CANONICAL per-player life counter: decremented on death in
+                                    // the reducer, controls respawn (player respawns if lives > 0).
+                                    // Game ends when ALL players have lives <= 0 and are dead.
+                                    // Default: 3. See also GameState.lives (display-only).
   respawnAtTick: number | null      // Tick to respawn after death
   kills: number
 
@@ -95,12 +98,12 @@ export type ClassicAlienType = 'squid' | 'crab' | 'octopus'
 // ─── Alien Registry ──────────────────────────────────────────────────────────
 
 export const ALIEN_REGISTRY = {
-  squid:   { points: 30, sprite: '╔═╗', color: 'magenta' },
-  crab:    { points: 20, sprite: '/°\\', color: 'cyan' },
+  squid:   { points: 30, sprite: '╔═╗', color: 'red' },
+  crab:    { points: 20, sprite: '/°\\', color: 'orange' },
   octopus: { points: 10, sprite: '{ö}', color: 'green' },
 } as const
 
-export const FORMATION_ROWS: ClassicAlienType[] = ['squid', 'crab', 'crab', 'octopus', 'octopus']
+const FORMATION_ROWS: ClassicAlienType[] = ['squid', 'crab', 'crab', 'octopus', 'octopus']
 
 // ─── Unified Entity Types (discriminated union on 'kind') ─────────────────────
 
@@ -346,7 +349,12 @@ export interface GameState {
   entities: Entity[]
 
   wave: number
-  lives: number                     // 3 solo, 5 co-op
+  lives: number                     // Display/initial value only (3 solo, 5 co-op). Set at game
+                                    // start from ScaledConfig.lives and on invasion (set to 0).
+                                    // NOT decremented on player death — the reducer decrements
+                                    // Player.lives instead. Used by GameRoom.endGame() to
+                                    // distinguish victory vs defeat. TODO: consider removing this
+                                    // in favor of deriving from Player.lives to avoid ambiguity.
   score: number
   alienDirection: 1 | -1
 
@@ -376,7 +384,7 @@ export const WIPE_TIMING = {
 // ─── Barrier Factory ──────────────────────────────────────────────────────────
 
 /** Canonical barrier shape - arch with gap in center bottom */
-export const BARRIER_SHAPE = [
+const BARRIER_SHAPE = [
   [1, 1, 1, 1, 1],  // Top row: solid
   [1, 1, 0, 1, 1],  // Bottom row: gap in center (arch)
 ] as const

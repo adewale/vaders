@@ -4,7 +4,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { gameReducer, canTransition, type GameAction } from './reducer'
 import type { GameState, Player, AlienEntity, BulletEntity, BarrierEntity } from '../../../shared/types'
-import { LAYOUT, DEFAULT_CONFIG, getBullets, getAliens, getUFOs } from '../../../shared/types'
+import { LAYOUT, DEFAULT_CONFIG, WIPE_TIMING, getBullets, getAliens, getUFOs } from '../../../shared/types'
 import {
   createTestGameState,
   createTestPlayer,
@@ -387,6 +387,68 @@ describe('PLAYER_INPUT action', () => {
 })
 
 // ============================================================================
+// PLAYER_MOVE Action Tests
+// ============================================================================
+
+describe('PLAYER_MOVE action', () => {
+  it('move left decrements player.x by discrete move speed (2)', () => {
+    const { state, players } = createTestPlayingState(1)
+    const player = players[0]
+    player.x = 60
+    state.players[player.id] = player
+
+    const result = gameReducer(state, { type: 'PLAYER_MOVE', playerId: player.id, direction: 'left' })
+
+    expect(result.state.players[player.id].x).toBe(58) // 60 - 2
+  })
+
+  it('move right increments player.x by discrete move speed (2)', () => {
+    const { state, players } = createTestPlayingState(1)
+    const player = players[0]
+    player.x = 60
+    state.players[player.id] = player
+
+    const result = gameReducer(state, { type: 'PLAYER_MOVE', playerId: player.id, direction: 'right' })
+
+    expect(result.state.players[player.id].x).toBe(62) // 60 + 2
+  })
+
+  it('move left respects PLAYER_MIN_X boundary', () => {
+    const { state, players } = createTestPlayingState(1)
+    const player = players[0]
+    player.x = LAYOUT.PLAYER_MIN_X // At left boundary
+    state.players[player.id] = player
+
+    const result = gameReducer(state, { type: 'PLAYER_MOVE', playerId: player.id, direction: 'left' })
+
+    expect(result.state.players[player.id].x).toBe(LAYOUT.PLAYER_MIN_X)
+  })
+
+  it('move right respects PLAYER_MAX_X boundary', () => {
+    const { state, players } = createTestPlayingState(1)
+    const player = players[0]
+    player.x = LAYOUT.PLAYER_MAX_X // At right boundary
+    state.players[player.id] = player
+
+    const result = gameReducer(state, { type: 'PLAYER_MOVE', playerId: player.id, direction: 'right' })
+
+    expect(result.state.players[player.id].x).toBe(LAYOUT.PLAYER_MAX_X)
+  })
+
+  it('ignored for dead players', () => {
+    const { state, players } = createTestPlayingState(1)
+    const player = players[0]
+    player.alive = false
+    player.x = 60
+    state.players[player.id] = player
+
+    const result = gameReducer(state, { type: 'PLAYER_MOVE', playerId: player.id, direction: 'left' })
+
+    expect(result.state.players[player.id].x).toBe(60)
+  })
+})
+
+// ============================================================================
 // PLAYER_SHOOT Action Tests
 // ============================================================================
 
@@ -613,7 +675,7 @@ describe('START_SOLO action', () => {
     expect(result.state.status).toBe('wipe_hold') // Wipe phase before playing
     expect(result.state.mode).toBe('solo')
     expect(result.state.lives).toBe(3)
-    expect(result.state.wipeTicksRemaining).toBe(60) // 2 seconds at 30Hz
+    expect(result.state.wipeTicksRemaining).toBe(WIPE_TIMING.HOLD_TICKS)
     expect(result.state.wipeWaveNumber).toBe(1)
   })
 
@@ -735,7 +797,7 @@ describe('COUNTDOWN_TICK action', () => {
 
     expect(result.state.status).toBe('wipe_hold') // Wipe phase before playing
     expect(result.state.countdownRemaining).toBeNull()
-    expect(result.state.wipeTicksRemaining).toBe(60)
+    expect(result.state.wipeTicksRemaining).toBe(WIPE_TIMING.HOLD_TICKS)
     expect(result.state.wipeWaveNumber).toBe(1)
     expect(hasEvent(result.events, 'game_start')).toBe(true)
   })
@@ -1551,14 +1613,13 @@ describe('barrier protection vs player hitbox mismatch', () => {
     }
   }
 
-  it('FAILING: alien bullet at barrier edge should NOT hit player behind barrier', () => {
+  it('alien bullet at barrier edge should NOT hit player behind barrier', () => {
     // Setup: Player centered behind a 5-wide barrier
     // Barrier at X=50 covers X=50,51,52,53,54
     // Player at X=52 (centered behind barrier)
     // Alien bullet at X=55 (just outside barrier right edge)
     //
-    // Expected behavior: Bullet should either hit barrier OR miss player
-    // Actual behavior: Bullet misses barrier but hits player (the bug!)
+    // Bullet should either hit barrier OR miss player
 
     const { state, players } = createTestPlayingState(1)
     const player = players[0]
@@ -1572,22 +1633,17 @@ describe('barrier protection vs player hitbox mismatch', () => {
 
     const result = gameReducer(state, { type: 'TICK' })
 
-    // The bullet should NOT have killed the player if they're "behind" the barrier
-    // This test documents the current (buggy) behavior where the bullet hits
     const playerAfter = result.state.players[player.id]
-
-    // CURRENT BEHAVIOR (bug): player.alive = false (bullet hits through barrier edge)
-    // EXPECTED BEHAVIOR: player.alive = true (barrier should protect)
-    //
-    // This assertion is what we WANT to be true (barrier protects player):
-    expect(playerAfter.alive).toBe(true)  // THIS WILL FAIL - demonstrating the bug
+    expect(playerAfter.alive).toBe(true)
   })
 
-  it('FAILING: bullet 2 cells outside barrier still hits player', () => {
-    // Even more egregious case: bullet is 2 cells outside barrier
+  it('bullet 2 cells outside barrier misses player', () => {
     // Barrier at X=50 covers X=50-54
     // Player at X=52
     // Bullet at X=56
+    //
+    // Player hitbox: |bulletX - playerX - 1| < 3
+    // |56 - 52 - 1| = 3, which is NOT < 3, so bullet misses
 
     const { state, players } = createTestPlayingState(1)
     const player = players[0]
@@ -1601,24 +1657,15 @@ describe('barrier protection vs player hitbox mismatch', () => {
     const result = gameReducer(state, { type: 'TICK' })
     const playerAfter = result.state.players[player.id]
 
-    // Player hitbox extends to X=55 (|56-52-1|=3, NOT < 3, so actually misses!)
-    // Let me recalculate: |bulletX - playerX - 1| < 3
-    // |56 - 52 - 1| = |3| = 3, which is NOT < 3
-    // So X=56 actually misses! Let's use X=55 instead
     expect(playerAfter.alive).toBe(true)
   })
 
-  it('FAILING: documents exact boundary where bullet hits player but misses barrier', () => {
-    // Precise test of the mismatch:
+  it('documents exact boundary where bullet misses barrier but player is still protected', () => {
     // Barrier at X=50, segments at X=50,51,52,53,54
     // Player at X=52
-    // Player hitbox: |bulletX - 52 - 1| < 3 → |bulletX - 53| < 3 → X in [51, 56)
-    //
     // Bullet at X=55:
-    //   - Barrier check: |55-54| = 1, NOT < 1 → MISS
-    //   - Player check: |55-53| = 2 < 3 → HIT
-    //
-    // This is the protection gap!
+    //   - Barrier check: misses barrier
+    //   - Player check: player is still alive (protected)
 
     const { state, players } = createTestPlayingState(1)
     const player = players[0]
@@ -1633,11 +1680,11 @@ describe('barrier protection vs player hitbox mismatch', () => {
     const result = gameReducer(state, { type: 'TICK' })
     const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
     const allSegmentsUndamaged = updatedBarrier.segments.every(s => s.health === 4)
-    expect(allSegmentsUndamaged).toBe(true)  // Bullet missed barrier ✓
+    expect(allSegmentsUndamaged).toBe(true)  // Bullet missed barrier
 
-    // But the player should still be protected!
+    // Player should still be protected
     const playerAfter = result.state.players[player.id]
-    expect(playerAfter.alive).toBe(true)  // THIS WILL FAIL
+    expect(playerAfter.alive).toBe(true)
   })
 
   it('control: bullet aligned with barrier segment hits barrier, not player', () => {
@@ -2269,7 +2316,7 @@ describe('alien entering flag (prevents shooting during wipe_reveal)', () => {
       const result = gameReducer(state, { type: 'START_SOLO' })
 
       expect(result.state.status).toBe('wipe_hold')
-      expect(result.state.wipeTicksRemaining).toBe(60)
+      expect(result.state.wipeTicksRemaining).toBe(WIPE_TIMING.HOLD_TICKS)
       expect(result.state.wipeWaveNumber).toBe(1)
     })
 
@@ -2281,7 +2328,7 @@ describe('alien entering flag (prevents shooting during wipe_reveal)', () => {
       const result = gameReducer(state, { type: 'COUNTDOWN_TICK' })
 
       expect(result.state.status).toBe('wipe_hold')
-      expect(result.state.wipeTicksRemaining).toBe(60)
+      expect(result.state.wipeTicksRemaining).toBe(WIPE_TIMING.HOLD_TICKS)
       expect(result.state.wipeWaveNumber).toBe(1)
     })
 
@@ -2294,7 +2341,7 @@ describe('alien entering flag (prevents shooting during wipe_reveal)', () => {
       const result = gameReducer(state, { type: 'TICK' })
 
       expect(result.state.status).toBe('wipe_reveal')
-      expect(result.state.wipeTicksRemaining).toBe(120) // Reveal duration
+      expect(result.state.wipeTicksRemaining).toBe(WIPE_TIMING.REVEAL_TICKS)
     })
 
     it('wipe_reveal transitions to playing after countdown', () => {
@@ -2324,7 +2371,7 @@ describe('alien entering flag (prevents shooting during wipe_reveal)', () => {
       const result = gameReducer(state, { type: 'TICK' })
 
       expect(result.state.status).toBe('wipe_hold')
-      expect(result.state.wipeTicksRemaining).toBe(60) // Hold duration
+      expect(result.state.wipeTicksRemaining).toBe(WIPE_TIMING.HOLD_TICKS)
     })
 
     it('wipe_hold sets entering=true on aliens when transitioning to wipe_reveal', () => {
@@ -2878,7 +2925,9 @@ describe('Sprite shape vs hitbox alignment', () => {
       // - Hitbox: collision at barrier.x + offsetX*2, barrier_y + offsetY*2 ✓ MATCHES VISUAL
       //
       // Using HITBOX constants ensures collision and visual stay in sync.
-      expect(true).toBe(true)  // Documentation test
+      // Verify LAYOUT contains the expected coordinate system constants
+      expect(LAYOUT.PLAYER_WIDTH).toBe(5)
+      expect(LAYOUT.PLAYER_HEIGHT).toBe(2)
     })
   })
 })

@@ -206,6 +206,7 @@ describe('Adding New Statuses (documentation)', () => {
     //    The type-level checks will catch any mismatches at compile time
     //    The runtime tests will catch missing switch cases
 
-    expect(true).toBe(true)
+    // Verify that ALL_GAME_STATUSES is non-empty (steps above rely on it)
+    expect(ALL_GAME_STATUSES.length).toBeGreaterThan(0)
   })
 })

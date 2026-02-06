@@ -43,6 +43,9 @@ jobs:
       - name: Run worker tests
         run: cd worker && bun run test
 
+      - name: Run shared tests
+        run: cd shared && bun test
+
   build:
     name: Build
     runs-on: ubuntu-latest

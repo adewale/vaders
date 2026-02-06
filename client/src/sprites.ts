@@ -31,7 +31,7 @@ export const SPRITES = {
     '▕███▏',
   ],
 
-  // UFO (mystery ship) - 2 lines, 7 chars wide
+  // UFO (mystery ship) - 2 lines, 5 chars wide
   ufo: [
     '╭─●─╮',
     '╰═══╯',
