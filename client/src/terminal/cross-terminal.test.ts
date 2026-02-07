@@ -304,7 +304,7 @@ describe('Visual Alignment Constraints', () => {
 })
 
 describe('Terminal-Specific Rendering', () => {
-  
+
   test('getSprites returns Unicode sprites for Unicode-capable terminals', () => {
     const restore = mockTerminalEnv('ghostty')
     try {
@@ -322,13 +322,121 @@ describe('Terminal-Specific Rendering', () => {
     // Ghostty: truecolor
     const ghosttyCaps = { supportsTrueColor: true, supports256Color: true, terminal: 'ghostty' } as TerminalCapabilities
     expect(getColorDepth(ghosttyCaps)).toBe('truecolor')
-    
+
     // Apple Terminal: 256 color
     const appleCaps = { supportsTrueColor: false, supports256Color: true, terminal: 'apple-terminal' } as TerminalCapabilities
     expect(getColorDepth(appleCaps)).toBe('256')
-    
+
     // Linux console: 16 color
     const linuxCaps = { supportsTrueColor: false, supports256Color: false, terminal: 'linux-console' } as TerminalCapabilities
     expect(getColorDepth(linuxCaps)).toBe('16')
+  })
+})
+
+// ============================================================================
+// Cross-Terminal Movement Handling (Issue #13 additions)
+// ============================================================================
+
+describe('Cross-Terminal Movement Handling', () => {
+  test('Ghostty uses continuous movement (Kitty keyboard protocol)', () => {
+    const restore = mockTerminalEnv('ghostty')
+    try {
+      const caps = detectCapabilities()
+      expect(caps.supportsKittyKeyboard).toBe(true)
+      expect(needsKeyReleaseTimeout(caps)).toBe(false)
+    } finally {
+      restore()
+    }
+  })
+
+  test('Apple Terminal uses discrete movement (no key release)', () => {
+    const restore = mockTerminalEnv('apple-terminal')
+    try {
+      const caps = detectCapabilities()
+      expect(caps.supportsKittyKeyboard).toBe(false)
+      expect(needsKeyReleaseTimeout(caps)).toBe(true)
+    } finally {
+      restore()
+    }
+  })
+})
+
+// ============================================================================
+// Color Conversion Cross-Terminal Consistency (Issue #13)
+// ============================================================================
+
+describe('Color Conversion Cross-Terminal', () => {
+  test('game colors produce valid 256-color indices for all terminals', () => {
+    // All game colors must map to valid 256-color range (16-255)
+    const gameColors = [
+      ...Object.values(COLORS.player),
+      ...Object.values(COLORS.alien),
+    ]
+    for (const hex of gameColors) {
+      const idx = hexTo256Color(hex)
+      expect(idx).toBeGreaterThanOrEqual(16)
+      expect(idx).toBeLessThanOrEqual(255)
+    }
+  })
+
+  test('formatColor returns non-empty strings for all color depths', () => {
+    const ghosttyCaps = { supportsTrueColor: true, supports256Color: true, terminal: 'ghostty' } as TerminalCapabilities
+    const appleCaps = { supportsTrueColor: false, supports256Color: true, terminal: 'apple-terminal' } as TerminalCapabilities
+    const linuxCaps = { supportsTrueColor: false, supports256Color: false, terminal: 'linux-console' } as TerminalCapabilities
+
+    const testColor = '#55ff55'
+
+    expect(formatColor(testColor, ghosttyCaps).length).toBeGreaterThan(0)
+    expect(formatColor(testColor, appleCaps).length).toBeGreaterThan(0)
+    expect(formatColor(testColor, linuxCaps).length).toBeGreaterThan(0)
+  })
+
+  test('truecolor and 256-color produce different escape sequences', () => {
+    const ghosttyCaps = { supportsTrueColor: true, supports256Color: true, terminal: 'ghostty' } as TerminalCapabilities
+    const appleCaps = { supportsTrueColor: false, supports256Color: true, terminal: 'apple-terminal' } as TerminalCapabilities
+
+    const trueSeq = formatColor('#55ff55', ghosttyCaps)
+    const c256Seq = formatColor('#55ff55', appleCaps)
+
+    // They should use different format prefixes
+    expect(trueSeq).toContain('38;2;')   // True color: 38;2;R;G;B
+    expect(c256Seq).toContain('38;5;')   // 256 color: 38;5;N
+  })
+})
+
+// ============================================================================
+// Minimum Terminal Size Constraints (Issue #13)
+// ============================================================================
+
+describe('Terminal Size Constraints', () => {
+  test('game grid constants are consistent', () => {
+    // The game grid is fixed at 120x36
+    // All sprites must fit within this grid
+    const width = 120
+    const height = 36
+
+    // Player must fit on screen
+    expect(SPRITE_SIZE.player.width).toBeLessThanOrEqual(width)
+    expect(SPRITE_SIZE.player.height).toBeLessThanOrEqual(height)
+
+    // UFO must fit on screen
+    expect(SPRITE_SIZE.ufo.width).toBeLessThanOrEqual(width)
+    expect(SPRITE_SIZE.ufo.height).toBeLessThanOrEqual(height)
+
+    // Alien must fit on screen
+    expect(SPRITE_SIZE.alien.width).toBeLessThanOrEqual(width)
+    expect(SPRITE_SIZE.alien.height).toBeLessThanOrEqual(height)
+  })
+
+  test('all sprites have non-zero dimensions', () => {
+    expect(SPRITE_SIZE.player.width).toBeGreaterThan(0)
+    expect(SPRITE_SIZE.player.height).toBeGreaterThan(0)
+    expect(SPRITE_SIZE.alien.width).toBeGreaterThan(0)
+    expect(SPRITE_SIZE.alien.height).toBeGreaterThan(0)
+    expect(SPRITE_SIZE.ufo.width).toBeGreaterThan(0)
+    expect(SPRITE_SIZE.ufo.height).toBeGreaterThan(0)
+    expect(SPRITE_SIZE.bullet.width).toBeGreaterThan(0)
+    expect(SPRITE_SIZE.barrier.width).toBeGreaterThan(0)
+    expect(SPRITE_SIZE.barrier.height).toBeGreaterThan(0)
   })
 })

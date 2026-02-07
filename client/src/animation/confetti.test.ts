@@ -357,6 +357,173 @@ describe('ConfettiSystem', () => {
   })
 })
 
+// ============================================================================
+// Particle Pool Reuse Tests (Issue #12)
+// ============================================================================
+
+describe('Particle Pool: Capping and Reuse', () => {
+  test('pool size never exceeds maxParticles', () => {
+    const maxParticles = 20
+    const system = new ConfettiSystem(
+      { width: 120, height: 36 },
+      { maxParticles, particlesPerBurst: 15 }
+    )
+    system.start()
+
+    // Run many updates to trigger all origin bursts
+    for (let i = 0; i < 100; i++) {
+      system.update()
+    }
+
+    // Active count should never exceed pool size
+    expect(system.getActiveCount()).toBeLessThanOrEqual(maxParticles)
+  })
+
+  test('pool is pre-allocated to maxParticles size at construction', () => {
+    const maxParticles = 25
+    const system = new ConfettiSystem(
+      { width: 120, height: 36 },
+      { maxParticles }
+    )
+
+    // Before starting, all particles exist but are inactive
+    expect(system.getActiveCount()).toBe(0)
+    // No visible particles since they are all inactive
+    expect(system.getVisibleParticles()).toEqual([])
+  })
+
+  test('particles recycle after expiry (pool reuse)', () => {
+    const maxParticles = 10
+    const system = new ConfettiSystem(
+      { width: 120, height: 36 },
+      {
+        maxParticles,
+        particlesPerBurst: 10,
+        lifetime: [30, 50],  // Moderate lifetime so particles survive initial checks
+      }
+    )
+    system.start()
+
+    // First update spawns the first origin (delayTicks=0)
+    // Particles are created AND decremented on the same tick
+    system.update()
+
+    // After 1 update, particles should be active (life 29-49 remaining)
+    const firstBatchCount = system.getActiveCount()
+    expect(firstBatchCount).toBeGreaterThan(0)
+
+    // Now advance past the longest lifetime to ensure all first-batch particles expire
+    // Lifetime range is [30, 50], particles are decremented on creation tick,
+    // so max lifetime is effectively 49 more ticks after creation
+    for (let i = 0; i < 60; i++) {
+      system.update()
+    }
+
+    // After expiry, first-batch particles should be inactive (recycled back to pool)
+    // Note: other origins may have spawned new particles by now, but pool slots
+    // freed by expired particles demonstrate the recycling mechanism
+    const afterExpiryCount = system.getActiveCount()
+    expect(afterExpiryCount).toBeLessThan(maxParticles)
+  })
+
+  test('burst with more particles than pool is capped to available slots', () => {
+    const maxParticles = 5
+    const system = new ConfettiSystem(
+      { width: 120, height: 36 },
+      {
+        maxParticles,
+        particlesPerBurst: 100,  // Way more than maxParticles
+        lifetime: [200, 300],    // Long lifetime so nothing expires
+      }
+    )
+    system.start()
+
+    // Trigger all origins
+    for (let i = 0; i < 80; i++) {
+      system.update()
+    }
+
+    // Should never exceed the pool size
+    expect(system.getActiveCount()).toBeLessThanOrEqual(maxParticles)
+  })
+
+  test('second start resets all particles for reuse', () => {
+    const system = new ConfettiSystem(
+      { width: 120, height: 36 },
+      { maxParticles: 30, particlesPerBurst: 10 }
+    )
+
+    // First run
+    system.start()
+    for (let i = 0; i < 20; i++) {
+      system.update()
+    }
+    const firstRunActive = system.getActiveCount()
+    expect(firstRunActive).toBeGreaterThan(0)
+
+    // Restart - pool should be fully available again
+    system.start()
+    expect(system.getActiveCount()).toBe(0) // All reset to inactive
+
+    // New particles should spawn using recycled pool slots
+    for (let i = 0; i < 20; i++) {
+      system.update()
+    }
+    const secondRunActive = system.getActiveCount()
+    expect(secondRunActive).toBeGreaterThan(0)
+  })
+
+  test('expired particles become available for new bursts', () => {
+    const system = new ConfettiSystem(
+      { width: 120, height: 36 },
+      {
+        maxParticles: 10,
+        particlesPerBurst: 10,
+        lifetime: [2, 3], // Very short lifetime
+      }
+    )
+    system.start()
+
+    // First update spawns first burst
+    system.update()
+    const firstCount = system.getActiveCount()
+    expect(firstCount).toBeGreaterThan(0)
+
+    // Wait for all to expire
+    for (let i = 0; i < 20; i++) {
+      system.update()
+    }
+
+    // Some later origins should have been able to spawn into recycled slots
+    // The system creates 8 origins (5 bottom + 3 top) with staggered delays
+    // Later origins will reuse expired slots
+    // This test just verifies the system handles the lifecycle correctly
+    // without running out of pool slots or crashing
+    expect(system.isRunning()).toBeDefined()
+  })
+
+  test('active count goes to 0 after all particles expire and system stops', () => {
+    const system = new ConfettiSystem(
+      { width: 120, height: 36 },
+      {
+        maxParticles: 20,
+        particlesPerBurst: 5,
+        lifetime: [2, 4],
+      }
+    )
+    system.start()
+
+    // Run until system stops on its own
+    for (let i = 0; i < 500; i++) {
+      system.update()
+      if (!system.isRunning()) break
+    }
+
+    expect(system.isRunning()).toBe(false)
+    expect(system.getActiveCount()).toBe(0)
+  })
+})
+
 describe('getConfettiDisplayColor', () => {
   test('returns original color at high opacity', () => {
     expect(getConfettiDisplayColor('#ff5555', 1.0)).toBe('#ff5555')

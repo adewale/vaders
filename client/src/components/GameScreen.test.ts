@@ -8,11 +8,23 @@ import type {
   Player,
   PlayerSlot,
   AlienEntity,
+  BulletEntity,
+  UFOEntity,
+  BarrierEntity,
   Entity,
   GameStatus,
   ServerEvent,
 } from '../../../shared/types'
-import { DEFAULT_CONFIG, STANDARD_WIDTH, STANDARD_HEIGHT } from '../../../shared/types'
+import {
+  DEFAULT_CONFIG,
+  STANDARD_WIDTH,
+  STANDARD_HEIGHT,
+  LAYOUT,
+  getAliens,
+  getBullets,
+  getBarriers,
+  getUFOs,
+} from '../../../shared/types'
 import {
   ConfettiSystem,
   WipeTransition,
@@ -891,5 +903,403 @@ describe('Animation integration edge cases', () => {
 
     // Corners might be masked
     // (exact behavior depends on iris radius calculation)
+  })
+})
+
+// ─── GameScreen State Derivation Tests ───────────────────────────────────────
+// These test the data extraction and transformation logic that happens
+// in the GameScreen function body.
+
+describe('GameScreen Entity Extraction', () => {
+  function createMockBullet(overrides: Partial<BulletEntity> = {}): BulletEntity {
+    return {
+      kind: 'bullet',
+      id: 'bullet-1',
+      x: 50,
+      y: 20,
+      ownerId: 'player-1',
+      dy: -1,
+      ...overrides,
+    }
+  }
+
+  function createMockUFO(overrides: Partial<UFOEntity> = {}): UFOEntity {
+    return {
+      kind: 'ufo',
+      id: 'ufo-1',
+      x: 30,
+      y: 1,
+      direction: 1,
+      alive: true,
+      points: 100,
+      ...overrides,
+    }
+  }
+
+  function createMockBarrier(overrides: Partial<BarrierEntity> = {}): BarrierEntity {
+    return {
+      kind: 'barrier',
+      id: 'barrier-1',
+      x: 20,
+      segments: [
+        { offsetX: 0, offsetY: 0, health: 4 },
+        { offsetX: 1, offsetY: 0, health: 3 },
+        { offsetX: 0, offsetY: 1, health: 2 },
+        { offsetX: 1, offsetY: 1, health: 1 },
+      ],
+      ...overrides,
+    }
+  }
+
+  test('getAliens filters only alien entities', () => {
+    const entities: Entity[] = [
+      createMockAlien({ id: 'a1' }),
+      createMockBullet({ id: 'b1' }),
+      createMockAlien({ id: 'a2' }),
+      createMockUFO({ id: 'u1' }),
+    ]
+
+    const aliens = getAliens(entities)
+    expect(aliens.length).toBe(2)
+    expect(aliens[0].id).toBe('a1')
+    expect(aliens[1].id).toBe('a2')
+  })
+
+  test('getBullets filters only bullet entities', () => {
+    const entities: Entity[] = [
+      createMockAlien({ id: 'a1' }),
+      createMockBullet({ id: 'b1' }),
+      createMockBullet({ id: 'b2' }),
+    ]
+
+    const bullets = getBullets(entities)
+    expect(bullets.length).toBe(2)
+    expect(bullets.every(b => b.kind === 'bullet')).toBe(true)
+  })
+
+  test('getBarriers filters only barrier entities', () => {
+    const entities: Entity[] = [
+      createMockBarrier({ id: 'bar1' }),
+      createMockAlien({ id: 'a1' }),
+      createMockBarrier({ id: 'bar2' }),
+    ]
+
+    const barriers = getBarriers(entities)
+    expect(barriers.length).toBe(2)
+  })
+
+  test('getUFOs filters only UFO entities', () => {
+    const entities: Entity[] = [
+      createMockUFO({ id: 'u1' }),
+      createMockAlien({ id: 'a1' }),
+    ]
+
+    const ufos = getUFOs(entities)
+    expect(ufos.length).toBe(1)
+    expect(ufos[0].id).toBe('u1')
+  })
+
+  test('all filter functions return empty for empty entities', () => {
+    const entities: Entity[] = []
+    expect(getAliens(entities).length).toBe(0)
+    expect(getBullets(entities).length).toBe(0)
+    expect(getBarriers(entities).length).toBe(0)
+    expect(getUFOs(entities).length).toBe(0)
+  })
+
+  test('mixed entities are correctly separated', () => {
+    const entities: Entity[] = [
+      createMockAlien({ id: 'a1' }),
+      createMockAlien({ id: 'a2' }),
+      createMockBullet({ id: 'b1' }),
+      createMockBullet({ id: 'b2' }),
+      createMockBullet({ id: 'b3' }),
+      createMockBarrier({ id: 'bar1' }),
+      createMockUFO({ id: 'u1' }),
+    ]
+
+    expect(getAliens(entities).length).toBe(2)
+    expect(getBullets(entities).length).toBe(3)
+    expect(getBarriers(entities).length).toBe(1)
+    expect(getUFOs(entities).length).toBe(1)
+  })
+})
+
+// ─── GameScreen Header Data Tests ────────────────────────────────────────────
+
+describe('GameScreen Header Data Derivation', () => {
+  test('player count derived from players object', () => {
+    const state = createMockGameState({
+      players: {
+        'p1': createMockPlayer({ id: 'p1' }),
+        'p2': createMockPlayer({ id: 'p2', slot: 2 }),
+      },
+    })
+    const playerCount = Object.keys(state.players).length
+    expect(playerCount).toBe(2)
+  })
+
+  test('current player lives extracted correctly', () => {
+    const currentPlayerId = 'player-1'
+    const state = createMockGameState({
+      players: {
+        'player-1': createMockPlayer({ id: 'player-1', lives: 2 }),
+        'player-2': createMockPlayer({ id: 'player-2', slot: 2, lives: 3 }),
+      },
+    })
+    const currentPlayer = state.players[currentPlayerId]
+    const myLives = currentPlayer?.lives ?? 0
+    expect(myLives).toBe(2)
+  })
+
+  test('missing current player defaults to 0 lives', () => {
+    const currentPlayerId = 'nonexistent'
+    const state = createMockGameState()
+    const currentPlayer = state.players[currentPlayerId]
+    const myLives = currentPlayer?.lives ?? 0
+    expect(myLives).toBe(0)
+  })
+
+  test('max lives is 3 for solo, 5 for multiplayer', () => {
+    const soloState = createMockGameState({ mode: 'solo' })
+    const multiState = createMockGameState({ mode: 'multiplayer' })
+
+    const soloMaxLives = soloState.mode === 'solo' ? 3 : 5
+    const multiMaxLives = multiState.mode === 'solo' ? 3 : 5
+
+    expect(soloMaxLives).toBe(3)
+    expect(multiMaxLives).toBe(5)
+  })
+
+  test('mode display text for solo and multiplayer', () => {
+    const soloState = createMockGameState({ mode: 'solo' })
+    const multiState = createMockGameState({
+      mode: 'multiplayer',
+      players: {
+        'p1': createMockPlayer({ id: 'p1' }),
+        'p2': createMockPlayer({ id: 'p2', slot: 2 }),
+        'p3': createMockPlayer({ id: 'p3', slot: 3 }),
+      },
+    })
+
+    const soloDisplay = soloState.mode === 'solo' ? 'SOLO' : `${Object.keys(soloState.players).length}P CO-OP`
+    const multiDisplay = multiState.mode === 'solo' ? 'SOLO' : `${Object.keys(multiState.players).length}P CO-OP`
+
+    expect(soloDisplay).toBe('SOLO')
+    expect(multiDisplay).toBe('3P CO-OP')
+  })
+
+  test('score formatting pads to 6 digits', () => {
+    const score = 42
+    expect(score.toString().padStart(6, '0')).toBe('000042')
+  })
+})
+
+// ─── Player Ship Visibility Tests ────────────────────────────────────────────
+
+describe('Player Ship Visibility Logic', () => {
+  test('dead player without respawn is not rendered', () => {
+    const player = createMockPlayer({ alive: false, respawnAtTick: null })
+    // In the component: if (!player.alive) { if (!player.respawnAtTick) return null }
+    const shouldRender = player.alive || player.respawnAtTick !== null
+    expect(shouldRender).toBe(false)
+  })
+
+  test('dead player with respawn tick is rendered (blink)', () => {
+    const player = createMockPlayer({ alive: false, respawnAtTick: 100 })
+    const shouldRender = player.alive || player.respawnAtTick !== null
+    expect(shouldRender).toBe(true)
+  })
+
+  test('alive player is always rendered', () => {
+    const player = createMockPlayer({ alive: true })
+    const shouldRender = player.alive || player.respawnAtTick !== null
+    expect(shouldRender).toBe(true)
+  })
+
+  test('blink effect toggles based on tick', () => {
+    // In the component: if (Math.floor(tick / 10) % 2 === 0) return null
+    // This creates a 10-tick on, 10-tick off blink pattern
+    const visibilityAt = (tick: number) => Math.floor(tick / 10) % 2 !== 0
+
+    expect(visibilityAt(0)).toBe(false)   // tick 0-9: hidden
+    expect(visibilityAt(5)).toBe(false)   // tick 5: hidden
+    expect(visibilityAt(10)).toBe(true)   // tick 10-19: visible
+    expect(visibilityAt(15)).toBe(true)   // tick 15: visible
+    expect(visibilityAt(20)).toBe(false)  // tick 20-29: hidden
+    expect(visibilityAt(30)).toBe(true)   // tick 30-39: visible
+  })
+})
+
+// ─── PlayerScores Sorting Logic Tests ────────────────────────────────────────
+
+describe('PlayerScores Sorting', () => {
+  test('players sorted by slot number ascending', () => {
+    const players: Record<string, Player> = {
+      'p3': createMockPlayer({ id: 'p3', name: 'C', slot: 3 }),
+      'p1': createMockPlayer({ id: 'p1', name: 'A', slot: 1 }),
+      'p4': createMockPlayer({ id: 'p4', name: 'D', slot: 4 }),
+      'p2': createMockPlayer({ id: 'p2', name: 'B', slot: 2 }),
+    }
+
+    const sorted = Object.values(players).sort((a, b) => a.slot - b.slot)
+    expect(sorted[0].slot).toBe(1)
+    expect(sorted[1].slot).toBe(2)
+    expect(sorted[2].slot).toBe(3)
+    expect(sorted[3].slot).toBe(4)
+  })
+
+  test('single player sorting is trivial', () => {
+    const players: Record<string, Player> = {
+      'p1': createMockPlayer({ id: 'p1', slot: 1 }),
+    }
+    const sorted = Object.values(players).sort((a, b) => a.slot - b.slot)
+    expect(sorted.length).toBe(1)
+  })
+})
+
+// ─── Bullet Direction Display Tests ──────────────────────────────────────────
+
+describe('Bullet Direction Logic', () => {
+  test('player bullets move up (dy = -1)', () => {
+    const bullet: BulletEntity = {
+      kind: 'bullet',
+      id: 'b1',
+      x: 50,
+      y: 28,
+      ownerId: 'player-1',
+      dy: -1,
+    }
+
+    // In the component: bullet.dy < 0 ? SPRITES.bullet.player : SPRITES.bullet.alien
+    const isPlayerBullet = bullet.dy < 0
+    expect(isPlayerBullet).toBe(true)
+  })
+
+  test('alien bullets move down (dy = 1)', () => {
+    const bullet: BulletEntity = {
+      kind: 'bullet',
+      id: 'b2',
+      x: 30,
+      y: 10,
+      ownerId: null,
+      dy: 1,
+    }
+
+    const isPlayerBullet = bullet.dy < 0
+    expect(isPlayerBullet).toBe(false)
+  })
+})
+
+// ─── Barrier Segment Rendering Logic Tests ───────────────────────────────────
+
+describe('Barrier Segment Filtering', () => {
+  test('only segments with health > 0 are rendered', () => {
+    const segments = [
+      { offsetX: 0, offsetY: 0, health: 4 as const },
+      { offsetX: 1, offsetY: 0, health: 0 as const },
+      { offsetX: 0, offsetY: 1, health: 2 as const },
+      { offsetX: 1, offsetY: 1, health: 0 as const },
+    ]
+
+    const visible = segments.filter(s => s.health > 0)
+    expect(visible.length).toBe(2)
+    expect(visible[0].health).toBe(4)
+    expect(visible[1].health).toBe(2)
+  })
+
+  test('barrier with all segments destroyed has nothing to render', () => {
+    const segments = [
+      { offsetX: 0, offsetY: 0, health: 0 as const },
+      { offsetX: 1, offsetY: 0, health: 0 as const },
+    ]
+
+    const visible = segments.filter(s => s.health > 0)
+    expect(visible.length).toBe(0)
+  })
+
+  test('barrier with full health renders all segments', () => {
+    const segments = [
+      { offsetX: 0, offsetY: 0, health: 4 as const },
+      { offsetX: 1, offsetY: 0, health: 4 as const },
+      { offsetX: 0, offsetY: 1, health: 4 as const },
+      { offsetX: 1, offsetY: 1, health: 4 as const },
+    ]
+
+    const visible = segments.filter(s => s.health > 0)
+    expect(visible.length).toBe(4)
+  })
+})
+
+// ─── Countdown Display Tests ─────────────────────────────────────────────────
+
+describe('Countdown Display Logic', () => {
+  test('countdown overlay shown during countdown status', () => {
+    const state = createMockGameState({
+      status: 'countdown',
+      countdownRemaining: 3,
+    })
+
+    const showCountdown = state.status === 'countdown' && state.countdownRemaining !== null
+    expect(showCountdown).toBe(true)
+  })
+
+  test('countdown not shown during playing status', () => {
+    const state = createMockGameState({
+      status: 'playing',
+      countdownRemaining: null,
+    })
+
+    const showCountdown = state.status === 'countdown' && state.countdownRemaining !== null
+    expect(showCountdown).toBe(false)
+  })
+
+  test('countdown not shown when countdownRemaining is null', () => {
+    const state = createMockGameState({
+      status: 'countdown',
+      countdownRemaining: null,
+    })
+
+    const showCountdown = state.status === 'countdown' && state.countdownRemaining !== null
+    expect(showCountdown).toBe(false)
+  })
+})
+
+// ─── Alien Visual Position Tests ─────────────────────────────────────────────
+
+describe('Alien Visual Position During Wipe', () => {
+  test('aliens hidden off-screen during wipe_reveal before animation starts', () => {
+    // When status is wipe_reveal and entrance hasn't started for this wave,
+    // aliens are placed at y: -5 to prevent a flash
+    const alien = createMockAlien({ x: 30, y: 10 })
+    const status: GameStatus = 'wipe_reveal'
+    const entranceStartedForWave: number | null = null
+    const currentWave = 2
+
+    // Simulate the component logic
+    let visualY: number
+    if (status === 'wipe_reveal' && entranceStartedForWave !== currentWave) {
+      visualY = -5
+    } else {
+      visualY = alien.y
+    }
+
+    expect(visualY).toBe(-5)
+  })
+
+  test('aliens at server position during normal gameplay', () => {
+    const alien = createMockAlien({ x: 30, y: 10 })
+    const status: GameStatus = 'playing'
+    const entranceStartedForWave = 1
+    const currentWave = 1
+
+    let visualY: number
+    if (status === 'wipe_reveal' && entranceStartedForWave !== currentWave) {
+      visualY = -5
+    } else {
+      visualY = alien.y
+    }
+
+    expect(visualY).toBe(10)
   })
 })

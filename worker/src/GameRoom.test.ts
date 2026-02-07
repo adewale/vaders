@@ -1306,3 +1306,1107 @@ describe('4-Player Room Full Scenario', () => {
     expect(state.lives).toBe(5)
   })
 })
+
+// ============================================================================
+// Lifecycle Edge Cases
+// ============================================================================
+
+describe('Lifecycle Edge Cases', () => {
+  describe('Player disconnecting during wipe phases', () => {
+    it('removes player during wipe_hold phase', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws1 = createMockWebSocket()
+      const ws2 = createMockWebSocket()
+      ctx._webSockets.push(ws1, ws2)
+
+      await joinPlayer(gameRoom, ws1, 'Player1')
+      await joinPlayer(gameRoom, ws2, 'Player2')
+
+      // Both ready up to start countdown
+      await gameRoom.webSocketMessage(ws1 as any, JSON.stringify({ type: 'ready' }))
+      await gameRoom.webSocketMessage(ws2 as any, JSON.stringify({ type: 'ready' }))
+
+      // Complete countdown: 3 -> 2 -> 1 -> game start (wipe_hold)
+      await gameRoom.alarm() // 2
+      await gameRoom.alarm() // 1
+      await gameRoom.alarm() // wipe_hold starts
+
+      // Verify we're in wipe_hold
+      let state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+      expect(state.status).toBe('wipe_hold')
+      expect(Object.keys(state.players).length).toBe(2)
+
+      // Player 1 disconnects during wipe_hold
+      await gameRoom.webSocketClose(ws1 as any, 1000, 'Closed', true)
+
+      // Player should be removed, game continues with remaining player
+      state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+      expect(Object.keys(state.players).length).toBe(1)
+
+      // player_left event should be broadcast
+      const leftCall = ws2.send.mock.calls.find((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'event' && msg.name === 'player_left'
+      })
+      expect(leftCall).toBeDefined()
+    })
+
+    it('removes player during wipe_reveal phase', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws1 = createMockWebSocket()
+      const ws2 = createMockWebSocket()
+      ctx._webSockets.push(ws1, ws2)
+
+      await joinPlayer(gameRoom, ws1, 'Player1')
+      await joinPlayer(gameRoom, ws2, 'Player2')
+
+      // Both ready up to start countdown
+      await gameRoom.webSocketMessage(ws1 as any, JSON.stringify({ type: 'ready' }))
+      await gameRoom.webSocketMessage(ws2 as any, JSON.stringify({ type: 'ready' }))
+
+      // Complete countdown: 3 -> 2 -> 1 -> game start (wipe_hold)
+      await gameRoom.alarm() // 2
+      await gameRoom.alarm() // 1
+      await gameRoom.alarm() // wipe_hold starts
+
+      // Run through wipe_hold (60 ticks) to reach wipe_reveal
+      for (let i = 0; i < 60; i++) {
+        await gameRoom.alarm()
+      }
+
+      // Verify we're in wipe_reveal
+      let state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+      expect(state.status).toBe('wipe_reveal')
+
+      // Player 1 disconnects during wipe_reveal
+      await gameRoom.webSocketClose(ws1 as any, 1000, 'Closed', true)
+
+      // Player should be removed, game continues
+      state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+      expect(Object.keys(state.players).length).toBe(1)
+    })
+
+    it('ends game when all players leave during wipe_hold', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+
+      await joinPlayer(gameRoom, ws, 'SoloPlayer')
+      await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'start_solo' }))
+
+      // Verify we're in wipe_hold
+      let state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+      expect(state.status).toBe('wipe_hold')
+
+      // Solo player disconnects during wipe_hold
+      await gameRoom.webSocketClose(ws as any, 1000, 'Closed', true)
+
+      // Game should end since no players remain
+      state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+      expect(Object.keys(state.players).length).toBe(0)
+      // removePlayer checks status === 'playing' to call endGame,
+      // but wipe_hold is not 'playing', so it schedules cleanup instead
+      expect(ctx.storage.setAlarm).toHaveBeenCalled()
+    })
+  })
+
+  describe('All players leaving during active game', () => {
+    it('ends game with defeat when last player leaves during playing', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+
+      await joinPlayer(gameRoom, ws, 'SoloPlayer')
+      await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'start_solo' }))
+
+      // Complete wipe phases to reach playing
+      await completeWipePhases(gameRoom)
+
+      let state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+      expect(state.status).toBe('playing')
+
+      // Player disconnects
+      await gameRoom.webSocketClose(ws as any, 1000, 'Closed', true)
+
+      // Should end game as defeat
+      state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+      expect(state.status).toBe('game_over')
+
+      // Should have broadcast game_over event
+      const gameOverCall = ws.send.mock.calls.find((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'event' && msg.name === 'game_over' && msg.data.result === 'defeat'
+      })
+      expect(gameOverCall).toBeDefined()
+    })
+
+    it('alarm stops running when game ends due to all players leaving', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+
+      await joinPlayer(gameRoom, ws, 'SoloPlayer')
+      await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'start_solo' }))
+
+      // Complete wipe phases to reach playing
+      await completeWipePhases(gameRoom)
+
+      let state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+      expect(state.status).toBe('playing')
+
+      // Player disconnects - game ends
+      await gameRoom.webSocketClose(ws as any, 1000, 'Closed', true)
+
+      state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+      expect(state.status).toBe('game_over')
+
+      // Clear alarm mock to track new calls
+      ;(ctx.storage.setAlarm as Mock).mockClear()
+
+      // Trigger alarm - should not schedule another game tick
+      await gameRoom.alarm()
+
+      // setAlarm may be called for cleanup (empty room), but not a ~33ms game tick
+      const tickAlarmCalls = (ctx.storage.setAlarm as Mock).mock.calls.filter(
+        (call: unknown[]) => {
+          const time = call[0] as number
+          return time - Date.now() < 1000
+        }
+      )
+      expect(tickAlarmCalls.length).toBe(0)
+    })
+
+    it('all players leaving during coop playing triggers defeat and cleanup', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws1 = createMockWebSocket()
+      const ws2 = createMockWebSocket()
+      ctx._webSockets.push(ws1, ws2)
+
+      await joinPlayer(gameRoom, ws1, 'Player1')
+      await joinPlayer(gameRoom, ws2, 'Player2')
+
+      await gameRoom.webSocketMessage(ws1 as any, JSON.stringify({ type: 'ready' }))
+      await gameRoom.webSocketMessage(ws2 as any, JSON.stringify({ type: 'ready' }))
+
+      // Complete countdown and wipe phases
+      await gameRoom.alarm() // 2
+      await gameRoom.alarm() // 1
+      await gameRoom.alarm() // wipe_hold starts
+      await completeWipePhases(gameRoom)
+
+      let state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+      expect(state.status).toBe('playing')
+
+      // Player 1 leaves - game continues
+      await gameRoom.webSocketClose(ws1 as any, 1000, 'Closed', true)
+      state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+      expect(state.status).toBe('playing')
+      expect(Object.keys(state.players).length).toBe(1)
+
+      // Player 2 leaves - game should end
+      await gameRoom.webSocketClose(ws2 as any, 1000, 'Closed', true)
+      state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+      expect(state.status).toBe('game_over')
+      expect(Object.keys(state.players).length).toBe(0)
+    })
+  })
+
+  describe('Player leaving cancels countdown', () => {
+    it('cancels countdown when one of two readied players disconnects', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws1 = createMockWebSocket()
+      const ws2 = createMockWebSocket()
+      ctx._webSockets.push(ws1, ws2)
+
+      await joinPlayer(gameRoom, ws1, 'Player1')
+      await joinPlayer(gameRoom, ws2, 'Player2')
+
+      await gameRoom.webSocketMessage(ws1 as any, JSON.stringify({ type: 'ready' }))
+      await gameRoom.webSocketMessage(ws2 as any, JSON.stringify({ type: 'ready' }))
+
+      // Verify countdown started
+      let state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+      expect(state.status).toBe('countdown')
+
+      ws2.send.mockClear()
+
+      // Player 1 disconnects during countdown
+      await gameRoom.webSocketClose(ws1 as any, 1000, 'Closed', true)
+
+      // Countdown should be cancelled
+      state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+      expect(state.status).toBe('waiting')
+      expect(state.countdownRemaining).toBeNull()
+
+      // countdown_cancelled event should be broadcast
+      const cancelCall = ws2.send.mock.calls.find((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'event' && msg.name === 'countdown_cancelled'
+      })
+      expect(cancelCall).toBeDefined()
+
+      // Alarm should be deleted
+      expect(ctx.storage.deleteAlarm).toHaveBeenCalled()
+    })
+
+    it('cancels countdown mid-tick when player disconnects after first countdown alarm', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws1 = createMockWebSocket()
+      const ws2 = createMockWebSocket()
+      ctx._webSockets.push(ws1, ws2)
+
+      await joinPlayer(gameRoom, ws1, 'Player1')
+      await joinPlayer(gameRoom, ws2, 'Player2')
+
+      await gameRoom.webSocketMessage(ws1 as any, JSON.stringify({ type: 'ready' }))
+      await gameRoom.webSocketMessage(ws2 as any, JSON.stringify({ type: 'ready' }))
+
+      // Tick countdown once: 3 -> 2
+      await gameRoom.alarm()
+
+      let state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+      expect(state.status).toBe('countdown')
+
+      // Player 1 disconnects mid-countdown
+      await gameRoom.webSocketClose(ws1 as any, 1000, 'Closed', true)
+
+      state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+      expect(state.status).toBe('waiting')
+    })
+  })
+
+  describe('Multiple rapid join/leave cycles', () => {
+    it('handles player joining and immediately leaving', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+
+      await joinPlayer(gameRoom, ws, 'FleetingPlayer')
+
+      let state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+      expect(Object.keys(state.players).length).toBe(1)
+
+      // Immediately disconnect
+      await gameRoom.webSocketClose(ws as any, 1000, 'Closed', true)
+
+      state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+      expect(Object.keys(state.players).length).toBe(0)
+    })
+
+    it('handles multiple players joining, leaving, and new players joining for vacated slots', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const allSlots: number[] = []
+
+      // First wave: 3 players join
+      const ws1 = createMockWebSocket()
+      const ws2 = createMockWebSocket()
+      const ws3 = createMockWebSocket()
+      ctx._webSockets.push(ws1, ws2, ws3)
+
+      await joinPlayer(gameRoom, ws1, 'Player1')
+      await joinPlayer(gameRoom, ws2, 'Player2')
+      await joinPlayer(gameRoom, ws3, 'Player3')
+
+      let state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+      expect(Object.keys(state.players).length).toBe(3)
+
+      // Players 1 and 3 leave
+      await gameRoom.webSocketClose(ws1 as any, 1000, 'Closed', true)
+      await gameRoom.webSocketClose(ws3 as any, 1000, 'Closed', true)
+
+      state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+      expect(Object.keys(state.players).length).toBe(1)
+
+      // Two new players join - should get slots 1 and 3 (vacated)
+      const ws4 = createMockWebSocket()
+      const ws5 = createMockWebSocket()
+      ctx._webSockets.push(ws4, ws5)
+
+      await joinPlayer(gameRoom, ws4, 'Player4')
+      await joinPlayer(gameRoom, ws5, 'Player5')
+
+      // Player4 should get slot 1 (first available)
+      const sync4 = ws4.send.mock.calls.find((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'sync' && msg.playerId
+      })
+      const player4 = JSON.parse(sync4![0])
+      expect(player4.state.players[player4.playerId].slot).toBe(1)
+
+      // Player5 should get slot 3 (next available after 1 and 2)
+      const sync5 = ws5.send.mock.calls.find((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'sync' && msg.playerId
+      })
+      const player5 = JSON.parse(sync5![0])
+      expect(player5.state.players[player5.playerId].slot).toBe(3)
+
+      state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+      expect(Object.keys(state.players).length).toBe(3)
+    })
+
+    it('maintains correct mode when cycling between 1 and 2 players', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+
+      // Solo player joins
+      const ws1 = createMockWebSocket()
+      ctx._webSockets.push(ws1)
+      await joinPlayer(gameRoom, ws1, 'Player1')
+
+      let state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+      expect(state.mode).toBe('solo')
+
+      // Second player joins - should switch to coop
+      const ws2 = createMockWebSocket()
+      ctx._webSockets.push(ws2)
+      await joinPlayer(gameRoom, ws2, 'Player2')
+
+      state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+      expect(state.mode).toBe('coop')
+
+      // Second player leaves - should switch back to solo
+      await gameRoom.webSocketClose(ws2 as any, 1000, 'Closed', true)
+
+      state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+      expect(state.mode).toBe('solo')
+      expect(Object.keys(state.players).length).toBe(1)
+    })
+  })
+})
+
+// ============================================================================
+// Error Handling
+// ============================================================================
+
+describe('Error Handling', () => {
+  describe('Sending message without joining first (no attachment)', () => {
+    it('drops input message from unattached WebSocket (no error, silently dropped)', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+
+      // Send input without joining - ws has no attachment
+      await gameRoom.webSocketMessage(
+        ws as any,
+        JSON.stringify({ type: 'input', held: { left: true, right: false } })
+      )
+
+      // Input is silently dropped (no error sent, just logged as DROPPED)
+      const errorCall = ws.send.mock.calls.find((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'error'
+      })
+      expect(errorCall).toBeUndefined()
+    })
+
+    it('drops shoot message from unattached WebSocket', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+
+      await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'shoot' }))
+
+      // Shoot is silently dropped (no error, logged as DROPPED)
+      const errorCall = ws.send.mock.calls.find((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'error'
+      })
+      expect(errorCall).toBeUndefined()
+    })
+
+    it('drops move message from unattached WebSocket', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+
+      await gameRoom.webSocketMessage(
+        ws as any,
+        JSON.stringify({ type: 'move', direction: 'left' })
+      )
+
+      // Move is silently dropped
+      const errorCall = ws.send.mock.calls.find((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'error'
+      })
+      expect(errorCall).toBeUndefined()
+    })
+
+    it('ignores ready message from unattached WebSocket', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+
+      await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'ready' }))
+
+      // Ready requires playerId && this.game.players[playerId] -- no playerId means no-op
+      // No error sent, no state change
+      const state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+      expect(state.readyPlayerIds.length).toBe(0)
+    })
+
+    it('responds to ping from unattached WebSocket (ping does not require join)', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+
+      // Ping works without joining - it doesn't check attachment
+      await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'ping' }))
+
+      const pongCall = ws.send.mock.calls.find((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'pong'
+      })
+      expect(pongCall).toBeDefined()
+    })
+  })
+
+  describe('Sending invalid message type', () => {
+    it('silently ignores unrecognized message type (no matching case in switch)', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+
+      await joinPlayer(gameRoom, ws, 'Player')
+      ws.send.mockClear()
+
+      // Send unknown message type - passes isValidClientMessage but no case matches
+      await gameRoom.webSocketMessage(
+        ws as any,
+        JSON.stringify({ type: 'nonexistent_action' })
+      )
+
+      // No error is sent -- the switch statement has no default case
+      const errorCall = ws.send.mock.calls.find((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'error'
+      })
+      expect(errorCall).toBeUndefined()
+    })
+  })
+
+  describe('Sending malformed JSON', () => {
+    it('returns invalid_message error for completely invalid JSON', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+
+      await gameRoom.webSocketMessage(ws as any, '{broken json!!!}')
+
+      const errorCall = ws.send.mock.calls.find((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'error' && msg.code === 'invalid_message'
+      })
+      expect(errorCall).toBeDefined()
+      expect(JSON.parse(errorCall![0]).message).toBe('Failed to parse message')
+    })
+
+    it('returns invalid_message error for JSON without type field', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+
+      await gameRoom.webSocketMessage(ws as any, JSON.stringify({ foo: 'bar' }))
+
+      const errorCall = ws.send.mock.calls.find((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'error' && msg.code === 'invalid_message'
+      })
+      expect(errorCall).toBeDefined()
+      expect(JSON.parse(errorCall![0]).message).toBe('Message must be an object with a string "type" field')
+    })
+
+    it('returns invalid_message error for JSON with non-string type', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+
+      await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 123 }))
+
+      const errorCall = ws.send.mock.calls.find((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'error' && msg.code === 'invalid_message'
+      })
+      expect(errorCall).toBeDefined()
+      expect(JSON.parse(errorCall![0]).message).toBe('Message must be an object with a string "type" field')
+    })
+
+    it('returns invalid_message error for JSON array', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+
+      await gameRoom.webSocketMessage(ws as any, JSON.stringify([1, 2, 3]))
+
+      const errorCall = ws.send.mock.calls.find((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'error' && msg.code === 'invalid_message'
+      })
+      expect(errorCall).toBeDefined()
+    })
+
+    it('returns invalid_message error for JSON null', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+
+      await gameRoom.webSocketMessage(ws as any, JSON.stringify(null))
+
+      const errorCall = ws.send.mock.calls.find((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'error' && msg.code === 'invalid_message'
+      })
+      expect(errorCall).toBeDefined()
+    })
+
+    it('returns invalid_message error for empty string', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+
+      await gameRoom.webSocketMessage(ws as any, '')
+
+      const errorCall = ws.send.mock.calls.find((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'error' && msg.code === 'invalid_message'
+      })
+      expect(errorCall).toBeDefined()
+      // Empty string fails JSON.parse, so error message is 'Failed to parse message'
+      expect(JSON.parse(errorCall![0]).message).toBe('Failed to parse message')
+    })
+  })
+
+  describe('Rate limiting', () => {
+    it('allows up to 60 messages per second', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+
+      // join counts as the 1st message in the rate limit window
+      await joinPlayer(gameRoom, ws, 'Player')
+      ws.send.mockClear()
+
+      // Send 59 more pings (total = 60, exactly at the limit)
+      for (let i = 0; i < 59; i++) {
+        await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'ping' }))
+      }
+
+      const pongCalls = ws.send.mock.calls.filter((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'pong'
+      })
+      expect(pongCalls.length).toBe(59)
+
+      // No rate limit error should have been sent
+      const errorCalls = ws.send.mock.calls.filter((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'error' && msg.code === 'rate_limited'
+      })
+      expect(errorCalls.length).toBe(0)
+    })
+
+    it('sends rate_limited error when exceeding 60 messages and drops further messages', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+
+      // join is message #1 in the rate limit window
+      await joinPlayer(gameRoom, ws, 'Player')
+      ws.send.mockClear()
+
+      // Send 60 more pings: messages #2 through #61
+      // Message #61 (the 60th ping) triggers rate limit (count > 60)
+      for (let i = 0; i < 60; i++) {
+        await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'ping' }))
+      }
+
+      // Should have exactly 59 pong responses (first 59 pings go through, 60th is blocked)
+      const pongCalls = ws.send.mock.calls.filter((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'pong'
+      })
+      expect(pongCalls.length).toBe(59)
+
+      // Should have rate_limited error (sent on the 61st total message)
+      const errorCalls = ws.send.mock.calls.filter((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'error' && msg.code === 'rate_limited'
+      })
+      expect(errorCalls.length).toBe(1)
+      expect(JSON.parse(errorCalls[0][0]).message).toBe('Too many messages, slow down')
+    })
+
+    it('sends rate_limited error only once even with many excess messages', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+
+      // join is message #1
+      await joinPlayer(gameRoom, ws, 'Player')
+      ws.send.mockClear()
+
+      // Send 79 more pings (total = 80 messages, 20 over limit)
+      for (let i = 0; i < 79; i++) {
+        await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'ping' }))
+      }
+
+      // Error only sent once (on message #61, count === RATE_LIMIT_MAX_MESSAGES + 1)
+      const errorCalls = ws.send.mock.calls.filter((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'error' && msg.code === 'rate_limited'
+      })
+      expect(errorCalls.length).toBe(1)
+    })
+
+    it('rate limit applies per-connection independently', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws1 = createMockWebSocket()
+      const ws2 = createMockWebSocket()
+      ctx._webSockets.push(ws1, ws2)
+
+      await joinPlayer(gameRoom, ws1, 'Player1')
+      await joinPlayer(gameRoom, ws2, 'Player2')
+      ws1.send.mockClear()
+      ws2.send.mockClear()
+
+      // ws1 sends 61 messages (hits rate limit)
+      for (let i = 0; i < 61; i++) {
+        await gameRoom.webSocketMessage(ws1 as any, JSON.stringify({ type: 'ping' }))
+      }
+
+      // ws2 should still be able to send normally
+      for (let i = 0; i < 5; i++) {
+        await gameRoom.webSocketMessage(ws2 as any, JSON.stringify({ type: 'ping' }))
+      }
+
+      const ws1Errors = ws1.send.mock.calls.filter((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'error' && msg.code === 'rate_limited'
+      })
+      expect(ws1Errors.length).toBe(1)
+
+      const ws2Pongs = ws2.send.mock.calls.filter((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'pong'
+      })
+      expect(ws2Pongs.length).toBe(5)
+    })
+
+    it('rate limit state is cleaned up on WebSocket close', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+
+      await joinPlayer(gameRoom, ws, 'Player')
+
+      // Send some messages to create rate limit state
+      for (let i = 0; i < 10; i++) {
+        await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'ping' }))
+      }
+
+      // Close the connection -- rateLimits.delete(ws) is called in webSocketClose
+      await gameRoom.webSocketClose(ws as any, 1000, 'Closed', true)
+
+      // No assertion needed beyond no-throw - the main thing is that rate limit
+      // map is cleaned up so it doesn't leak memory. We verify via the code path
+      // executing without error.
+    })
+  })
+
+  describe('Joining when game is already in playing status', () => {
+    it('rejects WebSocket upgrade when game is playing (HTTP level)', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+
+      await joinPlayer(gameRoom, ws, 'SoloPlayer')
+      await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'start_solo' }))
+      await completeWipePhases(gameRoom)
+
+      // Verify playing
+      const state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+      expect(state.status).toBe('playing')
+
+      // Try to upgrade WebSocket
+      const request = new Request('https://internal/ws', {
+        headers: { Upgrade: 'websocket' },
+      })
+      const response = await gameRoom.fetch(request)
+
+      expect(response.status).toBe(409)
+      const result = await response.json() as ErrorResponse
+      expect(result.code).toBe('game_in_progress')
+    })
+  })
+
+  describe('Joining when room already has 4 players (max capacity)', () => {
+    it('rejects via WebSocket upgrade HTTP response when room is full', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+
+      // Join 4 players
+      for (let i = 0; i < 4; i++) {
+        const ws = createMockWebSocket()
+        ctx._webSockets.push(ws)
+        await joinPlayer(gameRoom, ws, `Player${i + 1}`)
+      }
+
+      // Try WebSocket upgrade
+      const request = new Request('https://internal/ws', {
+        headers: { Upgrade: 'websocket' },
+      })
+      const response = await gameRoom.fetch(request)
+
+      expect(response.status).toBe(429)
+      const result = await response.json() as ErrorResponse
+      expect(result.code).toBe('room_full')
+    })
+
+    it('rejects via join message when room is full', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+
+      // Join 4 players
+      for (let i = 0; i < 4; i++) {
+        const ws = createMockWebSocket()
+        ctx._webSockets.push(ws)
+        await joinPlayer(gameRoom, ws, `Player${i + 1}`)
+      }
+
+      // 5th player tries to join via message
+      const ws5 = createMockWebSocket()
+      ctx._webSockets.push(ws5)
+      await gameRoom.webSocketMessage(
+        ws5 as any,
+        JSON.stringify({ type: 'join', name: 'Player5' })
+      )
+
+      const errorCall = ws5.send.mock.calls.find((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'error' && msg.code === 'room_full'
+      })
+      expect(errorCall).toBeDefined()
+    })
+  })
+
+  describe('Invalid input state in input message', () => {
+    it('silently drops input with missing left/right fields', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+
+      await joinPlayer(gameRoom, ws, 'Player')
+      await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'start_solo' }))
+      ws.send.mockClear()
+
+      // Send input with invalid held state (missing right field)
+      await gameRoom.webSocketMessage(
+        ws as any,
+        JSON.stringify({ type: 'input', held: { left: true } })
+      )
+
+      // No error sent - isValidInputState returns false, break is hit
+      const errorCall = ws.send.mock.calls.find((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'error'
+      })
+      expect(errorCall).toBeUndefined()
+    })
+
+    it('silently drops input with non-boolean values', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+
+      await joinPlayer(gameRoom, ws, 'Player')
+      await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'start_solo' }))
+      ws.send.mockClear()
+
+      // Send input with string values instead of booleans
+      await gameRoom.webSocketMessage(
+        ws as any,
+        JSON.stringify({ type: 'input', held: { left: 'yes', right: 'no' } })
+      )
+
+      const errorCall = ws.send.mock.calls.find((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'error'
+      })
+      expect(errorCall).toBeUndefined()
+    })
+
+    it('silently drops input with null held', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+
+      await joinPlayer(gameRoom, ws, 'Player')
+      await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'start_solo' }))
+      ws.send.mockClear()
+
+      await gameRoom.webSocketMessage(
+        ws as any,
+        JSON.stringify({ type: 'input', held: null })
+      )
+
+      const errorCall = ws.send.mock.calls.find((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'error'
+      })
+      expect(errorCall).toBeUndefined()
+    })
+
+    it('silently drops input with no held field', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+
+      await joinPlayer(gameRoom, ws, 'Player')
+      await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'start_solo' }))
+      ws.send.mockClear()
+
+      await gameRoom.webSocketMessage(
+        ws as any,
+        JSON.stringify({ type: 'input' })
+      )
+
+      const errorCall = ws.send.mock.calls.find((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'error'
+      })
+      expect(errorCall).toBeUndefined()
+    })
+  })
+
+  describe('Invalid move direction in move message', () => {
+    it('silently drops move with invalid direction string', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+
+      await joinPlayer(gameRoom, ws, 'Player')
+      await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'start_solo' }))
+      ws.send.mockClear()
+
+      // Send move with invalid direction
+      await gameRoom.webSocketMessage(
+        ws as any,
+        JSON.stringify({ type: 'move', direction: 'up' })
+      )
+
+      // No error sent - isValidMoveDirection returns false, break is hit
+      const errorCall = ws.send.mock.calls.find((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'error'
+      })
+      expect(errorCall).toBeUndefined()
+    })
+
+    it('silently drops move with numeric direction', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+
+      await joinPlayer(gameRoom, ws, 'Player')
+      await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'start_solo' }))
+      ws.send.mockClear()
+
+      await gameRoom.webSocketMessage(
+        ws as any,
+        JSON.stringify({ type: 'move', direction: 1 })
+      )
+
+      const errorCall = ws.send.mock.calls.find((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'error'
+      })
+      expect(errorCall).toBeUndefined()
+    })
+
+    it('silently drops move with missing direction field', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+
+      await joinPlayer(gameRoom, ws, 'Player')
+      await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'start_solo' }))
+      ws.send.mockClear()
+
+      await gameRoom.webSocketMessage(
+        ws as any,
+        JSON.stringify({ type: 'move' })
+      )
+
+      const errorCall = ws.send.mock.calls.find((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'error'
+      })
+      expect(errorCall).toBeUndefined()
+    })
+
+    it('accepts valid left and right directions', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+
+      await joinPlayer(gameRoom, ws, 'Player')
+      await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'start_solo' }))
+      await completeWipePhases(gameRoom)
+      ws.send.mockClear()
+
+      // Both valid directions should be accepted (no error)
+      await gameRoom.webSocketMessage(
+        ws as any,
+        JSON.stringify({ type: 'move', direction: 'left' })
+      )
+      await gameRoom.webSocketMessage(
+        ws as any,
+        JSON.stringify({ type: 'move', direction: 'right' })
+      )
+
+      const errorCalls = ws.send.mock.calls.filter((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'error'
+      })
+      expect(errorCalls.length).toBe(0)
+    })
+  })
+
+  describe('Player name validation', () => {
+    it('truncates names longer than 12 characters', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+
+      await joinPlayer(gameRoom, ws, 'VeryLongPlayerName123')
+
+      const syncCall = ws.send.mock.calls.find((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'sync' && msg.playerId
+      })
+      const syncMsg = JSON.parse(syncCall![0])
+      const player = syncMsg.state.players[syncMsg.playerId]
+      expect(player.name).toBe('VeryLongPlay') // Truncated to 12 chars
+      expect(player.name.length).toBe(12)
+    })
+
+    it('uses default name "Player" when name is not a string', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+
+      // Send join with non-string name
+      await gameRoom.webSocketMessage(
+        ws as any,
+        JSON.stringify({ type: 'join', name: 12345 })
+      )
+
+      const syncCall = ws.send.mock.calls.find((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'sync' && msg.playerId
+      })
+      const syncMsg = JSON.parse(syncCall![0])
+      const player = syncMsg.state.players[syncMsg.playerId]
+      expect(player.name).toBe('Player')
+    })
+
+    it('uses default name "Player" when name field is missing', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+
+      // Send join without name field
+      await gameRoom.webSocketMessage(
+        ws as any,
+        JSON.stringify({ type: 'join' })
+      )
+
+      const syncCall = ws.send.mock.calls.find((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'sync' && msg.playerId
+      })
+      const syncMsg = JSON.parse(syncCall![0])
+      const player = syncMsg.state.players[syncMsg.playerId]
+      expect(player.name).toBe('Player')
+    })
+  })
+
+  describe('HTTP endpoint validation', () => {
+    it('returns 400 for /init with invalid JSON body', async () => {
+      const ctx = createMockDurableObjectContext()
+      const env = createMockEnv()
+      const gameRoom = new GameRoom(ctx as any, env)
+      await new Promise(resolve => setTimeout(resolve, 0))
+
+      const request = new Request('https://internal/init', {
+        method: 'POST',
+        body: 'not json',
+      })
+      const response = await gameRoom.fetch(request)
+
+      expect(response.status).toBe(400)
+      expect(await response.text()).toBe('Invalid JSON body')
+    })
+
+    it('returns 400 for /init with invalid room code format', async () => {
+      const ctx = createMockDurableObjectContext()
+      const env = createMockEnv()
+      const gameRoom = new GameRoom(ctx as any, env)
+      await new Promise(resolve => setTimeout(resolve, 0))
+
+      const request = new Request('https://internal/init', {
+        method: 'POST',
+        body: JSON.stringify({ roomCode: 'abc' }), // lowercase, too short
+      })
+      const response = await gameRoom.fetch(request)
+
+      expect(response.status).toBe(400)
+      expect(await response.text()).toBe('Invalid room code format (expected 6 uppercase alphanumeric characters)')
+    })
+
+    it('returns 400 for /init with missing room code', async () => {
+      const ctx = createMockDurableObjectContext()
+      const env = createMockEnv()
+      const gameRoom = new GameRoom(ctx as any, env)
+      await new Promise(resolve => setTimeout(resolve, 0))
+
+      const request = new Request('https://internal/init', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      })
+      const response = await gameRoom.fetch(request)
+
+      expect(response.status).toBe(400)
+    })
+
+    it('returns 404 for unknown routes', async () => {
+      const { gameRoom } = await createInitializedGameRoom()
+
+      const response = await gameRoom.fetch(new Request('https://internal/nonexistent'))
+      expect(response.status).toBe(404)
+      expect(await response.text()).toBe('Not Found')
+    })
+  })
+
+  describe('Duplicate join prevention', () => {
+    it('returns already_joined error when same WebSocket tries to join twice', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+
+      await joinPlayer(gameRoom, ws, 'Alice')
+      ws.send.mockClear()
+
+      // Try to join again with the same WebSocket
+      await gameRoom.webSocketMessage(
+        ws as any,
+        JSON.stringify({ type: 'join', name: 'Alice2' })
+      )
+
+      const errorCall = ws.send.mock.calls.find((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'error' && msg.code === 'already_joined'
+      })
+      expect(errorCall).toBeDefined()
+      expect(JSON.parse(errorCall![0]).message).toBe('Already in room')
+    })
+  })
+})

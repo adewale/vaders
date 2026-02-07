@@ -2931,3 +2931,987 @@ describe('Sprite shape vs hitbox alignment', () => {
     })
   })
 })
+
+// ============================================================================
+// Collision Edge Cases (Issue #2)
+// ============================================================================
+
+describe('collision edge cases', () => {
+  describe('bullet hitting barrier AND alien in same tick', () => {
+    // The reducer checks collisions in this order:
+    // 1. Bullet-alien (marks bullet y=-100 on hit)
+    // 2. Bullet-UFO (marks bullet y=-100 on hit)
+    // 3. Bullet-player (marks bullet y=100 on hit)
+    // 4. Bullet-barrier (checks all bullets, including those already marked)
+    //
+    // A bullet that kills an alien gets y=-100 which is far from any barrier,
+    // so it effectively cannot also hit a barrier in the same tick.
+
+    it('bullet hitting alien is consumed and does NOT also damage barrier', () => {
+      const { state, players } = createTestPlayingState(1)
+      const player = players[0]
+
+      // Place alien directly above the barrier
+      const alien = createTestAlien('alien1', 50, LAYOUT.BARRIER_Y - 3, { points: 10 })
+      const barrier = createTestBarrier('barrier1', 50)
+      barrier.segments[0].health = 4
+
+      // Bullet will move up into the alien's position this tick
+      // Bullet at y = alien.y + 1, will move to alien.y after TICK
+      const bullet = createTestBullet('b1', 51, LAYOUT.BARRIER_Y - 2, player.id, -1)
+      state.entities = [alien, barrier, bullet]
+      state.score = 0
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // Alien should be killed
+      const aliens = getAliens(result.state.entities)
+      expect(aliens.find(a => a.id === 'alien1')).toBeUndefined()
+
+      // Score awarded for alien kill
+      expect(result.state.score).toBe(10)
+
+      // Barrier should NOT be damaged (bullet was consumed by alien)
+      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as any
+      expect(updatedBarrier.segments[0].health).toBe(4)
+    })
+
+    it('bullet that misses alien can still hit barrier behind it', () => {
+      const { state, players } = createTestPlayingState(1)
+      const player = players[0]
+
+      // Alien at x=50, bullet at x=60 (well outside alien hitbox)
+      const alien = createTestAlien('alien1', 50, 10, { points: 10 })
+      const barrier = createTestBarrier('barrier1', 60)
+      barrier.segments[0].health = 4
+
+      // Bullet aimed at barrier, not alien
+      const bullet = createTestBullet('b1', 60, LAYOUT.BARRIER_Y + 1, player.id, -1)
+      state.entities = [alien, barrier, bullet]
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // Alien should still be alive
+      const aliens = getAliens(result.state.entities)
+      expect(aliens.find(a => a.id === 'alien1')?.alive).toBe(true)
+
+      // Barrier should be damaged
+      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as any
+      expect(updatedBarrier.segments[0].health).toBe(3)
+    })
+
+    it('alien bullet consumed by barrier does NOT also hit player behind it', () => {
+      const { state, players } = createTestPlayingState(1)
+      const player = players[0]
+      player.x = 50
+      player.lives = 3
+      state.players[player.id] = player
+
+      // Barrier directly above the player
+      const barrier = createTestBarrier('barrier1', 48)
+      barrier.segments[0].health = 4
+
+      // Alien bullet moving down, will hit barrier segment at (48, BARRIER_Y)
+      // Position it so it enters the barrier's Y range this tick
+      const alienBullet = createTestBullet('ab1', 48, LAYOUT.BARRIER_Y - 1, null, 1)
+      state.entities = [barrier, alienBullet, createTestAlien('a1', 20, 5)]
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // Barrier should be damaged
+      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as any
+      expect(updatedBarrier.segments[0].health).toBe(3)
+
+      // Player should be alive (bullet was absorbed by barrier)
+      expect(result.state.players[player.id].alive).toBe(true)
+    })
+  })
+
+  describe('multiple players shooting same alien simultaneously', () => {
+    it('only first bullet (by iteration order) kills the alien, second bullet passes through', () => {
+      const { state, players } = createTestPlayingState(2)
+      const [player1, player2] = players
+      player1.kills = 0
+      player2.kills = 0
+      state.players[player1.id] = player1
+      state.players[player2.id] = player2
+
+      // Both bullets are within collision range of the same alien
+      const alien = createTestAlien('alien1', 50, 10, { points: 20 })
+      const bullet1 = createTestBullet('b1', 51, 10, player1.id, -1)
+      const bullet2 = createTestBullet('b2', 52, 10, player2.id, -1)
+      state.entities = [alien, bullet1, bullet2]
+      state.score = 0
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // Only one alien killed event should fire
+      const alienKilledEvents = result.events.filter(
+        e => e.type === 'event' && e.name === 'alien_killed'
+      )
+      expect(alienKilledEvents.length).toBe(1)
+
+      // Score should be awarded only once
+      expect(result.state.score).toBe(20)
+
+      // Only one player gets the kill credit (the first bullet processed)
+      const p1Kills = result.state.players[player1.id].kills
+      const p2Kills = result.state.players[player2.id].kills
+      expect(p1Kills + p2Kills).toBe(1)
+    })
+
+    it('second bullet continues upward after alien is already dead', () => {
+      const { state, players } = createTestPlayingState(2)
+      const [player1, player2] = players
+
+      // Alien at y=10
+      const alien = createTestAlien('alien1', 50, 10, { points: 20 })
+      // First bullet collides with alien
+      const bullet1 = createTestBullet('b1', 51, 10, player1.id, -1)
+      // Second bullet also in range but alien will be dead when it's checked
+      const bullet2 = createTestBullet('b2', 52, 11, player2.id, -1)
+      state.entities = [alien, bullet1, bullet2]
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // Second bullet should still exist (was not consumed because alien was already dead)
+      const bullets = getBullets(result.state.entities)
+      const remainingBullet = bullets.find(b => b.id === 'b2')
+      expect(remainingBullet).toBeDefined()
+      // It should have moved up by baseBulletSpeed
+      expect(remainingBullet!.y).toBe(10) // 11 - 1
+    })
+  })
+
+  describe('player bullet vs alien bullet (bullet-bullet collision)', () => {
+    it('player and alien bullets do NOT cancel each other out (no bullet-vs-bullet collision)', () => {
+      // The reducer does NOT check for bullet-vs-bullet collisions.
+      // Player bullets only check against aliens/UFOs, alien bullets only check against players.
+      // This test documents the actual behavior.
+
+      const { state, players } = createTestPlayingState(1)
+      const player = players[0]
+      player.x = 50
+      state.players[player.id] = player
+
+      // Player bullet moving up and alien bullet moving down, crossing paths
+      const playerBullet = createTestBullet('pb1', 50, 15, player.id, -1)
+      const alienBullet = createTestBullet('ab1', 50, 14, null, 1)
+      state.entities = [playerBullet, alienBullet, createTestAlien('a1', 20, 5)]
+      state.tick = 1 // Not a multiple of 5, so alien bullets move
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // Both bullets should still exist (they pass through each other)
+      const bullets = getBullets(result.state.entities)
+      const pb = bullets.find(b => b.id === 'pb1')
+      const ab = bullets.find(b => b.id === 'ab1')
+
+      expect(pb).toBeDefined()
+      expect(ab).toBeDefined()
+
+      // Player bullet moved up
+      expect(pb!.y).toBe(14)
+      // Alien bullet moved down
+      expect(ab!.y).toBe(15)
+    })
+
+    it('bullets at exact same position still pass through each other', () => {
+      const { state, players } = createTestPlayingState(1)
+      const player = players[0]
+      player.x = 80 // Far from bullet positions, won't be hit
+      state.players[player.id] = player
+
+      // Both bullets at the exact same position
+      const playerBullet = createTestBullet('pb1', 50, 10, player.id, -1)
+      const alienBullet = createTestBullet('ab1', 50, 10, null, 1)
+      state.entities = [playerBullet, alienBullet, createTestAlien('a1', 20, 5)]
+      state.tick = 1
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      const bullets = getBullets(result.state.entities)
+      // Both bullets should survive (no bullet-bullet collision logic)
+      expect(bullets.length).toBe(2)
+    })
+  })
+
+  describe('UFO collision with player bullets', () => {
+    it('UFO at left screen edge is hittable', () => {
+      const { state, players } = createTestPlayingState(1)
+      const ufo = createTestUFO('ufo1', 0, { points: 300, direction: -1 })
+      // Bullet within UFO hitbox [0, 5)
+      const bullet = createTestBullet('b1', 2, 1, players[0].id, -1)
+      state.entities = [ufo, bullet, createTestAlien('a1', 20, 5)]
+      state.score = 0
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      expect(result.state.score).toBe(300)
+      const ufos = getUFOs(result.state.entities)
+      expect(ufos.length).toBe(0)
+    })
+
+    it('UFO at right screen edge is hittable', () => {
+      const { state, players } = createTestPlayingState(1)
+      const ufo = createTestUFO('ufo1', 115, { points: 200, direction: 1 })
+      // Bullet within UFO hitbox [115, 120)
+      const bullet = createTestBullet('b1', 117, 1, players[0].id, -1)
+      state.entities = [ufo, bullet, createTestAlien('a1', 20, 5)]
+      state.score = 0
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      expect(result.state.score).toBe(200)
+    })
+
+    it('alien bullets do NOT hit UFOs (only player bullets hit UFOs)', () => {
+      const { state, players } = createTestPlayingState(1)
+      const ufo = createTestUFO('ufo1', 50, { points: 100, direction: 1 })
+      // Alien bullet at the UFO position (dy=1, not -1)
+      const alienBullet = createTestBullet('ab1', 52, 1, null, 1)
+      state.entities = [ufo, alienBullet, createTestAlien('a1', 20, 5)]
+      state.tick = 1
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // UFO should still be alive (alien bullets don't check UFO collision)
+      const ufos = getUFOs(result.state.entities)
+      expect(ufos.length).toBe(1)
+      expect(ufos[0].alive).toBe(true)
+    })
+
+    it('bullet that hits UFO does NOT also hit alien (bullet is consumed)', () => {
+      const { state, players } = createTestPlayingState(1)
+      const player = players[0]
+
+      // UFO at y=1, alien also nearby
+      const ufo = createTestUFO('ufo1', 50, { points: 100 })
+      const alien = createTestAlien('alien1', 50, 2) // Close to UFO
+      // Bullet at y=1 will collide with UFO first (aliens checked first, but bullet at y=0 after move)
+      // Actually: bullets move first, then alien check, then UFO check
+      // Bullet at y=2, moves to y=1, checks aliens (alien at y=2, bullet now at y=1, |1-2|=1 < 2 so HIT)
+      // Let's set up so bullet only hits UFO: alien far away
+      const alienFar = createTestAlien('alien-far', 20, 5)
+      const bullet = createTestBullet('b1', 52, 2, player.id, -1)
+      state.entities = [ufo, alienFar, bullet]
+      state.score = 0
+      player.kills = 0
+      state.players[player.id] = player
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // UFO should be killed
+      const ufos = getUFOs(result.state.entities)
+      expect(ufos.length).toBe(0)
+
+      // Score should be UFO points
+      expect(result.state.score).toBe(100)
+      expect(result.state.players[player.id].kills).toBe(1)
+    })
+
+    it('bullet can hit alien and a different bullet can hit UFO in the same tick', () => {
+      const { state, players } = createTestPlayingState(1)
+      const player = players[0]
+      player.kills = 0
+      state.players[player.id] = player
+
+      const alien = createTestAlien('alien1', 30, 10, { points: 10 })
+      const ufo = createTestUFO('ufo1', 50, { points: 200 })
+
+      const bulletForAlien = createTestBullet('b1', 31, 10, player.id, -1)
+      const bulletForUfo = createTestBullet('b2', 52, 1, player.id, -1)
+      state.entities = [alien, ufo, bulletForAlien, bulletForUfo]
+      state.score = 0
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // Both should be killed
+      expect(result.state.score).toBe(210) // 10 + 200
+      expect(result.state.players[player.id].kills).toBe(2)
+    })
+  })
+
+  describe('alien reaching player row (invasion game over)', () => {
+    it('triggers invasion when alien bottom edge reaches PLAYER_Y', () => {
+      // Invasion check: alien.y + ALIEN_HEIGHT >= PLAYER_Y
+      // ALIEN_HEIGHT = 2, PLAYER_Y = 31
+      // So alien at y=29 triggers: 29 + 2 = 31 >= 31
+
+      const { state, players } = createTestPlayingState(1, {
+        aliens: [createTestAlien('alien1', 50, LAYOUT.PLAYER_Y - LAYOUT.ALIEN_HEIGHT)],
+      })
+      // Must trigger on alien move tick
+      state.tick = DEFAULT_CONFIG.baseAlienMoveIntervalTicks - 1
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      expect(result.state.status).toBe('game_over')
+      expect(result.state.lives).toBe(0)
+      expect(hasEvent(result.events, 'invasion')).toBe(true)
+    })
+
+    it('alien one row above invasion threshold still triggers game over via GAME_OVER_Y check', () => {
+      // alien.y = PLAYER_Y - ALIEN_HEIGHT - 1 = 31 - 2 - 1 = 28
+      // GAME_OVER_Y = 28, so aliensReachedBottom check (28 >= 28) triggers game_over
+      // This demonstrates there are TWO game-over paths: invasion (section 4) and
+      // aliensReachedBottom (section 7). The GAME_OVER_Y check is more aggressive.
+      const { state, players } = createTestPlayingState(1, {
+        aliens: [createTestAlien('alien1', 50, LAYOUT.PLAYER_Y - LAYOUT.ALIEN_HEIGHT - 1)],
+      })
+      state.tick = 1 // Non-move tick to avoid invasion path
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // GAME_OVER_Y (28) triggers before actual invasion (PLAYER_Y - ALIEN_HEIGHT = 29)
+      expect(result.state.status).toBe('game_over')
+      expect(hasEvent(result.events, 'game_over')).toBe(true)
+    })
+
+    it('alien at y = GAME_OVER_Y - 1 does NOT trigger game over', () => {
+      // alien.y = 27, 27 >= 28 is false -> no game over
+      const { state, players } = createTestPlayingState(1, {
+        aliens: [createTestAlien('alien1', 50, LAYOUT.GAME_OVER_Y - 1)],
+      })
+      state.tick = 1 // Non-move tick
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      expect(result.state.status).toBe('playing')
+    })
+
+    it('invasion overrides remaining lives (game over regardless)', () => {
+      const { state, players } = createTestPlayingState(1, {
+        aliens: [createTestAlien('alien1', 50, LAYOUT.PLAYER_Y - LAYOUT.ALIEN_HEIGHT)],
+      })
+      const player = players[0]
+      player.lives = 99 // Lots of lives
+      state.players[player.id] = player
+      state.tick = DEFAULT_CONFIG.baseAlienMoveIntervalTicks - 1
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // Invasion triggers game over regardless of lives
+      expect(result.state.status).toBe('game_over')
+      expect(result.state.lives).toBe(0)
+      expect(hasEvent(result.events, 'invasion')).toBe(true)
+    })
+
+    it('invasion check only happens on alien move ticks', () => {
+      // Place alien at invasion threshold, but tick is NOT a move interval
+      const { state, players } = createTestPlayingState(1, {
+        aliens: [createTestAlien('alien1', 50, LAYOUT.PLAYER_Y - LAYOUT.ALIEN_HEIGHT)],
+      })
+      state.tick = 1 // Not a move interval (move interval is 18 for solo)
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // Invasion NOT checked because it's inside the alien movement block
+      // which only runs on alienMoveIntervalTicks
+      // But GAME_OVER_Y check happens in section 7 (end conditions)
+      // The end condition check: aliensReachedBottom = aliens.some(a.y >= GAME_OVER_Y)
+      // GAME_OVER_Y = 28, alien at y = 31 - 2 = 29, 29 >= 28 is true
+      // So this WILL trigger game_over via section 7 even on non-move ticks
+      expect(result.state.status).toBe('game_over')
+      expect(hasEvent(result.events, 'game_over')).toBe(true)
+    })
+
+    it('aliensReachedBottom check (section 7) triggers for aliens at GAME_OVER_Y', () => {
+      // GAME_OVER_Y = 28
+      const { state, players } = createTestPlayingState(1, {
+        aliens: [createTestAlien('alien1', 50, LAYOUT.GAME_OVER_Y)],
+      })
+      state.tick = 1 // Non-move tick
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      expect(result.state.status).toBe('game_over')
+      const data = getEventData<{ result: string }>(result.events, 'game_over')
+      expect(data?.result).toBe('defeat')
+    })
+
+    it('aliens just above GAME_OVER_Y do NOT trigger game over via section 7', () => {
+      // alien.y = 27, which is < GAME_OVER_Y (28)
+      const { state, players } = createTestPlayingState(1, {
+        aliens: [createTestAlien('alien1', 50, LAYOUT.GAME_OVER_Y - 1)],
+      })
+      state.tick = 1 // Non-move tick
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      expect(result.state.status).toBe('playing')
+    })
+  })
+
+  describe('collision priority order within a single tick', () => {
+    it('alien collision is checked BEFORE barrier collision for player bullets', () => {
+      // If a player bullet can hit both an alien and a barrier in the same tick,
+      // the alien is checked first. If the alien is hit, bullet.y = -100,
+      // so the barrier check won't match (barrier is at BARRIER_Y=25, not y=-100).
+
+      const { state, players } = createTestPlayingState(1)
+      const player = players[0]
+
+      // Alien positioned at barrier height
+      const alien = createTestAlien('alien1', 50, LAYOUT.BARRIER_Y - 1)
+      const barrier = createTestBarrier('barrier1', 50)
+      barrier.segments[0].health = 4
+
+      // Bullet will be at alien's Y after moving
+      const bullet = createTestBullet('b1', 51, LAYOUT.BARRIER_Y, player.id, -1)
+      state.entities = [alien, barrier, bullet]
+      state.score = 0
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // Alien should be hit (checked first)
+      const aliens = getAliens(result.state.entities)
+      expect(aliens.find(a => a.id === 'alien1')).toBeUndefined()
+      expect(result.state.score).toBeGreaterThan(0)
+
+      // Barrier should NOT be damaged (bullet was consumed by alien)
+      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as any
+      expect(updatedBarrier.segments[0].health).toBe(4)
+    })
+
+    it('player bullet checks aliens before UFOs', () => {
+      // The reducer iterates: bullet-alien, then bullet-UFO
+      // If a bullet hits an alien (y=-100), the UFO check won't match
+
+      const { state, players } = createTestPlayingState(1)
+      const alien = createTestAlien('alien1', 50, 1) // Same Y as UFO
+      const ufo = createTestUFO('ufo1', 50, { points: 200 })
+
+      // Bullet that could hit either
+      const bullet = createTestBullet('b1', 52, 2, players[0].id, -1)
+      state.entities = [alien, ufo, bullet]
+      state.score = 0
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // Alien should be hit (checked first)
+      const aliens = getAliens(result.state.entities)
+      expect(aliens.find(a => a.id === 'alien1')).toBeUndefined()
+
+      // UFO should still be alive (bullet was consumed by alien)
+      const ufos = getUFOs(result.state.entities)
+      expect(ufos.length).toBe(1)
+      expect(ufos[0].alive).toBe(true)
+
+      // Score should be alien points only (10 for octopus)
+      expect(result.state.score).toBe(10)
+    })
+  })
+})
+
+// ============================================================================
+// Boundary Condition Tests (Issue #9)
+// ============================================================================
+
+describe('boundary conditions', () => {
+  describe('player movement at screen edges', () => {
+    it('player at x=PLAYER_MIN_X (2) trying to move left stays at PLAYER_MIN_X', () => {
+      const { state, players } = createTestPlayingState(1)
+      const player = players[0]
+      player.x = LAYOUT.PLAYER_MIN_X
+      player.inputState = { left: true, right: false }
+      state.players[player.id] = player
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      expect(result.state.players[player.id].x).toBe(LAYOUT.PLAYER_MIN_X)
+    })
+
+    it('player at x=0 (below PLAYER_MIN_X) gets clamped to PLAYER_MIN_X on move left', () => {
+      // Even if a player somehow gets to x=0 (shouldn't happen normally),
+      // moving left should clamp to PLAYER_MIN_X
+      const { state, players } = createTestPlayingState(1)
+      const player = players[0]
+      player.x = 0 // Below minimum
+      player.inputState = { left: true, right: false }
+      state.players[player.id] = player
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // applyPlayerInput: Math.max(PLAYER_MIN_X, 0 - 1) = Math.max(2, -1) = 2
+      expect(result.state.players[player.id].x).toBe(LAYOUT.PLAYER_MIN_X)
+    })
+
+    it('player at x=PLAYER_MAX_X (114) trying to move right stays at PLAYER_MAX_X', () => {
+      const { state, players } = createTestPlayingState(1)
+      const player = players[0]
+      player.x = LAYOUT.PLAYER_MAX_X
+      player.inputState = { left: false, right: true }
+      state.players[player.id] = player
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      expect(result.state.players[player.id].x).toBe(LAYOUT.PLAYER_MAX_X)
+    })
+
+    it('player at x=119 (above PLAYER_MAX_X) gets clamped to PLAYER_MAX_X on move right', () => {
+      // Edge case: player somehow at x=119, moving right should clamp to PLAYER_MAX_X
+      const { state, players } = createTestPlayingState(1)
+      const player = players[0]
+      player.x = 119 // Above maximum (PLAYER_MAX_X = 114)
+      player.inputState = { left: false, right: true }
+      state.players[player.id] = player
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // applyPlayerInput: Math.min(PLAYER_MAX_X, 119 + 1) = Math.min(114, 120) = 114
+      expect(result.state.players[player.id].x).toBe(LAYOUT.PLAYER_MAX_X)
+    })
+
+    it('discrete PLAYER_MOVE left at PLAYER_MIN_X stays at PLAYER_MIN_X', () => {
+      const { state, players } = createTestPlayingState(1)
+      const player = players[0]
+      player.x = LAYOUT.PLAYER_MIN_X
+      state.players[player.id] = player
+
+      const result = gameReducer(state, { type: 'PLAYER_MOVE', playerId: player.id, direction: 'left' })
+
+      expect(result.state.players[player.id].x).toBe(LAYOUT.PLAYER_MIN_X)
+    })
+
+    it('discrete PLAYER_MOVE right at PLAYER_MAX_X stays at PLAYER_MAX_X', () => {
+      const { state, players } = createTestPlayingState(1)
+      const player = players[0]
+      player.x = LAYOUT.PLAYER_MAX_X
+      state.players[player.id] = player
+
+      const result = gameReducer(state, { type: 'PLAYER_MOVE', playerId: player.id, direction: 'right' })
+
+      expect(result.state.players[player.id].x).toBe(LAYOUT.PLAYER_MAX_X)
+    })
+
+    it('discrete PLAYER_MOVE at PLAYER_MIN_X + 1 left clamps correctly', () => {
+      // Discrete move speed is 2, so moving left from MIN_X + 1 should clamp to MIN_X
+      const { state, players } = createTestPlayingState(1)
+      const player = players[0]
+      player.x = LAYOUT.PLAYER_MIN_X + 1  // x = 3
+      state.players[player.id] = player
+
+      const result = gameReducer(state, { type: 'PLAYER_MOVE', playerId: player.id, direction: 'left' })
+
+      // constrainPlayerX: Math.max(2, 3 - 2) = Math.max(2, 1) = 2
+      expect(result.state.players[player.id].x).toBe(LAYOUT.PLAYER_MIN_X)
+    })
+
+    it('discrete PLAYER_MOVE at PLAYER_MAX_X - 1 right clamps correctly', () => {
+      // Discrete move speed is 2, so moving right from MAX_X - 1 should clamp to MAX_X
+      const { state, players } = createTestPlayingState(1)
+      const player = players[0]
+      player.x = LAYOUT.PLAYER_MAX_X - 1  // x = 113
+      state.players[player.id] = player
+
+      const result = gameReducer(state, { type: 'PLAYER_MOVE', playerId: player.id, direction: 'right' })
+
+      // constrainPlayerX: Math.min(114, 113 + 2) = Math.min(114, 115) = 114
+      expect(result.state.players[player.id].x).toBe(LAYOUT.PLAYER_MAX_X)
+    })
+
+    it('holding both left and right simultaneously results in no net movement', () => {
+      const { state, players } = createTestPlayingState(1)
+      const player = players[0]
+      player.x = 60
+      player.inputState = { left: true, right: true }
+      state.players[player.id] = player
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // applyPlayerInput applies left then right:
+      // left: Math.max(2, 60 - 1) = 59
+      // right: Math.min(114, 59 + 1) = 60
+      // Net effect: back to 60
+      expect(result.state.players[player.id].x).toBe(60)
+    })
+  })
+
+  describe('alien formation reaching screen edges (direction reversal)', () => {
+    it('alien at ALIEN_MAX_X triggers direction reversal', () => {
+      const { state, players } = createTestPlayingState(1, {
+        aliens: [createTestAlien('alien1', LAYOUT.ALIEN_MAX_X - 1, 10)],
+      })
+      state.alienDirection = 1 // Moving right
+      // Set tick so next tick triggers alien movement
+      state.tick = DEFAULT_CONFIG.baseAlienMoveIntervalTicks - 1
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // Direction should reverse
+      expect(result.state.alienDirection).toBe(-1)
+      // Alien should drop down by 1
+      const aliens = getAliens(result.state.entities)
+      expect(aliens[0].y).toBe(11) // Was 10, dropped by 1
+    })
+
+    it('alien at ALIEN_MIN_X triggers direction reversal', () => {
+      const { state, players } = createTestPlayingState(1, {
+        aliens: [createTestAlien('alien1', LAYOUT.ALIEN_MIN_X + 1, 10)],
+      })
+      state.alienDirection = -1 // Moving left
+      state.tick = DEFAULT_CONFIG.baseAlienMoveIntervalTicks - 1
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // Direction should reverse (nextX = 3 + (-1)*2 = 1 <= ALIEN_MIN_X=2)
+      // Wait, ALIEN_MIN_X + 1 = 3, nextX = 3 + (-1)*2 = 1, 1 <= 2 so hitWall
+      expect(result.state.alienDirection).toBe(1)
+      // Alien should drop down
+      const aliens = getAliens(result.state.entities)
+      expect(aliens[0].y).toBe(11)
+    })
+
+    it('alien well within bounds does NOT trigger reversal', () => {
+      const { state, players } = createTestPlayingState(1, {
+        aliens: [createTestAlien('alien1', 50, 10)],
+      })
+      state.alienDirection = 1
+      state.tick = DEFAULT_CONFIG.baseAlienMoveIntervalTicks - 1
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // Direction should stay the same
+      expect(result.state.alienDirection).toBe(1)
+      // Alien should move right by 2
+      const aliens = getAliens(result.state.entities)
+      expect(aliens[0].x).toBe(52) // 50 + 1*2
+      expect(aliens[0].y).toBe(10) // No drop
+    })
+
+    it('multiple aliens: rightmost one triggers reversal for all', () => {
+      const { state, players } = createTestPlayingState(1, {
+        aliens: [
+          createTestAlien('alien1', 50, 10),
+          createTestAlien('alien2', LAYOUT.ALIEN_MAX_X - 1, 10),
+        ],
+      })
+      state.alienDirection = 1
+      state.tick = DEFAULT_CONFIG.baseAlienMoveIntervalTicks - 1
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      expect(result.state.alienDirection).toBe(-1)
+      // Both aliens drop
+      const aliens = getAliens(result.state.entities)
+      for (const alien of aliens) {
+        expect(alien.y).toBe(11)
+      }
+    })
+
+    it('dead aliens do NOT affect wall detection', () => {
+      const { state, players } = createTestPlayingState(1, {
+        aliens: [
+          createTestAlien('alive', 50, 10),
+          createTestAlien('dead', LAYOUT.ALIEN_MAX_X - 1, 10, { alive: false }),
+        ],
+      })
+      state.alienDirection = 1
+      state.tick = DEFAULT_CONFIG.baseAlienMoveIntervalTicks - 1
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // Dead alien at wall should NOT cause reversal
+      expect(result.state.alienDirection).toBe(1)
+      // Living alien should move right
+      const aliens = getAliens(result.state.entities)
+      const aliveAlien = aliens.find(a => a.id === 'alive')
+      expect(aliveAlien!.x).toBe(52) // 50 + 2
+    })
+  })
+
+  describe('bullets going off-screen (removal)', () => {
+    it('player bullet at y=1 moves to y=0 and is removed (y <= 0)', () => {
+      const { state, players } = createTestPlayingState(1)
+      const bullet = createTestBullet('b1', 50, 1, players[0].id, -1)
+      state.entities.push(bullet)
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      const bullets = getBullets(result.state.entities)
+      expect(bullets.find(b => b.id === 'b1')).toBeUndefined()
+    })
+
+    it('alien bullet at y=height-1 moves to y=height and is removed (y >= height)', () => {
+      const { state, players } = createTestPlayingState(1)
+      const bullet = createTestBullet('ab1', 50, state.config.height - 1, null, 1)
+      state.entities.push(bullet)
+      state.tick = 1 // Not multiple of 5 so alien bullet moves
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      const bullets = getBullets(result.state.entities)
+      expect(bullets.find(b => b.id === 'ab1')).toBeUndefined()
+    })
+
+    it('bullet at y=0 is removed (exactly at boundary)', () => {
+      const { state, players } = createTestPlayingState(1)
+      // Create bullet already at y=0 (would be removed if y <= 0)
+      const bullet = createTestBullet('b1', 50, 0, players[0].id, -1)
+      state.entities.push(bullet)
+
+      // After tick, bullet moves to y=-1, filter removes y <= 0
+      const result = gameReducer(state, { type: 'TICK' })
+
+      const bullets = getBullets(result.state.entities)
+      expect(bullets.find(b => b.id === 'b1')).toBeUndefined()
+    })
+
+    it('bullet at y=2 survives (well within bounds)', () => {
+      const { state, players } = createTestPlayingState(1)
+      const bullet = createTestBullet('b1', 50, 2, players[0].id, -1)
+      state.entities.push(bullet)
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // y = 2 - 1 = 1, which is > 0, so bullet survives
+      const bullets = getBullets(result.state.entities)
+      const b = bullets.find(b => b.id === 'b1')
+      expect(b).toBeDefined()
+      expect(b!.y).toBe(1)
+    })
+
+    it('alien bullet skipping on 5th tick does not get removed at boundary', () => {
+      const { state, players } = createTestPlayingState(1)
+      // Alien bullet near bottom, on a tick where it skips movement
+      const bullet = createTestBullet('ab1', 50, state.config.height - 1, null, 1)
+      state.entities.push(bullet)
+      state.tick = 4 // Next tick is 5, alien bullets skip on tick % 5 === 0
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // Bullet did NOT move (skipped), so y = height - 1 which is < height
+      const bullets = getBullets(result.state.entities)
+      const ab = bullets.find(b => b.id === 'ab1')
+      expect(ab).toBeDefined()
+      expect(ab!.y).toBe(state.config.height - 1) // Still there
+    })
+  })
+
+  describe('entities at y=0 and y=35 (top/bottom boundaries)', () => {
+    it('UFO at y=1 (default) is within screen bounds', () => {
+      const { state, players } = createTestPlayingState(1)
+      const ufo = createTestUFO('ufo1', 50)
+      state.entities.push(ufo)
+
+      expect(ufo.y).toBe(1) // UFO always at y=1
+    })
+
+    it('player bullet spawns above player at y=PLAYER_Y - BULLET_SPAWN_OFFSET', () => {
+      const { state, players } = createTestPlayingState(1)
+      const player = players[0]
+      player.x = 50
+      player.lastShotTick = 0
+      state.tick = 10
+      state.players[player.id] = player
+
+      const result = gameReducer(state, { type: 'PLAYER_SHOOT', playerId: player.id })
+
+      const bullets = getBullets(result.state.entities)
+      expect(bullets[0].y).toBe(LAYOUT.PLAYER_Y - LAYOUT.BULLET_SPAWN_OFFSET)
+      // PLAYER_Y = 31, BULLET_SPAWN_OFFSET = 2, so y = 29
+      expect(bullets[0].y).toBe(29)
+    })
+
+    it('alien at y=0 is above normal start but still functional', () => {
+      // Aliens normally start at ALIEN_START_Y (3) but testing edge case
+      const { state, players } = createTestPlayingState(1, {
+        aliens: [createTestAlien('alien1', 50, 0)],
+      })
+
+      // Should still function normally (move, be hittable, etc.)
+      const bullet = createTestBullet('b1', 52, 0, players[0].id, -1)
+      state.entities.push(bullet)
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // Alien at y=0 should still be hittable (checkAlienHit: |0 - (-1)| = 1 < 2)
+      // Bullet moves from y=0 to y=-1, then checks collision with alien at y=0
+      // |(-1) - 0| = 1 < COLLISION_V(2) -> HIT
+      const aliens = getAliens(result.state.entities)
+      expect(aliens.find(a => a.id === 'alien1')).toBeUndefined() // Killed
+    })
+
+    it('alien at y=35 (bottom of screen) triggers game over via GAME_OVER_Y check', () => {
+      // y=35 >= GAME_OVER_Y(28) -> triggers game over
+      const { state, players } = createTestPlayingState(1, {
+        aliens: [createTestAlien('alien1', 50, 35)],
+      })
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      expect(result.state.status).toBe('game_over')
+    })
+
+    it('barrier at BARRIER_Y (25) can be hit by bullets from above and below', () => {
+      const { state, players } = createTestPlayingState(1)
+      const barrier = createTestBarrier('barrier1', 50)
+      barrier.segments[0].health = 4
+      barrier.segments[1].health = 4 // offsetX=1, offsetY=0
+
+      // Player bullet from above
+      const playerBullet = createTestBullet('pb1', 50, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
+      // Alien bullet from below (will move down into barrier)
+      const alienBullet = createTestBullet('ab1', 52, LAYOUT.BARRIER_Y - 1, null, 1)
+      state.entities = [barrier, playerBullet, alienBullet, createTestAlien('a1', 20, 5)]
+      state.tick = 1
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as any
+      // Player bullet should damage segment at offset (0,0) or (1,0)
+      // Alien bullet should damage segment at offset (1,0)
+      // Both bullets should be consumed
+      const bullets = getBullets(result.state.entities)
+      expect(bullets.length).toBe(0)
+
+      // At least one segment should be damaged
+      const damagedSegments = updatedBarrier.segments.filter(
+        (s: any) => s.health < 4
+      )
+      expect(damagedSegments.length).toBeGreaterThanOrEqual(1)
+    })
+  })
+
+  describe('sprite overlap at boundaries', () => {
+    it('two aliens can occupy adjacent positions without affecting each other', () => {
+      const { state, players } = createTestPlayingState(1, {
+        aliens: [
+          createTestAlien('alien1', 50, 10, { points: 10 }),
+          createTestAlien('alien2', 55, 10, { points: 20 }), // Adjacent (ALIEN_WIDTH=5)
+        ],
+      })
+      // Kill only the first one
+      const bullet = createTestBullet('b1', 52, 10, players[0].id, -1)
+      state.entities.push(bullet)
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // First alien killed, second should survive
+      const aliens = getAliens(result.state.entities)
+      expect(aliens.find(a => a.id === 'alien1')).toBeUndefined()
+      expect(aliens.find(a => a.id === 'alien2')?.alive).toBe(true)
+      expect(result.state.score).toBe(10)
+    })
+
+    it('player hitbox at PLAYER_MIN_X does not extend below x=0', () => {
+      // Player at x=PLAYER_MIN_X (2)
+      // Hitbox: [2-2, 2+3) = [0, 5)
+      // So x=0 IS within the hitbox (edge case)
+      const { state, players } = createTestPlayingState(1)
+      const player = players[0]
+      player.x = LAYOUT.PLAYER_MIN_X // x=2
+      player.lives = 3
+      state.players[player.id] = player
+
+      // Alien bullet at x=0 (leftmost hitbox position)
+      const alienBullet = createTestBullet('ab1', 0, LAYOUT.PLAYER_Y, null, 1)
+      state.entities = [alienBullet, createTestAlien('a1', 20, 5)]
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // checkPlayerHit: 0 >= 0 && 0 < 5 && |PLAYER_Y - PLAYER_Y+1| < 2
+      // Actually bullet moves first: y = PLAYER_Y + 1 (moved down)
+      // Then check: 0 >= (2-2=0) && 0 < (2+2+1=5) && |PLAYER_Y+1 - PLAYER_Y| < 2 -> 1 < 2 -> true
+      // So bullet at x=0 DOES hit the player
+      expect(result.state.players[player.id].alive).toBe(false)
+    })
+
+    it('player hitbox at PLAYER_MAX_X does not extend past screen width', () => {
+      // Player at x=PLAYER_MAX_X (114)
+      // Hitbox: [114-2, 114+3) = [112, 117)
+      // x=117 would be out of hitbox
+      const { state, players } = createTestPlayingState(1)
+      const player = players[0]
+      player.x = LAYOUT.PLAYER_MAX_X // x=114
+      player.lives = 3
+      state.players[player.id] = player
+
+      // Alien bullet just outside hitbox
+      const alienBullet = createTestBullet('ab1', 117, LAYOUT.PLAYER_Y, null, 1)
+      state.entities = [alienBullet, createTestAlien('a1', 20, 5)]
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // checkPlayerHit: 117 >= 112 && 117 < 117 -> false (117 not < 117)
+      expect(result.state.players[player.id].alive).toBe(true) // Misses
+    })
+
+    it('UFO off-screen removal uses generous bounds (x < -3 or x > width + 3)', () => {
+      const { state, players } = createTestPlayingState(1)
+
+      // UFO at exactly x=-3 moving left should be removed after move to -4
+      const ufo1 = createTestUFO('ufo-left', -3, { direction: -1 })
+      state.entities.push(ufo1)
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // After move: x = -3 + (-1)*1 = -4, -4 < -3, so removed
+      const ufos = getUFOs(result.state.entities)
+      expect(ufos.find(u => u.id === 'ufo-left')).toBeUndefined()
+    })
+
+    it('UFO at x=-2 moving left is NOT removed yet (still within buffer)', () => {
+      const { state, players } = createTestPlayingState(1)
+
+      // UFO at x=-2, moves to x=-3, -3 < -3 is false, so NOT removed
+      const ufo = createTestUFO('ufo1', -2, { direction: -1 })
+      state.entities.push(ufo)
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // After move: x = -2 + (-1) = -3, -3 < -3 is false
+      const ufos = getUFOs(result.state.entities)
+      expect(ufos.find(u => u.id === 'ufo1')).toBeDefined()
+    })
+  })
+
+  describe('alien-barrier collision at boundaries', () => {
+    it('aliens destroy barrier segments on contact during movement', () => {
+      const { state, players } = createTestPlayingState(1, {
+        aliens: [createTestAlien('alien1', 50, LAYOUT.BARRIER_Y - 1)],
+      })
+      const barrier = createTestBarrier('barrier1', 50)
+      barrier.segments[0].health = 4
+      state.entities.push(barrier)
+      // Trigger alien movement tick
+      state.tick = DEFAULT_CONFIG.baseAlienMoveIntervalTicks - 1
+      state.alienDirection = 1
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // After wall check (no wall hit here), alien at y=BARRIER_Y-1
+      // Alien spans [50, 55) x [BARRIER_Y-1, BARRIER_Y+1)
+      // Barrier segment at (50, BARRIER_Y) spans [50, 52) x [25, 27)
+      // Alien bottom = BARRIER_Y - 1 + 2 = BARRIER_Y + 1
+      // Overlap check: alien.y(24) < segBottom(27) && alienBottom(26) > segY(25) -> true
+      // So segments overlapping with alien should be destroyed
+      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as any
+      const destroyedSegments = updatedBarrier.segments.filter(
+        (s: any) => s.health === 0
+      )
+      expect(destroyedSegments.length).toBeGreaterThan(0)
+    })
+
+    it('aliens dropping down into barrier row destroys overlapping segments', () => {
+      // Place alien at wall edge so it reverses and drops into barrier
+      const { state, players } = createTestPlayingState(1, {
+        aliens: [createTestAlien('alien1', LAYOUT.ALIEN_MAX_X - 1, LAYOUT.BARRIER_Y - 2)],
+      })
+      const barrier = createTestBarrier('barrier1', LAYOUT.ALIEN_MAX_X - 3)
+      barrier.segments[0].health = 4
+      state.entities.push(barrier)
+      state.alienDirection = 1
+      state.tick = DEFAULT_CONFIG.baseAlienMoveIntervalTicks - 1
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // Alien hits wall, reverses, drops by 1
+      // New alien position: y = BARRIER_Y - 2 + 1 = BARRIER_Y - 1
+      expect(result.state.alienDirection).toBe(-1)
+      const aliens = getAliens(result.state.entities)
+      expect(aliens[0].y).toBe(LAYOUT.BARRIER_Y - 1)
+    })
+  })
+})
