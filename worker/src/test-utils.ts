@@ -10,9 +10,7 @@ import type {
   BarrierSegment,
   UFOEntity,
   PlayerSlot,
-  PlayerColor,
   ClassicAlienType,
-  GameConfig,
   Entity,
 } from '../../shared/types'
 import { DEFAULT_CONFIG, LAYOUT, PLAYER_COLORS } from '../../shared/types'

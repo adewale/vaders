@@ -1060,9 +1060,9 @@ describe('GameScreen Header Data Derivation', () => {
     expect(myLives).toBe(0)
   })
 
-  test('max lives is 3 for solo, 5 for multiplayer', () => {
+  test('max lives is 3 for solo, 5 for coop', () => {
     const soloState = createMockGameState({ mode: 'solo' })
-    const multiState = createMockGameState({ mode: 'multiplayer' })
+    const multiState = createMockGameState({ mode: 'coop' })
 
     const soloMaxLives = soloState.mode === 'solo' ? 3 : 5
     const multiMaxLives = multiState.mode === 'solo' ? 3 : 5
@@ -1071,10 +1071,10 @@ describe('GameScreen Header Data Derivation', () => {
     expect(multiMaxLives).toBe(5)
   })
 
-  test('mode display text for solo and multiplayer', () => {
+  test('mode display text for solo and coop', () => {
     const soloState = createMockGameState({ mode: 'solo' })
     const multiState = createMockGameState({
-      mode: 'multiplayer',
+      mode: 'coop',
       players: {
         'p1': createMockPlayer({ id: 'p1' }),
         'p2': createMockPlayer({ id: 'p2', slot: 2 }),
@@ -1289,7 +1289,7 @@ describe('Alien Visual Position During Wipe', () => {
 
   test('aliens at server position during normal gameplay', () => {
     const alien = createMockAlien({ x: 30, y: 10 })
-    const status: GameStatus = 'playing'
+    const status = 'playing' as GameStatus
     const entranceStartedForWave = 1
     const currentWave = 1
 

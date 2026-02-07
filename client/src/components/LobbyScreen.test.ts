@@ -40,7 +40,7 @@ function createMockPlayers(count: number): Player[] {
 function createMockGameState(overrides: Partial<GameState> = {}): GameState {
   return {
     roomId: 'XYZ789',
-    mode: 'multiplayer',
+    mode: 'coop',
     status: 'waiting',
     tick: 0,
     rngSeed: 12345,
@@ -187,7 +187,7 @@ describe('Lobby Menu Items Construction', () => {
   })
 
   test('multi-player gets only Ready Up option', () => {
-    const playerCount = 3
+    const playerCount: number = 3
     const isReady = false
 
     const menuItems = playerCount === 1
@@ -204,7 +204,7 @@ describe('Lobby Menu Items Construction', () => {
   })
 
   test('multi-player ready shows Cancel Ready', () => {
-    const playerCount = 2
+    const playerCount: number = 2
     const isReady = true
 
     const menuItems = playerCount === 1
@@ -251,8 +251,8 @@ describe('Ready Status Text', () => {
   })
 
   test('shows count without starting text when not all ready', () => {
-    const playerCount = 4
-    const readyCount = 2
+    const playerCount: number = 4
+    const readyCount: number = 2
     const allReady = readyCount === playerCount
 
     expect(allReady).toBe(false)
