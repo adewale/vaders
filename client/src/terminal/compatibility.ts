@@ -703,6 +703,31 @@ export function getTerminalQuirks(caps: TerminalCapabilities): string[] {
   return quirks
 }
 
+/**
+ * Check if the terminal supports gradient text rendering.
+ * Gradients require truecolor (24-bit RGB) to avoid visible banding.
+ * Terminals limited to 256 colors (Apple Terminal) get flat color fallback.
+ *
+ * @param caps - Terminal capabilities (uses cached if not provided)
+ * @returns true if gradient rendering will look correct
+ */
+export function supportsGradient(caps?: TerminalCapabilities): boolean {
+  const termCaps = caps ?? TERMINAL_CAPABILITIES
+  return termCaps.supportsTrueColor
+}
+
+/**
+ * Check if the terminal supports braille Unicode characters (U+2800 block).
+ * Requires Unicode support but NOT truecolor — Apple Terminal can render these.
+ *
+ * @param caps - Terminal capabilities (uses cached if not provided)
+ * @returns true if braille characters will render correctly
+ */
+export function supportsBraille(caps?: TerminalCapabilities): boolean {
+  const termCaps = caps ?? TERMINAL_CAPABILITIES
+  return termCaps.supportsUnicode
+}
+
 // ─── Platform Detection ─────────────────────────────────────────────────────
 
 /**

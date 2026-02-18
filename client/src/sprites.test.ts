@@ -6,6 +6,17 @@ import {
   SPRITES,
   ASCII_SPRITES,
   SPRITE_SIZE,
+  BRAILLE_SPINNER_FRAMES,
+  ASCII_SPINNER_FRAMES,
+  getSpinnerFrames,
+  getGradientLogo,
+  getGradientWaveText,
+  getGradientGameOverText,
+  getGradientVictoryText,
+  applyGradient,
+  applyMultilineGradient,
+  LOGO_ASCII,
+  ASCII_LOGO,
 } from './sprites'
 import { LAYOUT } from '../../shared/types'
 
@@ -568,5 +579,121 @@ describe('Visual Alignment Contract', () => {
     // Document that we expect 5-wide sprites
     expect(LAYOUT.PLAYER_WIDTH).toBe(5)
     expect(LAYOUT.ALIEN_WIDTH).toBe(5)
+  })
+})
+
+// ─── Braille Spinner Tests ──────────────────────────────────────────────────
+
+describe('Braille Spinner Frames', () => {
+  test('braille frames are all single characters', () => {
+    for (const frame of BRAILLE_SPINNER_FRAMES) {
+      expect(frame.length).toBe(1)
+    }
+  })
+
+  test('braille frames are in the U+2800 block', () => {
+    for (const frame of BRAILLE_SPINNER_FRAMES) {
+      const code = frame.charCodeAt(0)
+      expect(code).toBeGreaterThanOrEqual(0x2800)
+      expect(code).toBeLessThanOrEqual(0x28FF)
+    }
+  })
+
+  test('braille spinner has 8 frames', () => {
+    expect(BRAILLE_SPINNER_FRAMES.length).toBe(8)
+  })
+
+  test('ASCII spinner frames are all single characters', () => {
+    for (const frame of ASCII_SPINNER_FRAMES) {
+      expect(frame.length).toBe(1)
+    }
+  })
+
+  test('ASCII spinner frames are basic ASCII', () => {
+    for (const frame of ASCII_SPINNER_FRAMES) {
+      expect(frame.charCodeAt(0)).toBeLessThan(128)
+    }
+  })
+
+  test('ASCII spinner has 4 frames', () => {
+    expect(ASCII_SPINNER_FRAMES.length).toBe(4)
+  })
+
+  test('all braille frames are unique', () => {
+    const unique = new Set(BRAILLE_SPINNER_FRAMES)
+    expect(unique.size).toBe(BRAILLE_SPINNER_FRAMES.length)
+  })
+
+  test('all ASCII frames are unique', () => {
+    const unique = new Set(ASCII_SPINNER_FRAMES)
+    expect(unique.size).toBe(ASCII_SPINNER_FRAMES.length)
+  })
+
+  test('getSpinnerFrames returns an array of strings', () => {
+    const frames = getSpinnerFrames()
+    expect(frames.length).toBeGreaterThan(0)
+    for (const frame of frames) {
+      expect(typeof frame).toBe('string')
+      expect(frame.length).toBe(1)
+    }
+  })
+})
+
+// ─── Gradient Text Helper Tests ─────────────────────────────────────────────
+
+describe('Gradient Text Helpers', () => {
+  test('getGradientLogo returns non-empty string', () => {
+    const logo = getGradientLogo()
+    expect(logo.length).toBeGreaterThan(0)
+  })
+
+  test('getGradientLogo contains logo content', () => {
+    // Regardless of gradient support, the underlying text should be present
+    const logo = getGradientLogo()
+    // The logo contains "VADERS" — check for a substring present in both
+    // the Unicode logo (██) and ASCII logo (VADERS spelled out with /|_)
+    expect(logo).toContain('|')
+  })
+
+  test('getGradientWaveText returns non-empty string for non-empty input', () => {
+    const text = getGradientWaveText('WAVE 3')
+    expect(text.length).toBeGreaterThan(0)
+    // The raw text characters should still be present
+    expect(text).toContain('WAVE')
+  })
+
+  test('getGradientGameOverText preserves content', () => {
+    const text = getGradientGameOverText('GAME OVER')
+    expect(text).toContain('GAME OVER')
+  })
+
+  test('getGradientVictoryText preserves content', () => {
+    const text = getGradientVictoryText('VICTORY')
+    expect(text).toContain('VICTORY')
+  })
+
+  test('applyGradient returns plain text with fewer than 2 colors', () => {
+    expect(applyGradient('hello')).toBe('hello')
+    expect(applyGradient('hello', '#ff0000')).toBe('hello')
+  })
+
+  test('applyGradient with 2+ colors returns non-empty string', () => {
+    const text = applyGradient('hello', '#ff0000', '#0000ff')
+    expect(text.length).toBeGreaterThan(0)
+    expect(text).toContain('hello')
+  })
+
+  test('applyMultilineGradient returns plain text with fewer than 2 colors', () => {
+    expect(applyMultilineGradient('line1\nline2')).toBe('line1\nline2')
+    expect(applyMultilineGradient('line1\nline2', '#ff0000')).toBe('line1\nline2')
+  })
+
+  test('applyMultilineGradient with 2+ colors preserves line count', () => {
+    const input = 'line1\nline2\nline3'
+    const result = applyMultilineGradient(input, '#ff0000', '#0000ff')
+    // Output should have the same number of newlines
+    const inputLines = input.split('\n').length
+    const resultLines = result.split('\n').length
+    expect(resultLines).toBe(inputLines)
   })
 })

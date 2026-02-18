@@ -9,6 +9,8 @@ import {
   needsKeyReleaseTimeout,
   hexTo256Color,
   formatColor,
+  supportsGradient,
+  supportsBraille,
   type TerminalCapabilities,
 } from './compatibility'
 import { SPRITES, SPRITE_SIZE, ASCII_SPRITES, COLORS, getSprites } from '../sprites'
@@ -438,5 +440,81 @@ describe('Terminal Size Constraints', () => {
     expect(SPRITE_SIZE.bullet.width).toBeGreaterThan(0)
     expect(SPRITE_SIZE.barrier.width).toBeGreaterThan(0)
     expect(SPRITE_SIZE.barrier.height).toBeGreaterThan(0)
+  })
+})
+
+// ============================================================================
+// Cross-Terminal Animation Feature Support
+// ============================================================================
+
+describe('Cross-Terminal Animation Features', () => {
+  test('Apple Terminal gets braille but not gradients', () => {
+    const restore = mockTerminalEnv('apple-terminal')
+    try {
+      const caps = detectCapabilities()
+      expect(supportsBraille(caps)).toBe(true)
+      expect(supportsGradient(caps)).toBe(false)
+    } finally {
+      restore()
+    }
+  })
+
+  test('Ghostty gets both braille and gradients', () => {
+    const restore = mockTerminalEnv('ghostty')
+    try {
+      const caps = detectCapabilities()
+      expect(supportsBraille(caps)).toBe(true)
+      expect(supportsGradient(caps)).toBe(true)
+    } finally {
+      restore()
+    }
+  })
+
+  test('gradient and braille flags are independent', () => {
+    // A terminal can support braille (Unicode) without gradient (truecolor)
+    const appleCaps = {
+      supportsUnicode: true,
+      supportsTrueColor: false,
+      terminal: 'apple-terminal',
+    } as TerminalCapabilities
+    expect(supportsBraille(appleCaps)).toBe(true)
+    expect(supportsGradient(appleCaps)).toBe(false)
+
+    // A terminal with both
+    const kittyCaps = {
+      supportsUnicode: true,
+      supportsTrueColor: true,
+      terminal: 'kitty',
+    } as TerminalCapabilities
+    expect(supportsBraille(kittyCaps)).toBe(true)
+    expect(supportsGradient(kittyCaps)).toBe(true)
+
+    // A terminal with neither
+    const linuxCaps = {
+      supportsUnicode: false,
+      supportsTrueColor: false,
+      terminal: 'linux-console',
+    } as TerminalCapabilities
+    expect(supportsBraille(linuxCaps)).toBe(false)
+    expect(supportsGradient(linuxCaps)).toBe(false)
+  })
+
+  test('feature support matrix for all terminal tiers', () => {
+    // Tier 1: Full modern (truecolor + unicode)
+    for (const terminal of ['kitty', 'ghostty', 'iterm2', 'alacritty', 'wezterm', 'vscode'] as const) {
+      const caps = { supportsUnicode: true, supportsTrueColor: true, terminal } as TerminalCapabilities
+      expect(supportsBraille(caps)).toBe(true)
+      expect(supportsGradient(caps)).toBe(true)
+    }
+
+    // Tier 2: Unicode but no truecolor
+    const appleCaps = { supportsUnicode: true, supportsTrueColor: false, terminal: 'apple-terminal' } as TerminalCapabilities
+    expect(supportsBraille(appleCaps)).toBe(true)
+    expect(supportsGradient(appleCaps)).toBe(false)
+
+    // Tier 3: Neither
+    const linuxCaps = { supportsUnicode: false, supportsTrueColor: false, terminal: 'linux-console' } as TerminalCapabilities
+    expect(supportsBraille(linuxCaps)).toBe(false)
+    expect(supportsGradient(linuxCaps)).toBe(false)
   })
 })

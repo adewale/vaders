@@ -17,6 +17,8 @@ import {
   hexTo16Color,
   formatColor,
   getTerminalQuirks,
+  supportsGradient,
+  supportsBraille,
   type TerminalName,
   type TerminalCapabilities,
 } from './compatibility'
@@ -703,5 +705,87 @@ describe('Terminal-specific key release timeouts', () => {
   test('WezTerm with Kitty keyboard has 0 timeout', () => {
     const caps = { supportsKittyKeyboard: true, terminal: 'wezterm' } as TerminalCapabilities
     expect(getKeyReleaseTimeoutMs(caps)).toBe(0)
+  })
+})
+
+// ============================================================================
+// Gradient Feature Gating
+// ============================================================================
+
+describe('supportsGradient', () => {
+  test('returns true for truecolor terminals', () => {
+    const caps = { supportsTrueColor: true, supports256Color: true, terminal: 'kitty' } as TerminalCapabilities
+    expect(supportsGradient(caps)).toBe(true)
+  })
+
+  test('returns true for Ghostty', () => {
+    const caps = { supportsTrueColor: true, supports256Color: true, terminal: 'ghostty' } as TerminalCapabilities
+    expect(supportsGradient(caps)).toBe(true)
+  })
+
+  test('returns false for Apple Terminal (256 color only)', () => {
+    const caps = { supportsTrueColor: false, supports256Color: true, terminal: 'apple-terminal' } as TerminalCapabilities
+    expect(supportsGradient(caps)).toBe(false)
+  })
+
+  test('returns false for Linux console', () => {
+    const caps = { supportsTrueColor: false, supports256Color: false, terminal: 'linux-console' } as TerminalCapabilities
+    expect(supportsGradient(caps)).toBe(false)
+  })
+
+  test('returns false for unknown terminals without truecolor', () => {
+    const caps = { supportsTrueColor: false, supports256Color: true, terminal: 'unknown' } as TerminalCapabilities
+    expect(supportsGradient(caps)).toBe(false)
+  })
+
+  test('returns true for iTerm2 with truecolor', () => {
+    const caps = { supportsTrueColor: true, supports256Color: true, terminal: 'iterm2' } as TerminalCapabilities
+    expect(supportsGradient(caps)).toBe(true)
+  })
+})
+
+// ============================================================================
+// Braille Support Detection
+// ============================================================================
+
+describe('supportsBraille', () => {
+  test('returns true for Unicode-capable terminals', () => {
+    const caps = { supportsUnicode: true, terminal: 'kitty' } as TerminalCapabilities
+    expect(supportsBraille(caps)).toBe(true)
+  })
+
+  test('returns true for Apple Terminal (Unicode but no truecolor)', () => {
+    const caps = { supportsUnicode: true, supportsTrueColor: false, terminal: 'apple-terminal' } as TerminalCapabilities
+    expect(supportsBraille(caps)).toBe(true)
+  })
+
+  test('returns false for Linux console (no Unicode)', () => {
+    const caps = { supportsUnicode: false, terminal: 'linux-console' } as TerminalCapabilities
+    expect(supportsBraille(caps)).toBe(false)
+  })
+
+  test('returns false when VADERS_ASCII forces ASCII mode', () => {
+    withEnv({ VADERS_ASCII: '1', LANG: 'en_US.UTF-8', TERM_PROGRAM: 'ghostty', KITTY_WINDOW_ID: undefined }, () => {
+      const caps = detectCapabilities()
+      expect(supportsBraille(caps)).toBe(false)
+    })
+  })
+
+  test('Apple Terminal gets braille but not gradient', () => {
+    const caps = { supportsUnicode: true, supportsTrueColor: false, terminal: 'apple-terminal' } as TerminalCapabilities
+    expect(supportsBraille(caps)).toBe(true)
+    expect(supportsGradient(caps)).toBe(false)
+  })
+
+  test('Kitty gets both braille and gradient', () => {
+    const caps = { supportsUnicode: true, supportsTrueColor: true, terminal: 'kitty' } as TerminalCapabilities
+    expect(supportsBraille(caps)).toBe(true)
+    expect(supportsGradient(caps)).toBe(true)
+  })
+
+  test('Linux console gets neither braille nor gradient', () => {
+    const caps = { supportsUnicode: false, supportsTrueColor: false, terminal: 'linux-console' } as TerminalCapabilities
+    expect(supportsBraille(caps)).toBe(false)
+    expect(supportsGradient(caps)).toBe(false)
   })
 })

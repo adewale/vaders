@@ -6,7 +6,8 @@ import { STANDARD_WIDTH, STANDARD_HEIGHT } from '../../shared/types'
 export { STANDARD_WIDTH, STANDARD_HEIGHT }
 
 // Import terminal capabilities for sprite selection and color conversion
-import { getTerminalCapabilities, convertColorForTerminal, convertColorObject } from './terminal'
+import { getTerminalCapabilities, convertColorForTerminal, convertColorObject, supportsGradient, supportsBraille } from './terminal'
+import gradient from 'gradient-string'
 
 export const SPRITES = {
   // Classic alien sprites (2 lines each, 5 chars wide)
@@ -201,6 +202,114 @@ export const ASCII_LOGO = `
 | |/ / __ / / / / _|| / \\__ \\
 |___/_/ |_/_/|_/|___|_|\\_|___/
 `.trim()
+
+// ─── Braille Spinner Frames ─────────────────────────────────────────────────
+// Braille characters (U+2800 block) for smooth loading animations.
+// Works on any Unicode-capable terminal including Apple Terminal.
+// Falls back to classic ASCII twirl for non-Unicode terminals.
+
+/** Braille dot spinner — 8 frames, one dot orbiting */
+export const BRAILLE_SPINNER_FRAMES = [
+  '\u2801', // ⠁
+  '\u2802', // ⠂
+  '\u2804', // ⠄
+  '\u2840', // ⡀
+  '\u2880', // ⢀
+  '\u2820', // ⠠
+  '\u2810', // ⠐
+  '\u2808', // ⠈
+] as const
+
+/** ASCII fallback spinner — 4 frames, classic twirl */
+export const ASCII_SPINNER_FRAMES = [
+  '-',
+  '\\',
+  '|',
+  '/',
+] as const
+
+/**
+ * Get spinner frames appropriate for the current terminal.
+ * Returns braille frames for Unicode terminals, ASCII twirl for limited ones.
+ */
+export function getSpinnerFrames(): readonly string[] {
+  return supportsBraille() ? BRAILLE_SPINNER_FRAMES : ASCII_SPINNER_FRAMES
+}
+
+// ─── Gradient Text Helpers ──────────────────────────────────────────────────
+// gradient-string produces raw ANSI 24-bit escape sequences.
+// Only activated on truecolor terminals; 256-color terminals get flat color.
+
+// Pre-built gradient instances for common game text
+const _titleGradient = gradient('cyan', 'magenta')
+const _waveGradient = gradient('cyan', 'yellow')
+const _gameOverGradient = gradient('red', 'yellow')
+const _victoryGradient = gradient('green', 'cyan', 'magenta')
+
+/**
+ * Get the VADERS logo with gradient coloring on truecolor terminals.
+ * Falls back to plain logo text on 256-color/16-color terminals.
+ *
+ * @returns Logo string (may contain ANSI escape sequences on truecolor terminals)
+ */
+export function getGradientLogo(): string {
+  const logo = getLogo()
+  if (!supportsGradient()) return logo
+  return _titleGradient.multiline(logo)
+}
+
+/**
+ * Apply gradient to wave announcement text (e.g., "WAVE 3").
+ * Falls back to plain text on limited terminals.
+ */
+export function getGradientWaveText(text: string): string {
+  if (!supportsGradient()) return text
+  return _waveGradient(text)
+}
+
+/**
+ * Apply gradient to game over text.
+ * Falls back to plain text on limited terminals.
+ */
+export function getGradientGameOverText(text: string): string {
+  if (!supportsGradient()) return text
+  return _gameOverGradient(text)
+}
+
+/**
+ * Apply gradient to victory/success text.
+ * Falls back to plain text on limited terminals.
+ */
+export function getGradientVictoryText(text: string): string {
+  if (!supportsGradient()) return text
+  return _victoryGradient(text)
+}
+
+/**
+ * Apply a custom gradient to arbitrary text.
+ * Falls back to plain text on limited terminals.
+ *
+ * @param text - The text to colorize
+ * @param colors - Gradient color stops (hex strings)
+ */
+export function applyGradient(text: string, ...colors: string[]): string {
+  if (!supportsGradient()) return text
+  if (colors.length < 2) return text
+  return gradient(...colors)(text)
+}
+
+/**
+ * Apply a custom gradient to multiline text.
+ * Falls back to plain text on limited terminals.
+ *
+ * @param text - The multiline text to colorize
+ * @param colors - Gradient color stops (hex strings)
+ */
+export function applyMultilineGradient(text: string, ...colors: string[]): string {
+  if (!supportsGradient()) return text
+  if (colors.length < 2) return text
+  return gradient(...colors).multiline(text)
+}
 
 // ─── Sprite Selection Based on Terminal Capabilities ─────────────────────────
 
