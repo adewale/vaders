@@ -704,14 +704,14 @@ export function getTerminalQuirks(caps: TerminalCapabilities): string[] {
 }
 
 /**
- * Check if the terminal supports gradient text rendering.
- * Gradients require truecolor (24-bit RGB) to avoid visible banding.
- * Terminals limited to 256 colors (Apple Terminal) get flat color fallback.
+ * Check if the terminal supports rich color rendering (24-bit truecolor).
+ * Rich color enables smooth gradients, color interpolation, and full RGB palette.
+ * Terminals limited to 256 colors (Apple Terminal) need quantized-color fallbacks.
  *
  * @param caps - Terminal capabilities (uses cached if not provided)
- * @returns true if gradient rendering will look correct
+ * @returns true if the terminal can render 24-bit RGB colors
  */
-export function supportsGradient(caps?: TerminalCapabilities): boolean {
+export function supportsRichColor(caps?: TerminalCapabilities): boolean {
   const termCaps = caps ?? TERMINAL_CAPABILITIES
   return termCaps.supportsTrueColor
 }

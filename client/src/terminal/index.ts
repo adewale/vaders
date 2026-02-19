@@ -54,7 +54,7 @@ export {
   getTerminalQuirks,
 
   // Feature detection helpers
-  supportsGradient,
+  supportsRichColor,
   supportsBraille,
 
   // Singleton instances (for convenience)
