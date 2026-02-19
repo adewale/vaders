@@ -26,7 +26,7 @@ const SERVER_WIPE_TICKS = {
  */
 const CLIENT_WIPE_FRAMES = {
   exitDuration: 120,   // 2 seconds
-  holdDuration: 120,   // 2 seconds
+  holdDuration: 180,   // 3 seconds
   enterDuration: 240,  // 4 seconds (matches server wipe_reveal)
 }
 
@@ -91,8 +91,8 @@ describe('Server-Client Phase Duration Matching', () => {
       const serverSeconds = serverTicksToSeconds(SERVER_WIPE_TICKS.wipe_hold)
       const clientSeconds = clientFramesToSeconds(CLIENT_WIPE_FRAMES.holdDuration)
 
-      expect(serverSeconds).toBe(2)
-      expect(clientSeconds).toBe(2)
+      expect(serverSeconds).toBe(3)
+      expect(clientSeconds).toBe(3)
       expect(serverSeconds).toBe(clientSeconds)
     })
 
@@ -113,36 +113,36 @@ describe('Server-Client Phase Duration Matching', () => {
   })
 
   describe('Total wipe durations', () => {
-    test('game start (hold + reveal): 6 seconds', () => {
-      // Server: wipe_hold (2s) + wipe_reveal (4s) = 6s
+    test('game start (hold + reveal): 7 seconds', () => {
+      // Server: wipe_hold (3s) + wipe_reveal (4s) = 7s
       const serverSeconds = serverTicksToSeconds(
         SERVER_WIPE_TICKS.wipe_hold + SERVER_WIPE_TICKS.wipe_reveal
       )
-      expect(serverSeconds).toBe(6)
+      expect(serverSeconds).toBe(7)
 
-      // Client: hold (2s) + enter (4s) = 6s
+      // Client: hold (3s) + enter (4s) = 7s
       const clientSeconds = clientFramesToSeconds(
         CLIENT_WIPE_FRAMES.holdDuration + CLIENT_WIPE_FRAMES.enterDuration
       )
-      expect(clientSeconds).toBe(6)
+      expect(clientSeconds).toBe(7)
     })
 
-    test('wave transition (exit + hold + reveal): 8 seconds', () => {
-      // Server: wipe_exit (2s) + wipe_hold (2s) + wipe_reveal (4s) = 8s
+    test('wave transition (exit + hold + reveal): 9 seconds', () => {
+      // Server: wipe_exit (2s) + wipe_hold (3s) + wipe_reveal (4s) = 9s
       const serverSeconds = serverTicksToSeconds(
         SERVER_WIPE_TICKS.wipe_exit +
         SERVER_WIPE_TICKS.wipe_hold +
         SERVER_WIPE_TICKS.wipe_reveal
       )
-      expect(serverSeconds).toBe(8)
+      expect(serverSeconds).toBe(9)
 
-      // Client: exit (2s) + hold (2s) + enter (4s) = 8s
+      // Client: exit (2s) + hold (3s) + enter (4s) = 9s
       const clientSeconds = clientFramesToSeconds(
         CLIENT_WIPE_FRAMES.exitDuration +
         CLIENT_WIPE_FRAMES.holdDuration +
         CLIENT_WIPE_FRAMES.enterDuration
       )
-      expect(clientSeconds).toBe(8)
+      expect(clientSeconds).toBe(9)
     })
   })
 })
@@ -196,41 +196,41 @@ describe('Entrance Animation Timing', () => {
 
 describe('Server Status Transition Timeline', () => {
   test('game start timeline (solo)', () => {
-    // T=0: START_SOLO → status='wipe_hold', wipeTicksRemaining=60
-    // T=0 to T=60: wipe_hold phase (2 seconds)
-    // T=60: wipeTicksRemaining=0 → status='wipe_reveal', wipeTicksRemaining=120
+    // T=0: START_SOLO → status='wipe_hold', wipeTicksRemaining=90
+    // T=0 to T=90: wipe_hold phase (3 seconds)
+    // T=90: wipeTicksRemaining=0 → status='wipe_reveal', wipeTicksRemaining=120
     //       Aliens created with entering=true
-    // T=60 to T=180: wipe_reveal phase (4 seconds)
+    // T=90 to T=210: wipe_reveal phase (4 seconds)
     //       Aliens animate into position
-    // T=180: wipeTicksRemaining=0 → status='playing', entering=false
+    // T=210: wipeTicksRemaining=0 → status='playing', entering=false
     //        Aliens can now shoot
 
     const holdEndTick = SERVER_WIPE_TICKS.wipe_hold
     const revealEndTick = holdEndTick + SERVER_WIPE_TICKS.wipe_reveal
 
-    expect(holdEndTick).toBe(60)
-    expect(revealEndTick).toBe(180)
-    expect(serverTicksToSeconds(revealEndTick)).toBe(6)
+    expect(holdEndTick).toBe(90)
+    expect(revealEndTick).toBe(210)
+    expect(serverTicksToSeconds(revealEndTick)).toBe(7)
   })
 
   test('wave transition timeline', () => {
     // T=0: All aliens killed → status='wipe_exit', wipeTicksRemaining=60
     // T=0 to T=60: wipe_exit phase (2 seconds) - iris closing
-    // T=60: → status='wipe_hold', wipeTicksRemaining=60
-    // T=60 to T=120: wipe_hold phase (2 seconds) - show "WAVE N"
-    // T=120: → status='wipe_reveal', wipeTicksRemaining=120
+    // T=60: → status='wipe_hold', wipeTicksRemaining=90
+    // T=60 to T=150: wipe_hold phase (3 seconds) - show "WAVE N"
+    // T=150: → status='wipe_reveal', wipeTicksRemaining=120
     //        New aliens created with entering=true
-    // T=120 to T=240: wipe_reveal phase (4 seconds) - aliens enter
-    // T=240: → status='playing', entering=false
+    // T=150 to T=270: wipe_reveal phase (4 seconds) - aliens enter
+    // T=270: → status='playing', entering=false
 
     const exitEndTick = SERVER_WIPE_TICKS.wipe_exit
     const holdEndTick = exitEndTick + SERVER_WIPE_TICKS.wipe_hold
     const revealEndTick = holdEndTick + SERVER_WIPE_TICKS.wipe_reveal
 
     expect(exitEndTick).toBe(60)
-    expect(holdEndTick).toBe(120)
-    expect(revealEndTick).toBe(240)
-    expect(serverTicksToSeconds(revealEndTick)).toBe(8)
+    expect(holdEndTick).toBe(150)
+    expect(revealEndTick).toBe(270)
+    expect(serverTicksToSeconds(revealEndTick)).toBe(9)
   })
 
   test('aliens cannot shoot during wipe phases', () => {
@@ -275,8 +275,8 @@ describe('Timing Invariants', () => {
     expect(SERVER_WIPE_TICKS.wipe_reveal).toBeGreaterThan(SERVER_WIPE_TICKS.wipe_hold)
   })
 
-  test('wipe_exit and wipe_hold are equal duration', () => {
-    expect(SERVER_WIPE_TICKS.wipe_exit).toBe(SERVER_WIPE_TICKS.wipe_hold)
+  test('wipe_hold is longer than wipe_exit (more time to read wave number)', () => {
+    expect(SERVER_WIPE_TICKS.wipe_hold).toBeGreaterThanOrEqual(SERVER_WIPE_TICKS.wipe_exit)
   })
 
   test('no grace period - entering flag controls shooting', () => {

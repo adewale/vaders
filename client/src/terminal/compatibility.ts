@@ -725,6 +725,8 @@ export function supportsRichColor(caps?: TerminalCapabilities): boolean {
  */
 export function supportsBraille(caps?: TerminalCapabilities): boolean {
   const termCaps = caps ?? TERMINAL_CAPABILITIES
+  // Linux console cannot render braille characters even with UTF-8 locale
+  if (termCaps.terminal === 'linux-console') return false
   return termCaps.supportsUnicode
 }
 

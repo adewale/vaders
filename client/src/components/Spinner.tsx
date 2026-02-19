@@ -1,7 +1,7 @@
 // client/src/components/Spinner.tsx
 // Animated spinner using braille characters (Unicode) or ASCII twirl fallback.
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { getSpinnerFrames } from '../sprites'
 
 const SPINNER_INTERVAL_MS = 80
@@ -13,7 +13,7 @@ const SPINNER_INTERVAL_MS = 80
  * Usage: <Spinner /> or <Spinner fg="cyan" />
  */
 export function Spinner({ fg }: { fg?: string }) {
-  const frames = getSpinnerFrames()
+  const frames = useMemo(() => getSpinnerFrames(), [])
   const [frameIndex, setFrameIndex] = useState(0)
 
   useEffect(() => {

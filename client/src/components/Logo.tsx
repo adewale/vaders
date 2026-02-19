@@ -7,9 +7,8 @@ import { GRADIENT_PRESETS } from '../gradient'
 import { GradientText } from './GradientText'
 import { supportsRichColor } from '../terminal'
 
-const richColor = supportsRichColor()
-
 export function Logo() {
+  const richColor = supportsRichColor()
   return (
     <box flexDirection="column" alignItems="center">
       <GradientText

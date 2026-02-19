@@ -36,8 +36,6 @@ function rgbToHex(r: number, g: number, b: number): string {
   )
 }
 
-// ─── Types ──────────────────────────────────────────────────────────────────
-
 /** A character with its gradient color */
 export interface ColoredChar {
   char: string
@@ -53,7 +51,7 @@ export interface ColoredChar {
  * @param count  - Number of colors to generate
  * @returns Array of hex strings, length === count
  */
-export function interpolateGradient(colors: string[], count: number): string[] {
+export function interpolateGradient(colors: readonly string[], count: number): string[] {
   if (count <= 0) return []
   if (colors.length === 0) return Array(count).fill('#000000')
   if (colors.length === 1 || count === 1) return Array(count).fill(colors[0])
@@ -93,7 +91,7 @@ export function interpolateGradient(colors: string[], count: number): string[] {
  * @param colors - Array of hex color stops
  * @returns Array of lines, each line is an array of {char, color}
  */
-export function gradientMultiline(text: string, colors: string[]): ColoredChar[][] {
+export function gradientMultiline(text: string, colors: readonly string[]): ColoredChar[][] {
   const lines = text.split('\n')
   const maxWidth = Math.max(...lines.map(l => l.length), 1)
   const palette = interpolateGradient(colors, maxWidth)
@@ -124,3 +122,17 @@ export const GRADIENT_PRESETS = {
   /** Cool ocean tones */
   ocean:     ['#0077ff', '#00ffff', '#00ff88'],
 } as const
+
+// ─── Wave Gradient Selection ────────────────────────────────────────────────
+
+/**
+ * Pick a gradient preset based on wave number.
+ * Early waves are cool/calm, later waves escalate to hot/dangerous.
+ */
+export function getWaveGradient(waveNumber: number): readonly string[] {
+  if (waveNumber <= 2) return GRADIENT_PRESETS.ocean
+  if (waveNumber <= 4) return GRADIENT_PRESETS.vaders
+  if (waveNumber <= 6) return GRADIENT_PRESETS.retro
+  if (waveNumber <= 8) return GRADIENT_PRESETS.rainbow
+  return GRADIENT_PRESETS.danger
+}

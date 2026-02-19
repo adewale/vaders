@@ -9,6 +9,7 @@ import { LobbyScreen, getLobbyMenuItemCount } from './components/LobbyScreen'
 import { GameScreen } from './components/GameScreen'
 import { GameOverScreen, getGameOverMenuItemCount } from './components/GameOverScreen'
 import { Spinner } from './components/Spinner'
+import { WaveAnnounce } from './components/WaveAnnounce'
 import { normalizeKey, createHeldKeysTracker } from './input'
 import { usesDiscreteMovement } from './terminal'
 import { debugLog, clearDebugLog } from './debug'
@@ -205,7 +206,7 @@ function GameContainer({
   onMainMenu: () => void
 }) {
   const renderer = useRenderer()
-  const { getRenderState, playerId, send, connected, reconnecting, error, updateInput, move, shoot } = useGameConnection(
+  const { getRenderState, playerId, send, connected, reconnecting, error, updateInput, move, shoot, lastEvent, prevState } = useGameConnection(
     roomUrl,
     playerName
   )
@@ -566,16 +567,18 @@ function GameContainer({
         </box>
       )
     case 'wipe_hold':
-      // Wave transition: show wave number
+      // Wave transition: dramatic announcement with gradient digits + braille border
       return (
-        <box width={terminalWidth} height={terminalHeight} justifyContent="center" alignItems="center">
-          <text fg="yellow"><b>WAVE {state.wipeWaveNumber ?? state.wave}</b></text>
-        </box>
+        <WaveAnnounce
+          waveNumber={state.wipeWaveNumber ?? state.wave}
+          terminalWidth={terminalWidth}
+          terminalHeight={terminalHeight}
+        />
       )
     case 'wipe_exit':
     case 'wipe_reveal':
     case 'playing':
-      return <GameScreen state={state} currentPlayerId={playerId} isMuted={isMuted} isMusicMuted={isMusicMuted} />
+      return <GameScreen state={state} currentPlayerId={playerId} isMuted={isMuted} isMusicMuted={isMusicMuted} lastEvent={lastEvent} prevState={prevState} />
     case 'game_over':
       return (
         <GameOverScreen

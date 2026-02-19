@@ -289,6 +289,7 @@ export function useGameConnection(
 
   return {
     serverState: state.serverState,
+    prevState: state.prevState,
     getRenderState,
     playerId: state.playerId,
     connected: state.connected,

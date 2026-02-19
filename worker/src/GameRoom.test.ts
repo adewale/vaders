@@ -154,13 +154,13 @@ async function joinPlayer(
 /**
  * Helper to run through wipe phases to get to 'playing' status.
  * After startGame(), the game goes through:
- * - wipe_hold (60 ticks)
+ * - wipe_hold (90 ticks)
  * - wipe_reveal (120 ticks)
  * - playing
  */
 async function completeWipePhases(gameRoom: GameRoom) {
-  // wipe_hold: 60 ticks
-  for (let i = 0; i < 60; i++) {
+  // wipe_hold: 90 ticks
+  for (let i = 0; i < 90; i++) {
     await gameRoom.alarm()
   }
   // wipe_reveal: 120 ticks
@@ -173,7 +173,7 @@ async function completeWipePhases(gameRoom: GameRoom) {
  * Helper to run through wave transition wipe phases (from wipe_exit).
  * Wave transitions go through:
  * - wipe_exit (60 ticks)
- * - wipe_hold (60 ticks)
+ * - wipe_hold (90 ticks)
  * - wipe_reveal (120 ticks)
  * - playing
  */
@@ -182,8 +182,8 @@ async function completeWaveTransitionPhases(gameRoom: GameRoom) {
   for (let i = 0; i < 60; i++) {
     await gameRoom.alarm()
   }
-  // wipe_hold: 60 ticks
-  for (let i = 0; i < 60; i++) {
+  // wipe_hold: 90 ticks
+  for (let i = 0; i < 90; i++) {
     await gameRoom.alarm()
   }
   // wipe_reveal: 120 ticks
@@ -1283,9 +1283,9 @@ describe('4-Player Room Full Scenario', () => {
     expect(state.status).toBe('wipe_hold')
     expect(state.wipeWaveNumber).toBe(1)
 
-    // Run through wipe_hold (60 ticks) and wipe_reveal (120 ticks) phases
-    // wipe_hold: 60 ticks at 30Hz
-    for (let i = 0; i < 60; i++) {
+    // Run through wipe_hold (90 ticks) and wipe_reveal (120 ticks) phases
+    // wipe_hold: 90 ticks at 30Hz
+    for (let i = 0; i < 90; i++) {
       await gameRoom.alarm()
     }
     state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
@@ -1369,8 +1369,8 @@ describe('Lifecycle Edge Cases', () => {
       await gameRoom.alarm() // 1
       await gameRoom.alarm() // wipe_hold starts
 
-      // Run through wipe_hold (60 ticks) to reach wipe_reveal
-      for (let i = 0; i < 60; i++) {
+      // Run through wipe_hold (90 ticks) to reach wipe_reveal
+      for (let i = 0; i < 90; i++) {
         await gameRoom.alarm()
       }
 

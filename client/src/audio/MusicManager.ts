@@ -22,6 +22,7 @@ class MusicManager {
   private muted: boolean
   private isPlaying = false
   private shouldLoop = true
+  private lastError_: string | null = null
 
   private constructor() {
     this.muted = getUserConfig().musicMuted
@@ -46,10 +47,18 @@ class MusicManager {
   async start(): Promise<void> {
     if (this.isPlaying || this.muted) return
     if (!existsSync(MUSIC_PATH)) {
-      console.error('Music file not found:', MUSIC_PATH)
+      this.lastError_ = 'Music file not found'
       return
     }
 
+    // Pre-flight: verify audio player binary exists
+    const player = process.platform === 'darwin' ? 'afplay' : 'mpv'
+    if (!MusicManager.isPlayerAvailable(player)) {
+      this.lastError_ = `Audio player not found: ${player}`
+      return
+    }
+
+    this.lastError_ = null
     this.isPlaying = true
     this.shouldLoop = true
     this.playLoop()
@@ -67,19 +76,24 @@ class MusicManager {
         this.process = spawn({
           cmd: [player, ...args],
           stdout: 'ignore',
-          stderr: 'ignore',
+          stderr: 'pipe',
         })
 
         // Wait for playback to complete
-        await this.process.exited
+        const exitCode = await this.process.exited
+
+        // Non-zero exit code means playback failed
+        if (exitCode !== 0) {
+          this.lastError_ = `${player} exited with code ${exitCode}`
+          break
+        }
 
         // Small delay before looping
         if (this.shouldLoop && this.isPlaying) {
           await new Promise(r => setTimeout(r, 100))
         }
       } catch (err) {
-        // Player not available or error, stop trying
-        console.error('Music playback error:', err)
+        this.lastError_ = `Music playback failed: ${err instanceof Error ? err.message : String(err)}`
         break
       }
     }
@@ -138,6 +152,35 @@ class MusicManager {
    */
   isCurrentlyPlaying(): boolean {
     return this.isPlaying && !this.muted
+  }
+
+  /**
+   * Get the last error that occurred during playback, or null if none.
+   */
+  getLastError(): string | null {
+    return this.lastError_
+  }
+
+  /**
+   * Check if an error has occurred.
+   */
+  hasError(): boolean {
+    return this.lastError_ !== null
+  }
+
+  /**
+   * Check whether an audio player binary is available on the system.
+   * Uses `which` to verify the binary exists in PATH.
+   * @param player - Binary name to check, defaults to platform default (afplay/mpv)
+   */
+  static isPlayerAvailable(player?: string): boolean {
+    const cmd = player ?? (process.platform === 'darwin' ? 'afplay' : 'mpv')
+    try {
+      const result = Bun.spawnSync({ cmd: ['which', cmd] })
+      return result.exitCode === 0
+    } catch {
+      return false
+    }
   }
 }
 

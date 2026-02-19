@@ -181,10 +181,8 @@ describe('App.tsx render logic matches test expectations', () => {
     // Should NOT contain GameScreen
     expect(wipeHoldBlock).not.toContain('<GameScreen')
 
-    // Should contain wave title centered (terminal bg is black by default)
-    expect(wipeHoldBlock).toContain('WAVE')
-    expect(wipeHoldBlock).toContain('justifyContent="center"')
-    expect(wipeHoldBlock).toContain('alignItems="center"')
+    // Should contain wave announce component
+    expect(wipeHoldBlock).toContain('WaveAnnounce')
   })
 
   test('wipe_reveal case renders GameScreen', async () => {

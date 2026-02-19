@@ -726,6 +726,12 @@ describe('supportsBraille', () => {
     })
   })
 
+  test('linux-console with UTF-8 locale does not support braille', () => {
+    // Linux console cannot render braille characters even with UTF-8 locale
+    const caps = { supportsUnicode: true, terminal: 'linux-console' } as TerminalCapabilities
+    expect(supportsBraille(caps)).toBe(false)
+  })
+
   test('braille and rich color are independent capabilities', () => {
     // Apple Terminal: Unicode (braille) but no truecolor (no rich color)
     const unicodeOnly = { supportsUnicode: true, supportsTrueColor: false } as TerminalCapabilities

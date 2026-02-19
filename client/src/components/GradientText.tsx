@@ -12,7 +12,7 @@ interface GradientTextProps {
   /** The text to render (can be multiline) */
   text: string
   /** Array of hex color stops for the gradient */
-  colors: string[]
+  colors: readonly string[]
   /** Flat fallback color for terminals without truecolor */
   fallbackColor?: string
   /** Whether the terminal supports rich (truecolor) rendering */
@@ -41,9 +41,9 @@ export function GradientText({
   return (
     <box flexDirection="column">
       {lines.map((line, lineIdx) => (
-        <text key={lineIdx}>
+        <text key={`line-${lineIdx}`}>
           {line.map((ch, charIdx) => (
-            <span fg={ch.color} key={charIdx}>{ch.char}</span>
+            <span fg={ch.color} key={`${lineIdx}-${charIdx}`}>{ch.char}</span>
           ))}
         </text>
       ))}

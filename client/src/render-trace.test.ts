@@ -347,7 +347,7 @@ describe('App.tsx render logic verification', () => {
 
     // Verify rendering logic for each status
     // Check that countdown/wipe_hold render wave title (not GameScreen)
-    const wipeHoldBlock = source.match(/case 'countdown':[\s\S]*?case 'wipe_hold':[\s\S]*?WAVE[\s\S]*?(?=case 'wipe_exit')/)
+    const wipeHoldBlock = source.match(/case 'countdown':[\s\S]*?case 'wipe_hold':[\s\S]*?[Ww]ave[\s\S]*?(?=case 'wipe_exit')/)
     expect(wipeHoldBlock).not.toBeNull()
     expect(wipeHoldBlock![0]).not.toContain('<GameScreen')
 

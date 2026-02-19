@@ -493,5 +493,9 @@ describe('Cross-Terminal Animation Features', () => {
     const linuxCaps = { supportsUnicode: false, supportsTrueColor: false, terminal: 'linux-console' } as TerminalCapabilities
     expect(supportsBraille(linuxCaps)).toBe(false)
     expect(supportsRichColor(linuxCaps)).toBe(false)
+
+    // Linux console with UTF-8 still cannot render braille
+    const linuxUtf8Caps = { supportsUnicode: true, supportsTrueColor: false, terminal: 'linux-console' } as TerminalCapabilities
+    expect(supportsBraille(linuxUtf8Caps)).toBe(false)
   })
 })
