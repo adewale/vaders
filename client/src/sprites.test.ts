@@ -15,9 +15,8 @@ import {
   getGradientVictoryText,
   applyGradient,
   applyMultilineGradient,
-  LOGO_ASCII,
-  ASCII_LOGO,
 } from './sprites'
+import type { TerminalCapabilities } from './terminal/compatibility'
 import { LAYOUT } from '../../shared/types'
 
 // ─── Helper Functions ─────────────────────────────────────────────────────────
@@ -637,6 +636,18 @@ describe('Braille Spinner Frames', () => {
       expect(frame.length).toBe(1)
     }
   })
+
+  test('getSpinnerFrames returns braille frames for Unicode-capable terminal', () => {
+    const caps = { supportsUnicode: true } as TerminalCapabilities
+    const frames = getSpinnerFrames(caps)
+    expect(frames).toBe(BRAILLE_SPINNER_FRAMES)
+  })
+
+  test('getSpinnerFrames returns ASCII frames for non-Unicode terminal', () => {
+    const caps = { supportsUnicode: false } as TerminalCapabilities
+    const frames = getSpinnerFrames(caps)
+    expect(frames).toBe(ASCII_SPINNER_FRAMES)
+  })
 })
 
 // ─── Gradient Text Helper Tests ─────────────────────────────────────────────
@@ -695,5 +706,17 @@ describe('Gradient Text Helpers', () => {
     const inputLines = input.split('\n').length
     const resultLines = result.split('\n').length
     expect(resultLines).toBe(inputLines)
+  })
+
+  test('applyGradient handles invalid color strings gracefully', () => {
+    // Should not throw, should return plain text on error
+    const text = applyGradient('hello', 'not-a-color', 'also-bad')
+    expect(text).toContain('hello')
+  })
+
+  test('gradient functions handle empty string input', () => {
+    expect(getGradientWaveText('')).toBe('')
+    expect(getGradientGameOverText('')).toBe('')
+    expect(getGradientVictoryText('')).toBe('')
   })
 })
