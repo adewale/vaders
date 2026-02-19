@@ -6,12 +6,8 @@ import { STANDARD_WIDTH, STANDARD_HEIGHT } from '../../shared/types'
 export { STANDARD_WIDTH, STANDARD_HEIGHT }
 
 // Import terminal capabilities for sprite selection and color conversion
-import { getTerminalCapabilities, convertColorForTerminal, convertColorObject, supportsGradient, supportsBraille } from './terminal'
+import { getTerminalCapabilities, convertColorForTerminal, convertColorObject, supportsBraille } from './terminal'
 import type { TerminalCapabilities } from './terminal'
-
-// Set FORCE_COLOR before gradient-string loads chalk (ESM eval order matters)
-import './force-color'
-import gradient from 'gradient-string'
 
 export const SPRITES = {
   // Classic alien sprites (2 lines each, 5 chars wide)
@@ -238,118 +234,6 @@ export const ASCII_SPINNER_FRAMES = [
  */
 export function getSpinnerFrames(caps?: TerminalCapabilities): readonly string[] {
   return supportsBraille(caps) ? BRAILLE_SPINNER_FRAMES : ASCII_SPINNER_FRAMES
-}
-
-// ─── Gradient Text Helpers ──────────────────────────────────────────────────
-// gradient-string produces raw ANSI 24-bit escape sequences.
-// Only activated on truecolor terminals; 256-color terminals get flat color.
-// FORCE_COLOR is synced in force-color.ts (imported above, before gradient-string).
-
-// Lazy-initialized gradient instances — only created on first use.
-// Avoids unnecessary startup cost on non-truecolor terminals.
-type GradientFn = ReturnType<typeof gradient>
-let _titleGradient: GradientFn | undefined
-let _waveGradient: GradientFn | undefined
-let _gameOverGradient: GradientFn | undefined
-let _victoryGradient: GradientFn | undefined
-
-function titleGradient(): GradientFn {
-  return (_titleGradient ??= gradient(['cyan', 'magenta']))
-}
-function waveGradient(): GradientFn {
-  return (_waveGradient ??= gradient(['cyan', 'yellow']))
-}
-function gameOverGradient(): GradientFn {
-  return (_gameOverGradient ??= gradient(['red', 'yellow']))
-}
-function victoryGradient(): GradientFn {
-  return (_victoryGradient ??= gradient(['green', 'cyan', 'magenta']))
-}
-
-/**
- * Get the VADERS logo with gradient coloring on truecolor terminals.
- * Falls back to plain logo text on 256-color/16-color terminals.
- *
- * @warning Returns raw ANSI escape sequences on truecolor terminals. Use with process.stdout.write() or pre-rendered text buffers, NOT as children of OpenTUI <text> components.
- * @returns Logo string (may contain ANSI escape sequences on truecolor terminals)
- */
-export function getGradientLogo(): string {
-  const logo = getLogo()
-  const caps = getTerminalCapabilities()
-  // Extra supportsUnicode check: the ASCII fallback logo uses simple characters
-  // that don't benefit from gradient coloring. Only apply gradient to the
-  // Unicode block-character logo where the effect looks right.
-  if (!caps.supportsTrueColor || !caps.supportsUnicode) return logo
-  return titleGradient().multiline(logo)
-}
-
-/**
- * Apply gradient to wave announcement text (e.g., "WAVE 3").
- * Falls back to plain text on limited terminals.
- *
- * @warning Returns raw ANSI escape sequences on truecolor terminals. Use with process.stdout.write() or pre-rendered text buffers, NOT as children of OpenTUI <text> components.
- */
-export function getGradientWaveText(text: string): string {
-  if (!supportsGradient()) return text
-  return waveGradient()(text)
-}
-
-/**
- * Apply gradient to game over text.
- * Falls back to plain text on limited terminals.
- *
- * @warning Returns raw ANSI escape sequences on truecolor terminals. Use with process.stdout.write() or pre-rendered text buffers, NOT as children of OpenTUI <text> components.
- */
-export function getGradientGameOverText(text: string): string {
-  if (!supportsGradient()) return text
-  return gameOverGradient()(text)
-}
-
-/**
- * Apply gradient to victory/success text.
- * Falls back to plain text on limited terminals.
- *
- * @warning Returns raw ANSI escape sequences on truecolor terminals. Use with process.stdout.write() or pre-rendered text buffers, NOT as children of OpenTUI <text> components.
- */
-export function getGradientVictoryText(text: string): string {
-  if (!supportsGradient()) return text
-  return victoryGradient()(text)
-}
-
-/**
- * Apply a custom gradient to arbitrary text.
- * Falls back to plain text on limited terminals.
- *
- * @warning Returns raw ANSI escape sequences on truecolor terminals. Use with process.stdout.write() or pre-rendered text buffers, NOT as children of OpenTUI <text> components.
- * @param text - The text to colorize
- * @param colors - Gradient color stops (hex strings)
- */
-export function applyGradient(text: string, ...colors: string[]): string {
-  if (!supportsGradient()) return text
-  if (colors.length < 2) return text
-  try {
-    return gradient(colors)(text)
-  } catch {
-    return text
-  }
-}
-
-/**
- * Apply a custom gradient to multiline text.
- * Falls back to plain text on limited terminals.
- *
- * @warning Returns raw ANSI escape sequences on truecolor terminals. Use with process.stdout.write() or pre-rendered text buffers, NOT as children of OpenTUI <text> components.
- * @param text - The multiline text to colorize
- * @param colors - Gradient color stops (hex strings)
- */
-export function applyMultilineGradient(text: string, ...colors: string[]): string {
-  if (!supportsGradient()) return text
-  if (colors.length < 2) return text
-  try {
-    return gradient(colors).multiline(text)
-  } catch {
-    return text
-  }
 }
 
 // ─── Sprite Selection Based on Terminal Capabilities ─────────────────────────

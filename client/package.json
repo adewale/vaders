@@ -15,7 +15,6 @@
   "dependencies": {
     "@opentui/core": "0.1.74",
     "@opentui/react": "0.1.74",
-    "gradient-string": "^3.0.0",
     "react": "^19.0.0"
   },
   "devDependencies": {

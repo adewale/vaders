@@ -8,6 +8,7 @@ import { LaunchScreen } from './components/LaunchScreen'
 import { LobbyScreen, getLobbyMenuItemCount } from './components/LobbyScreen'
 import { GameScreen } from './components/GameScreen'
 import { GameOverScreen, getGameOverMenuItemCount } from './components/GameOverScreen'
+import { Spinner } from './components/Spinner'
 import { normalizeKey, createHeldKeysTracker } from './input'
 import { usesDiscreteMovement } from './terminal'
 import { debugLog, clearDebugLog } from './debug'
@@ -173,7 +174,7 @@ export function App({
   if (appState.screen === 'connecting' || !appState.roomUrl) {
     return (
       <box width={terminalWidth} height={terminalHeight} justifyContent="center" alignItems="center">
-        <text fg="cyan">Connecting to server...</text>
+        <text fg="cyan">Connecting to server... </text><Spinner fg="cyan" />
       </box>
     )
   }
@@ -514,7 +515,7 @@ function GameContainer({
     if (reconnecting) {
       return (
         <box width={terminalWidth} height={terminalHeight} justifyContent="center" alignItems="center" flexDirection="column">
-          <text fg="yellow">Reconnecting...</text>
+          <text fg="yellow">Reconnecting... </text><Spinner fg="yellow" />
         </box>
       )
     }
@@ -530,7 +531,7 @@ function GameContainer({
     }
     return (
       <box width={terminalWidth} height={terminalHeight} justifyContent="center" alignItems="center">
-        <text fg="cyan">Connecting to server...</text>
+        <text fg="cyan">Connecting to server... </text><Spinner fg="cyan" />
       </box>
     )
   }
@@ -541,7 +542,7 @@ function GameContainer({
       if (autoStartSolo) {
         return (
           <box width={terminalWidth} height={terminalHeight} justifyContent="center" alignItems="center">
-            <text fg="cyan">Starting game...</text>
+            <text fg="cyan">Starting game... </text><Spinner fg="cyan" />
           </box>
         )
       }

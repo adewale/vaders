@@ -9,12 +9,6 @@ import {
   BRAILLE_SPINNER_FRAMES,
   ASCII_SPINNER_FRAMES,
   getSpinnerFrames,
-  getGradientLogo,
-  getGradientWaveText,
-  getGradientGameOverText,
-  getGradientVictoryText,
-  applyGradient,
-  applyMultilineGradient,
 } from './sprites'
 import type { TerminalCapabilities } from './terminal/compatibility'
 import { LAYOUT } from '../../shared/types'
@@ -647,78 +641,5 @@ describe('Braille Spinner Frames', () => {
     const caps = { supportsUnicode: false } as TerminalCapabilities
     const frames = getSpinnerFrames(caps)
     expect(frames).toBe(ASCII_SPINNER_FRAMES)
-  })
-})
-
-// ─── Gradient Text Helper Tests ─────────────────────────────────────────────
-
-describe('Gradient Text Helpers', () => {
-  test('getGradientLogo returns non-empty string', () => {
-    const logo = getGradientLogo()
-    expect(logo.length).toBeGreaterThan(0)
-  })
-
-  test('getGradientLogo contains recognizable logo structure', () => {
-    const logo = getGradientLogo()
-    // The Unicode logo has block characters, the ASCII logo has /|_ structure.
-    // Both span multiple lines. Verify multiline structure and distinctive content.
-    const lines = logo.split('\n')
-    expect(lines.length).toBeGreaterThanOrEqual(3)
-    // ASCII logo contains '___|' pattern, Unicode logo contains '═══'
-    expect(logo).toMatch(/___|═══/)
-  })
-
-  test('getGradientWaveText returns non-empty string for non-empty input', () => {
-    const text = getGradientWaveText('WAVE 3')
-    expect(text.length).toBeGreaterThan(0)
-    // The raw text characters should still be present
-    expect(text).toContain('WAVE')
-  })
-
-  test('getGradientGameOverText preserves content', () => {
-    const text = getGradientGameOverText('GAME OVER')
-    expect(text).toContain('GAME OVER')
-  })
-
-  test('getGradientVictoryText preserves content', () => {
-    const text = getGradientVictoryText('VICTORY')
-    expect(text).toContain('VICTORY')
-  })
-
-  test('applyGradient returns plain text with fewer than 2 colors', () => {
-    expect(applyGradient('hello')).toBe('hello')
-    expect(applyGradient('hello', '#ff0000')).toBe('hello')
-  })
-
-  test('applyGradient with 2+ colors returns non-empty string', () => {
-    const text = applyGradient('hello', '#ff0000', '#0000ff')
-    expect(text.length).toBeGreaterThan(0)
-    expect(text).toContain('hello')
-  })
-
-  test('applyMultilineGradient returns plain text with fewer than 2 colors', () => {
-    expect(applyMultilineGradient('line1\nline2')).toBe('line1\nline2')
-    expect(applyMultilineGradient('line1\nline2', '#ff0000')).toBe('line1\nline2')
-  })
-
-  test('applyMultilineGradient with 2+ colors preserves line count', () => {
-    const input = 'line1\nline2\nline3'
-    const result = applyMultilineGradient(input, '#ff0000', '#0000ff')
-    // Output should have the same number of newlines
-    const inputLines = input.split('\n').length
-    const resultLines = result.split('\n').length
-    expect(resultLines).toBe(inputLines)
-  })
-
-  test('applyGradient handles invalid color strings gracefully', () => {
-    // Should not throw, should return plain text on error
-    const text = applyGradient('hello', 'not-a-color', 'also-bad')
-    expect(text).toContain('hello')
-  })
-
-  test('gradient functions handle empty string input', () => {
-    expect(getGradientWaveText('')).toBe('')
-    expect(getGradientGameOverText('')).toBe('')
-    expect(getGradientVictoryText('')).toBe('')
   })
 })
