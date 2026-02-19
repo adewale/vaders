@@ -412,18 +412,17 @@ describe('Particle Pool: Capping and Reuse', () => {
     const firstBatchCount = system.getActiveCount()
     expect(firstBatchCount).toBeGreaterThan(0)
 
-    // Now advance past the longest lifetime to ensure all first-batch particles expire
-    // Lifetime range is [30, 50], particles are decremented on creation tick,
-    // so max lifetime is effectively 49 more ticks after creation
-    for (let i = 0; i < 60; i++) {
+    // Advance past ALL origin spawns and particle lifetimes.
+    // start() creates 8 origins (5 bottom + 3 top) with delays up to 50 ticks.
+    // Last origin fires at tick ~51, its particles live up to 50 more ticks.
+    // So we need ~101 total ticks for everything to expire. Use 110 for margin.
+    for (let i = 0; i < 110; i++) {
       system.update()
     }
 
-    // After expiry, first-batch particles should be inactive (recycled back to pool)
-    // Note: other origins may have spawned new particles by now, but pool slots
-    // freed by expired particles demonstrate the recycling mechanism
+    // After all origins have fired and all particles expired, pool is fully recycled
     const afterExpiryCount = system.getActiveCount()
-    expect(afterExpiryCount).toBeLessThan(maxParticles)
+    expect(afterExpiryCount).toBe(0)
   })
 
   test('burst with more particles than pool is capped to available slots', () => {

@@ -658,12 +658,14 @@ describe('Gradient Text Helpers', () => {
     expect(logo.length).toBeGreaterThan(0)
   })
 
-  test('getGradientLogo contains logo content', () => {
-    // Regardless of gradient support, the underlying text should be present
+  test('getGradientLogo contains recognizable logo structure', () => {
     const logo = getGradientLogo()
-    // The logo contains "VADERS" — check for a substring present in both
-    // the Unicode logo (██) and ASCII logo (VADERS spelled out with /|_)
-    expect(logo).toContain('|')
+    // The Unicode logo has block characters, the ASCII logo has /|_ structure.
+    // Both span multiple lines. Verify multiline structure and distinctive content.
+    const lines = logo.split('\n')
+    expect(lines.length).toBeGreaterThanOrEqual(3)
+    // ASCII logo contains '___|' pattern, Unicode logo contains '═══'
+    expect(logo).toMatch(/___|═══/)
   })
 
   test('getGradientWaveText returns non-empty string for non-empty input', () => {

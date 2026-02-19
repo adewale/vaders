@@ -7,8 +7,11 @@ export { STANDARD_WIDTH, STANDARD_HEIGHT }
 
 // Import terminal capabilities for sprite selection and color conversion
 import { getTerminalCapabilities, convertColorForTerminal, convertColorObject, supportsGradient, supportsBraille } from './terminal'
-import gradient from 'gradient-string'
 import type { TerminalCapabilities } from './terminal'
+
+// Set FORCE_COLOR before gradient-string loads chalk (ESM eval order matters)
+import './force-color'
+import gradient from 'gradient-string'
 
 export const SPRITES = {
   // Classic alien sprites (2 lines each, 5 chars wide)
@@ -240,22 +243,28 @@ export function getSpinnerFrames(caps?: TerminalCapabilities): readonly string[]
 // ─── Gradient Text Helpers ──────────────────────────────────────────────────
 // gradient-string produces raw ANSI 24-bit escape sequences.
 // Only activated on truecolor terminals; 256-color terminals get flat color.
+// FORCE_COLOR is synced in force-color.ts (imported above, before gradient-string).
 
-// Sync chalk's color detection with our own when gradients are enabled.
-// gradient-string uses chalk internally, which detects color support independently
-// via tty.isatty(1). Our supportsGradient() gates on env vars and can disagree.
-// Only force chalk to truecolor level when we know the terminal supports it.
-// We intentionally do NOT set FORCE_COLOR='0' for non-truecolor terminals,
-// as that would suppress color output for all libraries that read FORCE_COLOR.
-if (supportsGradient()) {
-  process.env.FORCE_COLOR = '3'
+// Lazy-initialized gradient instances — only created on first use.
+// Avoids unnecessary startup cost on non-truecolor terminals.
+type GradientFn = ReturnType<typeof gradient>
+let _titleGradient: GradientFn | undefined
+let _waveGradient: GradientFn | undefined
+let _gameOverGradient: GradientFn | undefined
+let _victoryGradient: GradientFn | undefined
+
+function titleGradient(): GradientFn {
+  return (_titleGradient ??= gradient(['cyan', 'magenta']))
 }
-
-// Pre-built gradient instances for common game text
-const _titleGradient = gradient(['cyan', 'magenta'])
-const _waveGradient = gradient(['cyan', 'yellow'])
-const _gameOverGradient = gradient(['red', 'yellow'])
-const _victoryGradient = gradient(['green', 'cyan', 'magenta'])
+function waveGradient(): GradientFn {
+  return (_waveGradient ??= gradient(['cyan', 'yellow']))
+}
+function gameOverGradient(): GradientFn {
+  return (_gameOverGradient ??= gradient(['red', 'yellow']))
+}
+function victoryGradient(): GradientFn {
+  return (_victoryGradient ??= gradient(['green', 'cyan', 'magenta']))
+}
 
 /**
  * Get the VADERS logo with gradient coloring on truecolor terminals.
@@ -267,8 +276,11 @@ const _victoryGradient = gradient(['green', 'cyan', 'magenta'])
 export function getGradientLogo(): string {
   const logo = getLogo()
   const caps = getTerminalCapabilities()
+  // Extra supportsUnicode check: the ASCII fallback logo uses simple characters
+  // that don't benefit from gradient coloring. Only apply gradient to the
+  // Unicode block-character logo where the effect looks right.
   if (!caps.supportsTrueColor || !caps.supportsUnicode) return logo
-  return _titleGradient.multiline(logo)
+  return titleGradient().multiline(logo)
 }
 
 /**
@@ -279,7 +291,7 @@ export function getGradientLogo(): string {
  */
 export function getGradientWaveText(text: string): string {
   if (!supportsGradient()) return text
-  return _waveGradient(text)
+  return waveGradient()(text)
 }
 
 /**
@@ -290,7 +302,7 @@ export function getGradientWaveText(text: string): string {
  */
 export function getGradientGameOverText(text: string): string {
   if (!supportsGradient()) return text
-  return _gameOverGradient(text)
+  return gameOverGradient()(text)
 }
 
 /**
@@ -301,7 +313,7 @@ export function getGradientGameOverText(text: string): string {
  */
 export function getGradientVictoryText(text: string): string {
   if (!supportsGradient()) return text
-  return _victoryGradient(text)
+  return victoryGradient()(text)
 }
 
 /**
