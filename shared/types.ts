@@ -27,20 +27,20 @@ export const STANDARD_HEIGHT = 36
 export const LAYOUT = {
   PLAYER_Y: 31,              // Y position for player ships (5 rows from bottom)
   PLAYER_MIN_X: 2,           // Left boundary for player movement
-  PLAYER_MAX_X: 114,         // Right boundary for player movement (120 - 5 - 1)
-  PLAYER_WIDTH: 5,           // Width of player sprite (2-line sprite)
+  PLAYER_MAX_X: 112,         // Right boundary for player movement (120 - 7 - 1)
+  PLAYER_WIDTH: 7,           // Width of player sprite (2-line braille sprite)
   PLAYER_HEIGHT: 2,          // Height of player sprite
   BULLET_SPAWN_OFFSET: 2,    // Bullet spawns this far above player
   BARRIER_Y: 25,             // Y position for barrier row
   ALIEN_START_Y: 3,          // Initial Y position for top alien row
-  ALIEN_COL_SPACING: 7,      // Horizontal spacing between alien columns (wider for 5-char sprites)
+  ALIEN_COL_SPACING: 9,      // Horizontal spacing between alien columns (7-char sprites + 2 gap)
   ALIEN_ROW_SPACING: 3,      // Vertical spacing between alien rows (for 2-line sprites)
   ALIEN_MIN_X: 2,            // Left boundary for alien movement
-  ALIEN_MAX_X: 114,          // Right boundary for alien movement
-  ALIEN_WIDTH: 5,            // Width of alien sprite
+  ALIEN_MAX_X: 112,          // Right boundary for alien movement (120 - 7 - 1)
+  ALIEN_WIDTH: 7,            // Width of alien sprite
   ALIEN_HEIGHT: 2,           // Height of alien sprite
   GAME_OVER_Y: 28,           // If aliens reach this Y, game over
-  COLLISION_H: 3,            // Horizontal collision threshold (for 5-wide sprites)
+  COLLISION_H: 4,            // Horizontal collision threshold (for 7-wide sprites)
   COLLISION_V: 2,            // Vertical collision threshold (for 2-tall sprites)
 } as const
 
@@ -48,10 +48,10 @@ export const LAYOUT = {
 // These match the visual sprite sizes for accurate collision detection
 
 export const HITBOX = {
-  PLAYER_HALF_WIDTH: 2,      // Player.x is center, sprite width 5, so half is 2
-  ALIEN_WIDTH: 5,            // Left-edge based, full sprite width
+  PLAYER_HALF_WIDTH: 3,      // Player.x is center, sprite width 7, so half is 3
+  ALIEN_WIDTH: 7,            // Left-edge based, full sprite width
   ALIEN_HEIGHT: 2,           // Full sprite height
-  UFO_WIDTH: 5,              // Left-edge based, full sprite width
+  UFO_WIDTH: 7,              // Left-edge based, full sprite width
   UFO_HEIGHT: 2,             // Full sprite height
   BARRIER_SEGMENT_WIDTH: 2,  // Each segment is 2 chars wide
   BARRIER_SEGMENT_HEIGHT: 2, // Each segment is 2 rows tall
@@ -230,7 +230,7 @@ export function applyPlayerInput(
 
 /**
  * Check if a bullet hits a player.
- * Player.x is CENTER of sprite (width 5), so visual span is [x-2, x+3).
+ * Player.x is CENTER of sprite (width 7), so visual span is [x-3, x+4).
  * Y uses tolerance (COLLISION_V=2) to account for bullet movement.
  */
 export function checkPlayerHit(bX: number, bY: number, pX: number, pY: number): boolean {
@@ -241,7 +241,7 @@ export function checkPlayerHit(bX: number, bY: number, pX: number, pY: number): 
 
 /**
  * Check if a bullet hits an alien.
- * Alien.x is LEFT EDGE of sprite (width 5), so visual span is [x, x+5).
+ * Alien.x is LEFT EDGE of sprite (width 7), so visual span is [x, x+7).
  * Y uses tolerance (COLLISION_V=2) to account for bullet movement.
  */
 export function checkAlienHit(bX: number, bY: number, aX: number, aY: number): boolean {
@@ -251,7 +251,7 @@ export function checkAlienHit(bX: number, bY: number, aX: number, aY: number): b
 
 /**
  * Check if a bullet hits a UFO.
- * UFO.x is LEFT EDGE of sprite (width 5), so visual span is [x, x+5).
+ * UFO.x is LEFT EDGE of sprite (width 7), so visual span is [x, x+7).
  * Y uses tolerance (COLLISION_V=2) to account for bullet movement.
  */
 export function checkUfoHit(bX: number, bY: number, uX: number, uY: number): boolean {

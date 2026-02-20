@@ -1,5 +1,5 @@
 // client/src/sprites.ts
-// Game sprites for 120x36 standard size - 2-line sprites for larger display
+// Game sprites for 120x36 standard size - 7-wide braille sprites with animation frames
 
 // Import standard dimensions from shared (single source of truth)
 import { STANDARD_WIDTH, STANDARD_HEIGHT } from '../../shared/types'
@@ -9,34 +9,214 @@ export { STANDARD_WIDTH, STANDARD_HEIGHT }
 import { getTerminalCapabilities, convertColorForTerminal, convertColorObject, supportsBraille } from './terminal'
 import type { TerminalCapabilities } from './terminal'
 
-export const SPRITES = {
-  // Classic alien sprites (2 lines each, 5 chars wide)
-  alien: {
-    squid: [
-      '╔═══╗',
-      '╚═╦═╝',
+// ─── Braille Bitmap Converter ───────────────────────────────────────────────────
+
+const BRAILLE_BASE = 0x2800
+const BRAILLE_DOTS: number[][] = [
+  [0x01, 0x08],  // row 0: dot1, dot4
+  [0x02, 0x10],  // row 1: dot2, dot5
+  [0x04, 0x20],  // row 2: dot3, dot6
+  [0x40, 0x80],  // row 3: dot7, dot8
+]
+
+/** Convert a 4-row × 2-col boolean grid to a single braille character */
+function bitmapToBraille(dots: boolean[][]): string {
+  let code = BRAILLE_BASE
+  for (let row = 0; row < 4; row++) {
+    for (let col = 0; col < 2; col++) {
+      if (dots[row]?.[col]) {
+        code |= BRAILLE_DOTS[row][col]
+      }
+    }
+  }
+  return String.fromCharCode(code)
+}
+
+/** Convert a pixel grid (rows × cols) into braille character lines.
+ *  Each braille char represents a 2×4 block of pixels. */
+function pixelsToBraille(pixels: number[][]): string[] {
+  const rows = pixels.length
+  const cols = pixels[0]?.length ?? 0
+  const brailleRows = Math.ceil(rows / 4)
+  const brailleCols = Math.ceil(cols / 2)
+  const lines: string[] = []
+
+  for (let br = 0; br < brailleRows; br++) {
+    let line = ''
+    for (let bc = 0; bc < brailleCols; bc++) {
+      const dots: boolean[][] = []
+      for (let dr = 0; dr < 4; dr++) {
+        const row: boolean[] = []
+        for (let dc = 0; dc < 2; dc++) {
+          const pr = br * 4 + dr
+          const pc = bc * 2 + dc
+          row.push(pr < rows && pc < cols ? pixels[pr][pc] === 1 : false)
+        }
+        dots.push(row)
+      }
+      line += bitmapToBraille(dots)
+    }
+    lines.push(line)
+  }
+  return lines
+}
+
+// ─── Braille Pixel Art (14×8 grids → 7 braille chars × 2 lines) ────────────────
+
+const PIXEL_ART = {
+  squid: {
+    a: [
+      [0,0,0,0,0,1,1,1,1,0,0,0,0,0],
+      [0,0,0,1,1,1,1,1,1,1,1,0,0,0],
+      [0,0,1,1,1,1,1,1,1,1,1,1,0,0],
+      [0,1,1,1,0,0,1,1,0,0,1,1,1,0],
+      [0,1,1,1,1,1,1,1,1,1,1,1,1,0],
+      [0,0,0,0,1,0,0,0,0,1,0,0,0,0],
+      [0,0,0,1,0,1,0,0,1,0,1,0,0,0],
+      [0,0,1,0,0,0,1,1,0,0,0,1,0,0],
     ],
-    crab: [
-      '/°°°\\',
-      '╚═══╝',
-    ],
-    octopus: [
-      '(╭ö╮)',
-      '(╰─╯)',
+    b: [
+      [0,0,0,0,0,1,1,1,1,0,0,0,0,0],
+      [0,0,0,1,1,1,1,1,1,1,1,0,0,0],
+      [0,0,1,1,1,1,1,1,1,1,1,1,0,0],
+      [0,1,1,1,0,0,1,1,0,0,1,1,1,0],
+      [0,1,1,1,1,1,1,1,1,1,1,1,1,0],
+      [0,0,1,0,0,1,0,0,1,0,0,1,0,0],
+      [0,1,0,0,0,0,0,0,0,0,0,0,1,0],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
     ],
   },
-
-  // Player ship (2 lines, 5 chars wide)
+  crab: {
+    a: [
+      [1,0,0,0,1,0,0,0,0,1,0,0,0,1],
+      [0,1,0,0,0,1,0,0,1,0,0,0,1,0],
+      [0,0,1,1,1,1,1,1,1,1,1,1,0,0],
+      [0,1,1,0,1,1,1,1,1,1,0,1,1,0],
+      [1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+      [1,0,1,1,1,1,1,1,1,1,1,1,0,1],
+      [1,0,1,0,0,0,0,0,0,0,0,1,0,1],
+      [0,0,0,0,1,1,0,0,1,1,0,0,0,0],
+    ],
+    b: [
+      [0,0,0,0,1,0,0,0,0,1,0,0,0,0],
+      [0,0,0,0,0,1,0,0,1,0,0,0,0,0],
+      [0,0,1,1,1,1,1,1,1,1,1,1,0,0],
+      [0,1,1,0,1,1,1,1,1,1,0,1,1,0],
+      [1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+      [1,0,1,1,1,1,1,1,1,1,1,1,0,1],
+      [1,0,0,0,1,0,0,0,0,1,0,0,0,1],
+      [0,0,0,1,0,0,0,0,0,0,1,0,0,0],
+    ],
+  },
+  octopus: {
+    a: [
+      [0,0,0,0,1,1,1,1,1,1,0,0,0,0],
+      [0,0,1,1,1,1,1,1,1,1,1,1,0,0],
+      [0,1,1,1,0,0,1,1,0,0,1,1,1,0],
+      [0,1,1,1,1,1,1,1,1,1,1,1,1,0],
+      [0,0,1,1,1,1,1,1,1,1,1,1,0,0],
+      [0,0,0,1,1,0,0,0,0,1,1,0,0,0],
+      [0,0,1,1,0,1,0,0,1,0,1,1,0,0],
+      [0,1,1,0,0,0,0,0,0,0,0,1,1,0],
+    ],
+    b: [
+      [0,0,0,0,1,1,1,1,1,1,0,0,0,0],
+      [0,0,1,1,1,1,1,1,1,1,1,1,0,0],
+      [0,1,1,1,0,0,1,1,0,0,1,1,1,0],
+      [0,1,1,1,1,1,1,1,1,1,1,1,1,0],
+      [0,0,1,1,1,1,1,1,1,1,1,1,0,0],
+      [0,0,0,1,0,0,1,1,0,0,1,0,0,0],
+      [0,0,1,0,0,1,0,0,1,0,0,1,0,0],
+      [1,1,0,0,0,0,0,0,0,0,0,0,1,1],
+    ],
+  },
   player: [
-    ' ╱█╲ ',
-    '▕███▏',
+    [0,0,0,0,0,1,1,1,0,0,0,0,0,0],
+    [0,0,0,0,1,1,1,1,1,0,0,0,0,0],
+    [0,0,0,1,1,1,1,1,1,1,0,0,0,0],
+    [0,0,1,1,1,1,1,1,1,1,1,0,0,0],
+    [0,1,1,1,1,1,1,1,1,1,1,1,0,0],
+    [1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+    [1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+    [1,1,0,0,1,1,1,1,1,0,0,0,1,1],
   ],
+  ufo: {
+    a: [
+      [0,0,0,0,0,1,1,1,1,0,0,0,0,0],
+      [0,0,0,1,1,1,1,1,1,1,1,0,0,0],
+      [0,0,1,1,0,0,1,1,0,0,1,1,0,0],
+      [0,1,1,1,1,1,1,1,1,1,1,1,1,0],
+      [1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+      [0,1,1,1,1,1,1,1,1,1,1,1,1,0],
+      [0,0,1,1,0,0,0,0,0,0,1,1,0,0],
+      [0,0,0,0,1,0,0,0,0,1,0,0,0,0],
+    ],
+    b: [
+      [0,0,0,0,0,1,1,1,1,0,0,0,0,0],
+      [0,0,0,1,1,1,1,1,1,1,1,0,0,0],
+      [0,0,1,1,0,1,0,0,1,0,1,1,0,0],
+      [0,1,1,1,1,1,1,1,1,1,1,1,1,0],
+      [1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+      [0,1,1,1,1,1,1,1,1,1,1,1,1,0],
+      [0,0,1,1,0,0,0,0,0,0,1,1,0,0],
+      [0,0,0,0,0,1,0,0,1,0,0,0,0,0],
+    ],
+  },
+}
 
-  // UFO (mystery ship) - 2 lines, 5 chars wide
-  ufo: [
-    '╭─●─╮',
-    '╰═══╯',
-  ],
+// Pre-render braille sprites at module load
+function renderBrailleSprites() {
+  return {
+    alien: {
+      squid: {
+        a: pixelsToBraille(PIXEL_ART.squid.a) as [string, string],
+        b: pixelsToBraille(PIXEL_ART.squid.b) as [string, string],
+      },
+      crab: {
+        a: pixelsToBraille(PIXEL_ART.crab.a) as [string, string],
+        b: pixelsToBraille(PIXEL_ART.crab.b) as [string, string],
+      },
+      octopus: {
+        a: pixelsToBraille(PIXEL_ART.octopus.a) as [string, string],
+        b: pixelsToBraille(PIXEL_ART.octopus.b) as [string, string],
+      },
+    },
+    player: {
+      a: pixelsToBraille(PIXEL_ART.player) as [string, string],
+      b: pixelsToBraille(PIXEL_ART.player) as [string, string],
+    },
+    ufo: {
+      a: pixelsToBraille(PIXEL_ART.ufo.a) as [string, string],
+      b: pixelsToBraille(PIXEL_ART.ufo.b) as [string, string],
+    },
+  }
+}
+
+const _brailleSprites = renderBrailleSprites()
+
+// ─── Sprite Type ────────────────────────────────────────────────────────────────
+
+/** A sprite with two animation frames (A/B) */
+export interface AnimatedSprite {
+  a: readonly [string, string]
+  b: readonly [string, string]
+}
+
+// ─── Main Sprites ───────────────────────────────────────────────────────────────
+
+export const SPRITES = {
+  // Classic alien sprites (2 lines each, 7 chars wide, braille pixel art)
+  alien: {
+    squid: _brailleSprites.alien.squid,
+    crab: _brailleSprites.alien.crab,
+    octopus: _brailleSprites.alien.octopus,
+  } as Record<string, AnimatedSprite>,
+
+  // Player ship (2 lines, 7 chars wide)
+  player: _brailleSprites.player,
+
+  // UFO (mystery ship) - 2 lines, 7 chars wide
+  ufo: _brailleSprites.ufo,
 
   // Bullets (1 char)
   bullet: {
@@ -44,37 +224,55 @@ export const SPRITES = {
     alien: '▼',    // Moving down
   },
 
-  // Barrier states (based on health) - 2x2 blocks
+  // Barrier states (based on health) - half-block damage patterns, 2x2
   barrier: {
     4: ['██', '██'],  // Full health
-    3: ['▓▓', '▓▓'],  // 3/4 health
-    2: ['▒▒', '▒▒'],  // 2/4 health
-    1: ['░░', '░░'],  // 1/4 health
+    3: ['▓█', '█▓'],  // 3/4 health - checkerboard damage
+    2: ['▒▓', '▓▒'],  // 2/4 health
+    1: ['░▒', '▒░'],  // 1/4 health
     0: ['  ', '  '],  // Destroyed
   },
 
   // Enhanced mode sprites (2 lines each)
   enhanced: {
     commander: {
-      healthy: ['◄════►', '╚════╝'],
-      damaged: ['◄────►', '╚────╝'],
+      healthy: ['◄══════►', '╚══════╝'],
+      damaged: ['◄──────►', '╚──────╝'],
     },
     transform: {
       scorpion: ['∿∿', '╰╯'],
       stingray: ['◇◇', '╲╱'],
       mini_commander: ['◄►', '╚╝'],
     },
-    tractorBeam: ['╠╬╬╣', '║║║║'],
+    tractorBeam: ['╠╬╬╬╬╣', '║║║║║║'],
   },
 } as const
 
 // Sprite dimensions (width x height in characters)
 export const SPRITE_SIZE = {
-  alien: { width: 5, height: 2 },
-  player: { width: 5, height: 2 },
-  ufo: { width: 5, height: 2 },
+  alien: { width: 7, height: 2 },
+  player: { width: 7, height: 2 },
+  ufo: { width: 7, height: 2 },
   bullet: { width: 1, height: 1 },
   barrier: { width: 2, height: 2 },
+} as const
+
+// ─── Gradient Colors ────────────────────────────────────────────────────────────
+// Vertical gradient: bright top row, dark bottom row
+
+export const GRADIENT_COLORS = {
+  alien: {
+    squid:   { bright: '#ff8888', dark: '#aa1111' },
+    crab:    { bright: '#ffcc44', dark: '#aa5500' },
+    octopus: { bright: '#88ff88', dark: '#11aa11' },
+  },
+  player: {
+    1: { bright: '#44ffff', dark: '#116666' },
+    2: { bright: '#ffaa44', dark: '#884400' },
+    3: { bright: '#ff88ff', dark: '#881188' },
+    4: { bright: '#aaff44', dark: '#448800' },
+  },
+  ufo: { bright: '#ff88ff', dark: '#aa11aa' },
 } as const
 
 // Retro Arcade Color Palette
@@ -138,10 +336,10 @@ export const LOGO_ASCII = `
   ╚═══╝  ╚═╝  ╚═╝╚═════╝ ╚══════╝╚═╝  ╚═╝╚══════╝
 `.trim()
 
-// Decorative alien parade for launch screen (2-line)
+// Decorative alien parade for launch screen (2-line, using frame A)
 export const ALIEN_PARADE = [
-  '╔═══╗  /°°°\\  (╭ö╮)',
-  '╚═╦═╝  ╚═══╝  (╰─╯)',
+  `${_brailleSprites.alien.squid.a[0]}  ${_brailleSprites.alien.crab.a[0]}  ${_brailleSprites.alien.octopus.a[0]}`,
+  `${_brailleSprites.alien.squid.a[1]}  ${_brailleSprites.alien.crab.a[1]}  ${_brailleSprites.alien.octopus.a[1]}`,
 ]
 
 // ─── ASCII Fallback Sprites ──────────────────────────────────────────────────
@@ -149,49 +347,49 @@ export const ALIEN_PARADE = [
 
 export const ASCII_SPRITES = {
   alien: {
-    squid: [
-      '+===+',
-      '+-+-+',
-    ],
-    crab: [
-      '/ooo\\',
-      '+===+',
-    ],
-    octopus: [
-      '(o^o)',
-      '(---)',
-    ],
+    squid: {
+      a: ['+==+==+', '+-=+=-+'],
+      b: ['+==+==+', '=+-+-+='],
+    },
+    crab: {
+      a: ['/ooooo\\', '+=====+'],
+      b: ['\\ooooo/', '+=====+'],
+    },
+    octopus: {
+      a: ['(o---o)', '(--v--)'],
+      b: ['(o---o)', '\\--v--/'],
+    },
+  } as Record<string, AnimatedSprite>,
+  player: {
+    a: ['  /A\\  ', '|=====|'],
+    b: ['  /A\\  ', '|=====|'],
   },
-  player: [
-    ' /A\\ ',
-    '|===|',
-  ],
-  ufo: [
-    '+-o-+',
-    '+===+',
-  ],
+  ufo: {
+    a: ['+--o--+', '+=====+'],
+    b: ['+--*--+', '+=====+'],
+  },
   bullet: {
     player: '|',
     alien: 'v',
   },
   barrier: {
     4: ['##', '##'],
-    3: ['%%', '%%'],
-    2: ['::','::'],
+    3: ['%#', '#%'],
+    2: ['::', '::'],
     1: ['..', '..'],
     0: ['  ', '  '],
   },
   enhanced: {
     commander: {
-      healthy: ['<====>', '+====+'],
-      damaged: ['<---->', '+----+'],
+      healthy: ['<======>', '+======+'],
+      damaged: ['<------>', '+------+'],
     },
     transform: {
       scorpion: ['~~', 'vv'],
       stingray: ['<>', '\\/',],
       mini_commander: ['<>','++'],
     },
-    tractorBeam: ['||||', '||||'],
+    tractorBeam: ['||||||', '||||||'],
   },
 } as const
 
@@ -240,7 +438,7 @@ export function getSpinnerFrames(caps?: TerminalCapabilities): readonly string[]
 
 /**
  * Get the appropriate sprites based on terminal capabilities.
- * Returns Unicode sprites for modern terminals, ASCII for limited ones.
+ * Returns braille sprites for modern terminals, ASCII for limited ones.
  */
 export function getSprites() {
   const caps = getTerminalCapabilities()
@@ -296,4 +494,12 @@ export function getColors(): typeof COLORS {
 export function getTerminalPlayerColor(slot: PlayerSlot, fallbackColor?: string): string {
   const colors = getColors()
   return colors.player[slot] ?? fallbackColor ?? colors.player[1]
+}
+
+/**
+ * Select animation frame based on game tick.
+ * Aliens alternate between frames A and B every 15 ticks (~0.5s at 30Hz).
+ */
+export function getAnimationFrame(sprite: AnimatedSprite, tick: number): readonly [string, string] {
+  return Math.floor(tick / 15) % 2 === 0 ? sprite.a : sprite.b
 }

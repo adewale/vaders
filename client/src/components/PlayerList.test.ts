@@ -103,25 +103,25 @@ describe('Player Color Assignment', () => {
 describe('Player Ship Sprite', () => {
   test('player sprite has 2 lines', () => {
     const sprites = getSprites()
-    expect(sprites.player.length).toBe(2)
+    expect(sprites.player.a.length).toBe(2)
   })
 
   test('player sprite first line is 5 characters wide', () => {
     const sprites = getSprites()
-    expect(sprites.player[0].length).toBe(5)
+    expect(sprites.player.a[0].length).toBe(7)
   })
 
   test('player sprite is consistent width across lines', () => {
     const sprites = getSprites()
-    const firstLineWidth = sprites.player[0].length
-    const secondLineWidth = sprites.player[1].length
+    const firstLineWidth = sprites.player.a[0].length
+    const secondLineWidth = sprites.player.a[1].length
     expect(firstLineWidth).toBe(secondLineWidth)
   })
 
   test('player sprite is suitable for compact lobby display', () => {
     const sprites = getSprites()
     // First line should be usable as a compact representation
-    const firstLine = sprites.player[0]
+    const firstLine = sprites.player.a[0]
     expect(firstLine.length).toBeLessThanOrEqual(7)
     expect(firstLine.trim().length).toBeGreaterThan(0)
   })

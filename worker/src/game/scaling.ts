@@ -12,7 +12,7 @@ export function getScaledConfig(playerCount: number, baseConfig: GameConfig): Sc
     1: { speedMult: 1.0,  shootsPerSecond: 0.5,  cols: 11, rows: 5 }, // 0.5/s = 1 shot every 2s
     2: { speedMult: 1.25, shootsPerSecond: 0.75, cols: 11, rows: 5 }, // 0.75/s = 1 shot every 1.3s
     3: { speedMult: 1.5,  shootsPerSecond: 1.0,  cols: 13, rows: 5 }, // 1.0/s = 1 shot per second
-    4: { speedMult: 1.75, shootsPerSecond: 1.25, cols: 15, rows: 6 }, // 1.25/s = 1 shot every 0.8s
+    4: { speedMult: 1.75, shootsPerSecond: 1.25, cols: 13, rows: 6 }, // 1.25/s = 1 shot every 0.8s
   }
   const scale = scaleTable[playerCount as keyof typeof scaleTable] ?? scaleTable[1]
 

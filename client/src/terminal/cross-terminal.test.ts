@@ -182,31 +182,31 @@ describe('Cross-Terminal Consistency', () => {
 describe('Sprite Consistency Constraints', () => {
   
   describe('Player Ship Dimensions', () => {
-    test('player sprite is exactly 5 chars wide', () => {
-      expect(SPRITES.player[0].length).toBe(5)
-      expect(SPRITES.player[1].length).toBe(5)
-      expect(SPRITE_SIZE.player.width).toBe(5)
+    test('player sprite is exactly 7 chars wide', () => {
+      expect(SPRITES.player.a[0].length).toBe(7)
+      expect(SPRITES.player.a[1].length).toBe(7)
+      expect(SPRITE_SIZE.player.width).toBe(7)
     })
 
     test('player sprite is exactly 2 lines tall', () => {
-      expect(SPRITES.player.length).toBe(2)
+      expect(SPRITES.player.a.length).toBe(2)
       expect(SPRITE_SIZE.player.height).toBe(2)
     })
 
     test('ASCII player sprite has same dimensions as Unicode sprite', () => {
-      expect(ASCII_SPRITES.player[0].length).toBe(SPRITES.player[0].length)
-      expect(ASCII_SPRITES.player[1].length).toBe(SPRITES.player[1].length)
+      expect(ASCII_SPRITES.player.a[0].length).toBe(SPRITES.player.a[0].length)
+      expect(ASCII_SPRITES.player.a[1].length).toBe(SPRITES.player.a[1].length)
     })
   })
 
   describe('Bullet Spawn Position Constraint', () => {
     // CRITICAL: Bullets must appear to come from the center of the player ship
-    // Player ship is 5 chars wide, so center is at offset 2 (0-indexed)
-    
+    // Player ship is 7 chars wide, so center is at offset 3 (0-indexed)
+
     test('player sprite center column is well-defined', () => {
       const playerWidth = SPRITE_SIZE.player.width
       const centerOffset = Math.floor(playerWidth / 2)
-      expect(centerOffset).toBe(2) // Center of 5-wide sprite
+      expect(centerOffset).toBe(3) // Center of 7-wide sprite
     })
 
     test('bullet is single character for precise positioning', () => {
@@ -228,17 +228,17 @@ describe('Sprite Consistency Constraints', () => {
     test('all alien types have same dimensions', () => {
       const alienTypes = ['squid', 'crab', 'octopus'] as const
       for (const type of alienTypes) {
-        expect(SPRITES.alien[type][0].length).toBe(5)
-        expect(SPRITES.alien[type][1].length).toBe(5)
-        expect(SPRITES.alien[type].length).toBe(2)
+        expect(SPRITES.alien[type].a[0].length).toBe(7)
+        expect(SPRITES.alien[type].a[1].length).toBe(7)
+        expect(SPRITES.alien[type].a.length).toBe(2)
       }
     })
 
     test('ASCII alien sprites match Unicode dimensions', () => {
       const alienTypes = ['squid', 'crab', 'octopus'] as const
       for (const type of alienTypes) {
-        expect(ASCII_SPRITES.alien[type][0].length).toBe(SPRITES.alien[type][0].length)
-        expect(ASCII_SPRITES.alien[type][1].length).toBe(SPRITES.alien[type][1].length)
+        expect(ASCII_SPRITES.alien[type].a[0].length).toBe(SPRITES.alien[type].a[0].length)
+        expect(ASCII_SPRITES.alien[type].a[1].length).toBe(SPRITES.alien[type].a[1].length)
       }
     })
   })
@@ -261,14 +261,14 @@ describe('Sprite Consistency Constraints', () => {
 
   describe('UFO Sprite Consistency', () => {
     test('UFO sprite matches declared dimensions', () => {
-      expect(SPRITES.ufo[0].length).toBe(SPRITE_SIZE.ufo.width)
-      expect(SPRITES.ufo[1].length).toBe(SPRITE_SIZE.ufo.width)
-      expect(SPRITES.ufo.length).toBe(SPRITE_SIZE.ufo.height)
+      expect(SPRITES.ufo.a[0].length).toBe(SPRITE_SIZE.ufo.width)
+      expect(SPRITES.ufo.a[1].length).toBe(SPRITE_SIZE.ufo.width)
+      expect(SPRITES.ufo.a.length).toBe(SPRITE_SIZE.ufo.height)
     })
 
     test('ASCII UFO sprite matches Unicode dimensions', () => {
-      expect(ASCII_SPRITES.ufo[0].length).toBe(SPRITES.ufo[0].length)
-      expect(ASCII_SPRITES.ufo[1].length).toBe(SPRITES.ufo[1].length)
+      expect(ASCII_SPRITES.ufo.a[0].length).toBe(SPRITES.ufo.a[0].length)
+      expect(ASCII_SPRITES.ufo.a[1].length).toBe(SPRITES.ufo.a[1].length)
     })
   })
 })
@@ -277,33 +277,33 @@ describe('Visual Alignment Constraints', () => {
   
   test('all 2-line sprites have consistent line lengths', () => {
     // Each sprite's two lines must be the same width for proper alignment
-    expect(SPRITES.player[0].length).toBe(SPRITES.player[1].length)
-    
+    expect(SPRITES.player.a[0].length).toBe(SPRITES.player.a[1].length)
+
     for (const type of ['squid', 'crab', 'octopus'] as const) {
-      expect(SPRITES.alien[type][0].length).toBe(SPRITES.alien[type][1].length)
+      expect(SPRITES.alien[type].a[0].length).toBe(SPRITES.alien[type].a[1].length)
     }
-    
-    expect(SPRITES.ufo[0].length).toBe(SPRITES.ufo[1].length)
-    
+
+    expect(SPRITES.ufo.a[0].length).toBe(SPRITES.ufo.a[1].length)
+
     for (const health of [1, 2, 3, 4] as const) {
       expect(SPRITES.barrier[health][0].length).toBe(SPRITES.barrier[health][1].length)
     }
   })
 
   test('ASCII sprites also have consistent line lengths', () => {
-    expect(ASCII_SPRITES.player[0].length).toBe(ASCII_SPRITES.player[1].length)
-    
+    expect(ASCII_SPRITES.player.a[0].length).toBe(ASCII_SPRITES.player.a[1].length)
+
     for (const type of ['squid', 'crab', 'octopus'] as const) {
-      expect(ASCII_SPRITES.alien[type][0].length).toBe(ASCII_SPRITES.alien[type][1].length)
+      expect(ASCII_SPRITES.alien[type].a[0].length).toBe(ASCII_SPRITES.alien[type].a[1].length)
     }
-    
-    expect(ASCII_SPRITES.ufo[0].length).toBe(ASCII_SPRITES.ufo[1].length)
+
+    expect(ASCII_SPRITES.ufo.a[0].length).toBe(ASCII_SPRITES.ufo.a[1].length)
   })
 
   test('sprite widths match SPRITE_SIZE declarations', () => {
-    expect(SPRITES.player[0].length).toBe(SPRITE_SIZE.player.width)
-    expect(SPRITES.alien.squid[0].length).toBe(SPRITE_SIZE.alien.width)
-    expect(SPRITES.ufo[0].length).toBe(SPRITE_SIZE.ufo.width)
+    expect(SPRITES.player.a[0].length).toBe(SPRITE_SIZE.player.width)
+    expect(SPRITES.alien.squid.a[0].length).toBe(SPRITE_SIZE.alien.width)
+    expect(SPRITES.ufo.a[0].length).toBe(SPRITE_SIZE.ufo.width)
     expect(SPRITES.barrier[4][0].length).toBe(SPRITE_SIZE.barrier.width)
     expect(SPRITES.bullet.player.length).toBe(SPRITE_SIZE.bullet.width)
   })
@@ -320,7 +320,7 @@ describe('Terminal-Specific Rendering', () => {
       expect(caps.supportsUnicode).toBe(true)
       // Verify that Unicode caps would produce Unicode sprites
       const sprites = caps.supportsUnicode ? SPRITES : ASCII_SPRITES
-      expect(sprites.player[0]).toBe(SPRITES.player[0])
+      expect(sprites.player.a[0]).toBe(SPRITES.player.a[0])
     } finally {
       restore()
     }

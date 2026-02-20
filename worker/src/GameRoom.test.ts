@@ -1298,9 +1298,9 @@ describe('4-Player Room Full Scenario', () => {
     state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
     expect(state.status).toBe('playing')
 
-    // 4-player config should have 15 columns and 6 rows of aliens (15*6 = 90 aliens)
+    // 4-player config should have 13 columns and 6 rows of aliens (13*6 = 78 aliens)
     const aliens = state.entities.filter(e => e.kind === 'alien')
-    expect(aliens.length).toBe(90) // 15 cols * 6 rows
+    expect(aliens.length).toBe(78) // 13 cols * 6 rows
 
     // Should have 5 shared lives (coop mode)
     expect(state.lives).toBe(5)

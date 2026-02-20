@@ -593,16 +593,16 @@ describe('bullet spawn position centering', () => {
     it('DOCUMENTS: adding SPRITE_WIDTH/2 offset would be WRONG', () => {
       // This test documents WHY the old formula was wrong
       const playerX = 50
-      const spriteWidth = LAYOUT.PLAYER_WIDTH  // 5
+      const spriteWidth = LAYOUT.PLAYER_WIDTH  // 7
 
       // WRONG: This assumes player.x is left edge
-      const wrongBulletX = playerX + Math.floor(spriteWidth / 2)  // 50 + 2 = 52
+      const wrongBulletX = playerX + Math.floor(spriteWidth / 2)  // 50 + 3 = 53
 
       // CORRECT: player.x IS the center, no offset needed
       const correctBulletX = playerX  // 50
 
-      // The wrong formula places bullet 2 columns to the right
-      expect(wrongBulletX - correctBulletX).toBe(2)
+      // The wrong formula places bullet 3 columns to the right
+      expect(wrongBulletX - correctBulletX).toBe(3)
     })
   })
 
@@ -620,18 +620,18 @@ describe('bullet spawn position centering', () => {
   })
 
   describe('sprite dimension constants', () => {
-    it('PLAYER_WIDTH is 5 (odd number for symmetric centering)', () => {
-      expect(LAYOUT.PLAYER_WIDTH).toBe(5)
+    it('PLAYER_WIDTH is 7 (odd number for symmetric centering)', () => {
+      expect(LAYOUT.PLAYER_WIDTH).toBe(7)
     })
 
-    it('ALIEN_WIDTH is 5 (odd number for symmetric centering)', () => {
-      expect(LAYOUT.ALIEN_WIDTH).toBe(5)
+    it('ALIEN_WIDTH is 7 (odd number for symmetric centering)', () => {
+      expect(LAYOUT.ALIEN_WIDTH).toBe(7)
     })
 
-    it('center offset for 5-wide sprite is 2', () => {
-      // For rendering: leftEdge = center - 2
-      // Columns: [0, 1, 2, 3, 4] with center at index 2
-      expect(Math.floor(5 / 2)).toBe(2)
+    it('center offset for 7-wide sprite is 3', () => {
+      // For rendering: leftEdge = center - 3
+      // Columns: [0, 1, 2, 3, 4, 5, 6] with center at index 3
+      expect(Math.floor(7 / 2)).toBe(3)
     })
   })
 })
@@ -1581,16 +1581,18 @@ describe('barrier segment damage progression', () => {
 // ============================================================================
 
 describe('barrier protection vs player hitbox mismatch', () => {
-  // These tests demonstrate a bug where bullets can hit players "through" barriers
-  // because the player hitbox (COLLISION_H=3) is wider than the barrier collision
-  // detection threshold (< 1).
+  // These tests verify barrier/player hitbox interaction.
+  // With HITBOX.PLAYER_HALF_WIDTH=3, player hitbox is [pX-3, pX+4).
   //
-  // Real barrier (5 segments): offsets 0,1,2,3,4 → for barrier at X=50, segments at X=50-54
-  // Player hitbox: |bulletX - playerX - 1| < 3 → for player at X=52, bullets X=50-55 hit
+  // Real barrier (5 segments): offsets 0,1,2,3,4 → for barrier at X=50,
+  //   segment collision ranges: [50,52), [52,54), [54,56), [56,58), [58,60)
+  // Player at X=52, hitbox: [49, 56)
   //
   // A bullet at X=55 would:
-  //   - Miss barrier (nearest segment at X=54, difference=1, NOT < 1)
-  //   - Hit player at X=52 (|55-52-1|=2 < 3)
+  //   - Hit barrier segment at offsetX=2 (range [54,56)) if at barrier Y
+  //   - Hit player at X=52 (55 >= 49 && 55 < 56) if at player Y
+  // A bullet at X=56 would:
+  //   - Miss player (56 not < 56)
 
   function createFullBarrier(id: string, x: number): BarrierEntity {
     // Use the real 5-wide barrier shape like production
@@ -1615,20 +1617,20 @@ describe('barrier protection vs player hitbox mismatch', () => {
 
   it('alien bullet at barrier edge should NOT hit player behind barrier', () => {
     // Setup: Player centered behind a 5-wide barrier
-    // Barrier at X=50 covers X=50,51,52,53,54
-    // Player at X=52 (centered behind barrier)
-    // Alien bullet at X=55 (just outside barrier right edge)
+    // Barrier at X=50, segment collision: [50,52), [52,54), [54,56), [56,58), [58,60)
+    // Player at X=52 (centered behind barrier), hitbox: [49, 56)
+    // Alien bullet at X=56 (just outside player hitbox right edge)
     //
-    // Bullet should either hit barrier OR miss player
+    // Bullet should miss player (56 not < 56)
 
     const { state, players } = createTestPlayingState(1)
     const player = players[0]
     player.x = 52  // Center player behind barrier
     state.players[player.id] = player
 
-    const barrier = createFullBarrier('barrier1', 50)  // Segments at X=50-54
-    // Alien bullet just outside barrier, moving down toward player
-    const alienBullet = createTestBullet('ab1', 55, LAYOUT.PLAYER_Y - 1, null, 1)
+    const barrier = createFullBarrier('barrier1', 50)
+    // Alien bullet just outside player hitbox, moving down toward player
+    const alienBullet = createTestBullet('ab1', 56, LAYOUT.PLAYER_Y - 1, null, 1)
     state.entities = [barrier, alienBullet]
 
     const result = gameReducer(state, { type: 'TICK' })
@@ -1638,12 +1640,11 @@ describe('barrier protection vs player hitbox mismatch', () => {
   })
 
   it('bullet 2 cells outside barrier misses player', () => {
-    // Barrier at X=50 covers X=50-54
-    // Player at X=52
+    // Barrier at X=50, segment collision: [50,52)...[58,60)
+    // Player at X=52, hitbox: [49, 56)
     // Bullet at X=56
     //
-    // Player hitbox: |bulletX - playerX - 1| < 3
-    // |56 - 52 - 1| = 3, which is NOT < 3, so bullet misses
+    // Player hitbox check: 56 >= 49 && 56 < 56 → false (56 not < 56), so bullet misses
 
     const { state, players } = createTestPlayingState(1)
     const player = players[0]
@@ -1661,11 +1662,11 @@ describe('barrier protection vs player hitbox mismatch', () => {
   })
 
   it('documents exact boundary where bullet misses barrier but player is still protected', () => {
-    // Barrier at X=50, segments at X=50,51,52,53,54
-    // Player at X=52
-    // Bullet at X=55:
-    //   - Barrier check: misses barrier
-    //   - Player check: player is still alive (protected)
+    // Barrier at X=50, segment collision: [50,52)...[58,60)
+    // Player at X=52, hitbox: [49, 56)
+    // Bullet at X=56:
+    //   - Barrier check: bullet at y=30 is below barrier at y=25, misses barrier
+    //   - Player check: 56 >= 49 && 56 < 56 → false, misses player
 
     const { state, players } = createTestPlayingState(1)
     const player = players[0]
@@ -1673,10 +1674,10 @@ describe('barrier protection vs player hitbox mismatch', () => {
     state.players[player.id] = player
 
     const barrier = createFullBarrier('barrier1', 50)
-    const alienBullet = createTestBullet('ab1', 55, LAYOUT.PLAYER_Y - 1, null, 1)
+    const alienBullet = createTestBullet('ab1', 56, LAYOUT.PLAYER_Y - 1, null, 1)
     state.entities = [barrier, alienBullet]
 
-    // Verify bullet misses barrier
+    // Verify bullet misses barrier (bullet is below barrier Y)
     const result = gameReducer(state, { type: 'TICK' })
     const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
     const allSegmentsUndamaged = updatedBarrier.segments.every(s => s.health === 4)
@@ -2460,18 +2461,18 @@ describe('shooting at screen boundaries', () => {
 // 3. Rendering position calculations
 //
 // Key constants from shared/types.ts:
-//   SPRITE_SIZE.player = { width: 5, height: 2 }
-//   SPRITE_SIZE.alien = { width: 5, height: 2 }
-//   SPRITE_SIZE.ufo = { width: 5, height: 2 }  (NOTE: actual sprite is 5 chars, LAYOUT says width: 5)
+//   SPRITE_SIZE.player = { width: 7, height: 2 }
+//   SPRITE_SIZE.alien = { width: 7, height: 2 }
+//   SPRITE_SIZE.ufo = { width: 7, height: 2 }
 //   SPRITE_SIZE.bullet = { width: 1, height: 1 }
 //   SPRITE_SIZE.barrier = { width: 2, height: 2 }
 //
 // Key constants from shared/types.ts LAYOUT:
-//   COLLISION_H = 3 (horizontal collision threshold)
+//   COLLISION_H = 4 (horizontal collision threshold)
 //   COLLISION_V = 2 (vertical collision threshold)
-//   PLAYER_WIDTH = 5
+//   PLAYER_WIDTH = 7
 //   PLAYER_HEIGHT = 2
-//   ALIEN_WIDTH = 5
+//   ALIEN_WIDTH = 7
 //   ALIEN_HEIGHT = 2
 //
 // Coordinate systems:
@@ -2486,45 +2487,43 @@ describe('shooting at screen boundaries', () => {
 describe('Sprite shape vs hitbox alignment', () => {
   // ─── Player Collision Tests ─────────────────────────────────────────────────
   describe('Player hitbox', () => {
-    // Player.x is CENTER of sprite (width=5, so sprite spans [x-2, x+2])
-    // checkBulletCollision: |bulletX - playerX - offsetX| < COLLISION_H (where offsetX=1)
-    // Actual formula: |bulletX - playerX - 1| < 3
-    // This means bullets at playerX-2 to playerX+4 (exclusive) will hit
-    // But visual sprite spans playerX-2 to playerX+2
-    // MISMATCH: hitbox extends 2 chars past right edge of visual sprite!
+    // Player.x is CENTER of sprite (width=7, so sprite spans [x-3, x+3])
+    // checkPlayerHit: bX >= pX - 3 && bX < pX + 4
+    // This means bullets at [pX-3, pX+4) will hit
+    // Visual sprite spans [pX-3, pX+3]
+    // Hitbox matches visual sprite (+1 for bullet width accounting)
 
-    it('MISMATCH: player hitbox extends past visual right edge', () => {
-      // Player at x=50, visual sprite spans [48, 52] (5 chars wide, centered)
-      // But checkBulletCollision hits for bullets at [48, 54)
+    it('player hitbox matches visual sprite - bullet past right edge misses', () => {
+      // Player at x=50, visual sprite spans [47, 53] (7 chars wide, centered)
+      // Hitbox: [50-3, 50+3+1) = [47, 54)
       // This test verifies bullets outside the visual sprite DON'T hit
 
       const { state, players } = createTestPlayingState(1)
       const player = players[0]
-      player.x = 50  // Center at 50, visual: [48, 52]
+      player.x = 50  // Center at 50, visual: [47, 53]
       state.players[player.id] = player
 
-      // Bullet at x=53 is 1 char past visual right edge - should MISS (fixed behavior)
-      const alienBullet = createTestBullet('ab1', 53, LAYOUT.PLAYER_Y, null, 1)
+      // Bullet at x=54 is 1 char past visual right edge - should MISS
+      const alienBullet = createTestBullet('ab1', 54, LAYOUT.PLAYER_Y, null, 1)
       state.entities = [alienBullet, createTestAlien('a1', 20, 5)]
 
       const result = gameReducer(state, { type: 'TICK' })
       const playerAfter = result.state.players[player.id]
 
-      // FIXED: Bullet at x=53 now correctly misses player with visual sprite at [48,52]
-      // checkPlayerHit: 53 >= 48 && 53 < 53 → false (not < 53)
+      // checkPlayerHit: 54 >= 47 && 54 < 54 → false (54 not < 54)
       expect(playerAfter.alive).toBe(true)  // Correctly misses!
     })
 
     it('player hitbox now matches visual sprite', () => {
-      // checkPlayerHit: bX >= pX - 2 && bX < pX + 3
-      // For player at x=50: hitbox is [48, 53) which matches visual [48, 52] + bullet width
+      // checkPlayerHit: bX >= pX - 3 && bX < pX + 4
+      // For player at x=50: hitbox is [47, 54) which matches visual [47, 53] + bullet width
       //
       // For player at x=50:
-      //   Left boundary:  47 < 48 -> MISS
-      //   Left edge:      48 >= 48 && 48 < 53 -> HIT ✓
-      //   Center:         50 >= 48 && 50 < 53 -> HIT
-      //   Right edge:     52 >= 48 && 52 < 53 -> HIT
-      //   Past right:     53 >= 48 && 53 < 53 -> MISS (53 not < 53) ✓
+      //   Left boundary:  46 < 47 -> MISS
+      //   Left edge:      47 >= 47 && 47 < 54 -> HIT ✓
+      //   Center:         50 >= 47 && 50 < 54 -> HIT
+      //   Right edge:     53 >= 47 && 53 < 54 -> HIT
+      //   Past right:     54 >= 47 && 54 < 54 -> MISS (54 not < 54) ✓
       //
       // Hitbox now aligns with visual sprite!
 
@@ -2533,31 +2532,31 @@ describe('Sprite shape vs hitbox alignment', () => {
       player1.x = 50
       state1.players[player1.id] = player1
 
-      // Bullet at x=48 (visual left edge) NOW CORRECTLY HITS
-      const bulletLeft = createTestBullet('ab1', 48, LAYOUT.PLAYER_Y, null, 1)
+      // Bullet at x=47 (visual left edge) NOW CORRECTLY HITS
+      const bulletLeft = createTestBullet('ab1', 47, LAYOUT.PLAYER_Y, null, 1)
       state1.entities = [bulletLeft, createTestAlien('a1', 20, 5)]
 
       const result1 = gameReducer(state1, { type: 'TICK' })
-      // FIXED: 48 >= 48 && 48 < 53 -> HIT
+      // FIXED: 47 >= 47 && 47 < 54 -> HIT
       expect(result1.state.players[player1.id].alive).toBe(false)  // Bullet at visual left edge now HITS
     })
 
     it('documents correct hitbox boundaries for player', () => {
       // Summary: For player at center x=50:
-      // - Visual sprite spans: x=[48, 52] (5 chars wide centered on x=50)
-      // - Hitbox spans: x=[48, 53) (matches visual, +1 for bullet width accounting)
-      // - Left visual edge (48) is now INSIDE hitbox ✓
-      // - Past right visual edge (53) is now OUTSIDE hitbox ✓
+      // - Visual sprite spans: x=[47, 53] (7 chars wide centered on x=50)
+      // - Hitbox spans: x=[47, 54) (matches visual, +1 for bullet width accounting)
+      // - Left visual edge (47) is now INSIDE hitbox ✓
+      // - Past right visual edge (54) is now OUTSIDE hitbox ✓
 
       const testCases = [
-        { bulletX: 47, expectedHit: false, description: 'far left (outside visual)' },
-        { bulletX: 48, expectedHit: true, description: 'visual left edge - HITS ✓' },
-        { bulletX: 49, expectedHit: true, description: 'inside visual, 1 from left edge' },
+        { bulletX: 46, expectedHit: false, description: 'far left (outside visual)' },
+        { bulletX: 47, expectedHit: true, description: 'visual left edge - HITS ✓' },
+        { bulletX: 48, expectedHit: true, description: 'inside visual, 1 from left edge' },
         { bulletX: 50, expectedHit: true, description: 'center' },
         { bulletX: 51, expectedHit: true, description: 'inside visual' },
-        { bulletX: 52, expectedHit: true, description: 'visual right edge' },
-        { bulletX: 53, expectedHit: false, description: 'past visual right edge - MISSES ✓' },
-        { bulletX: 54, expectedHit: false, description: 'far right (outside)' },
+        { bulletX: 53, expectedHit: true, description: 'visual right edge' },
+        { bulletX: 54, expectedHit: false, description: 'past visual right edge - MISSES ✓' },
+        { bulletX: 55, expectedHit: false, description: 'far right (outside)' },
       ]
 
       for (const tc of testCases) {
@@ -2579,18 +2578,18 @@ describe('Sprite shape vs hitbox alignment', () => {
 
   // ─── Alien Collision Tests ─────────────────────────────────────────────────
   describe('Alien hitbox', () => {
-    // Alien.x is LEFT EDGE of sprite (width=5, so sprite spans [x, x+4])
-    // checkAlienHit: bX >= aX && bX < aX + 5
-    // This means bullets at [alienX, alienX+5) will hit
-    // Visual sprite spans [alienX, alienX+5)
-    // FIXED: hitbox now matches visual sprite!
+    // Alien.x is LEFT EDGE of sprite (width=7, so sprite spans [x, x+6])
+    // checkAlienHit: bX >= aX && bX < aX + 7
+    // This means bullets at [alienX, alienX+7) will hit
+    // Visual sprite spans [alienX, alienX+7)
+    // Hitbox matches visual sprite!
 
     it('documents alien hitbox boundaries', () => {
-      // Alien at x=50, visual sprite spans [50, 54] (5 chars wide, left-aligned)
-      // checkAlienHit: bX >= 50 && bX < 55
-      // Hits for bulletX in [50, 55)
+      // Alien at x=50, visual sprite spans [50, 56] (7 chars wide, left-aligned)
+      // checkAlienHit: bX >= 50 && bX < 57
+      // Hits for bulletX in [50, 57)
       //
-      // Hitbox: [50, 55) matches visual sprite!
+      // Hitbox: [50, 57) matches visual sprite!
 
       const testCases = [
         { bulletX: 47, expectedHit: false, description: 'far left' },
@@ -2598,10 +2597,10 @@ describe('Sprite shape vs hitbox alignment', () => {
         { bulletX: 49, expectedHit: false, description: '1 left of visual - MISSES ✓' },
         { bulletX: 50, expectedHit: true, description: 'visual left edge - HITS ✓' },
         { bulletX: 51, expectedHit: true, description: 'visual center-left' },
-        { bulletX: 52, expectedHit: true, description: 'visual center' },
-        { bulletX: 53, expectedHit: true, description: 'visual center-right' },
-        { bulletX: 54, expectedHit: true, description: 'visual right edge - HITS ✓' },
-        { bulletX: 55, expectedHit: false, description: 'past right edge - MISSES ✓' },
+        { bulletX: 53, expectedHit: true, description: 'visual center' },
+        { bulletX: 55, expectedHit: true, description: 'visual center-right' },
+        { bulletX: 56, expectedHit: true, description: 'visual right edge - HITS ✓' },
+        { bulletX: 57, expectedHit: false, description: 'past right edge - MISSES ✓' },
       ]
 
       for (const tc of testCases) {
@@ -2621,30 +2620,30 @@ describe('Sprite shape vs hitbox alignment', () => {
 
     it('bullet left of visual alien sprite now correctly misses', () => {
       const { state, players } = createTestPlayingState(1)
-      const alien = createTestAlien('alien1', 50, 10)  // Visual: [50, 54]
+      const alien = createTestAlien('alien1', 50, 10)  // Visual: [50, 56]
       const bullet = createTestBullet('b1', 49, 10, players[0].id, -1)  // 1 char LEFT of visual
       state.entities = [alien, bullet]
 
       const result = gameReducer(state, { type: 'TICK' })
       const alienAfter = getAliens(result.state.entities).find(a => a.id === 'alien1')
 
-      // FIXED: 49 < 50 -> MISS
+      // 49 < 50 -> MISS
       // x=49 is visually LEFT of alien sprite, correctly misses
       expect(alienAfter?.alive).toBe(true)  // Correctly misses!
     })
 
     it('bullet at visual right edge now correctly hits alien', () => {
       const { state, players } = createTestPlayingState(1)
-      const alien = createTestAlien('alien1', 50, 10)  // Visual: [50, 54]
-      const bullet = createTestBullet('b1', 54, 10, players[0].id, -1)  // Visual right edge
+      const alien = createTestAlien('alien1', 50, 10)  // Visual: [50, 56]
+      const bullet = createTestBullet('b1', 56, 10, players[0].id, -1)  // Visual right edge
       state.entities = [alien, bullet]
 
       const result = gameReducer(state, { type: 'TICK' })
       // Dead aliens are cleaned up at end of tick
       const alienAfter = getAliens(result.state.entities).find(a => a.id === 'alien1')
 
-      // FIXED: 54 >= 50 && 54 < 55 -> HIT
-      // x=54 is visually ON the alien sprite, correctly hits
+      // 56 >= 50 && 56 < 57 -> HIT
+      // x=56 is visually ON the alien sprite, correctly hits
       expect(alienAfter).toBeUndefined()  // Alien removed = was hit correctly!
     })
   })
@@ -2652,27 +2651,22 @@ describe('Sprite shape vs hitbox alignment', () => {
   // ─── UFO Collision Tests ─────────────────────────────────────────────────
   describe('UFO hitbox', () => {
     // UFO.x is LEFT EDGE (same as alien)
-    // Sprite comment says "7 chars wide" but SPRITE_SIZE.ufo = { width: 5 }
-    // Actual sprite '╭─●─╮' is 5 chars (each Unicode char is 1 cell)
-    // Uses checkUfoHit which now matches visual sprite
+    // Sprite is 7 chars wide, HITBOX.UFO_WIDTH=7
+    // Uses checkUfoHit: bX >= uX && bX < uX + 7
 
-    it('documents UFO sprite dimension mismatch in comments', () => {
-      // In sprites.ts line 34: "// UFO (mystery ship) - 2 lines, 7 chars wide"
-      // In sprites.ts line 74: "ufo: { width: 5, height: 2 }"
-      // Actual sprite '╭─●─╮' has 5 characters
-      // This is a documentation bug (comment says 7, actual is 5)
-      //
-      // The hitbox now uses HITBOX.UFO_WIDTH=5 to match visual
-      expect(LAYOUT.COLLISION_H).toBe(3)  // Old value kept for reference
+    it('documents UFO sprite dimensions match hitbox', () => {
+      // UFO sprite is 7 chars wide, matching HITBOX.UFO_WIDTH=7
+      // LAYOUT.COLLISION_H=4 is the horizontal collision threshold for 7-wide sprites
+      expect(LAYOUT.COLLISION_H).toBe(4)
     })
 
     it('documents UFO hitbox boundaries (now matches visual)', () => {
       const testCases = [
         { bulletX: 49, expectedHit: false, description: '1 left of visual - MISSES ✓' },
         { bulletX: 50, expectedHit: true, description: 'visual left edge - HITS ✓' },
-        { bulletX: 53, expectedHit: true, description: 'visual center-right' },
-        { bulletX: 54, expectedHit: true, description: 'visual right edge - HITS ✓' },
-        { bulletX: 55, expectedHit: false, description: 'past right edge - MISSES ✓' },
+        { bulletX: 53, expectedHit: true, description: 'visual center' },
+        { bulletX: 56, expectedHit: true, description: 'visual right edge - HITS ✓' },
+        { bulletX: 57, expectedHit: false, description: 'past right edge - MISSES ✓' },
       ]
 
       for (const tc of testCases) {
@@ -2902,22 +2896,22 @@ describe('Sprite shape vs hitbox alignment', () => {
   })
 
   // ─── Summary of fixed hitboxes ─────────────────────────────────────────────────
-  describe('Summary of entity coordinate systems (all fixed)', () => {
+  describe('Summary of entity coordinate systems (7-wide sprites)', () => {
     it('documents all entity coordinate systems', () => {
       // PLAYER (checkPlayerHit):
-      // - Position: x = CENTER of sprite (width 5)
-      // - Visual: renders at [x-2, x+3)
-      // - Hitbox: [x-2, x+3) × [y, y+2) ✓ MATCHES VISUAL
+      // - Position: x = CENTER of sprite (width 7)
+      // - Visual: renders at [x-3, x+4)
+      // - Hitbox: [x-3, x+4) × [y, y+2) ✓ MATCHES VISUAL
 
       // ALIEN (checkAlienHit):
-      // - Position: x = LEFT EDGE of sprite (width 5)
-      // - Visual: renders at [x, x+5)
-      // - Hitbox: [x, x+5) × [y, y+2) ✓ MATCHES VISUAL
+      // - Position: x = LEFT EDGE of sprite (width 7)
+      // - Visual: renders at [x, x+7)
+      // - Hitbox: [x, x+7) × [y, y+2) ✓ MATCHES VISUAL
 
       // UFO (checkUfoHit):
-      // - Position: x = LEFT EDGE of sprite (width 5)
-      // - Visual: renders at [x, x+5)
-      // - Hitbox: [x, x+5) × [y, y+2) ✓ MATCHES VISUAL
+      // - Position: x = LEFT EDGE of sprite (width 7)
+      // - Visual: renders at [x, x+7)
+      // - Hitbox: [x, x+7) × [y, y+2) ✓ MATCHES VISUAL
 
       // BARRIER (checkBarrierSegmentHit):
       // - Position: barrier.x = LEFT EDGE, segments use offsetX/offsetY
@@ -2926,7 +2920,7 @@ describe('Sprite shape vs hitbox alignment', () => {
       //
       // Using HITBOX constants ensures collision and visual stay in sync.
       // Verify LAYOUT contains the expected coordinate system constants
-      expect(LAYOUT.PLAYER_WIDTH).toBe(5)
+      expect(LAYOUT.PLAYER_WIDTH).toBe(7)
       expect(LAYOUT.PLAYER_HEIGHT).toBe(2)
     })
   })

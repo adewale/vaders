@@ -18,7 +18,7 @@ import {
   getUFOs,
 } from '../../../shared/types'
 import type { ServerEvent } from '../../../shared/protocol'
-import { SPRITES, SPRITE_SIZE, COLORS, getPlayerColor } from '../sprites'
+import { SPRITES, SPRITE_SIZE, COLORS, GRADIENT_COLORS, getPlayerColor, getAnimationFrame } from '../sprites'
 import { MusicManager } from '../audio/MusicManager'
 import { SYMBOLS as SYM } from '../capabilities'
 import { useTerminalSize } from '../hooks/useTerminalSize'
@@ -209,10 +209,10 @@ export function GameScreen({ state, currentPlayerId, isMuted = false, isMusicMut
             <UFOSprite key={`ufo-${ufo.id}`} ufo={ufo} tick={state.tick} />
           ))}
 
-          {/* Aliens - 2 line sprites (with entrance animation) */}
+          {/* Aliens - 2 line braille sprites (with entrance animation) */}
           {aliens.filter(a => a.alive).map(alien => {
             const pos = getAlienVisualPosition(alien)
-            return <AlienSprite key={`alien-${alien.id}`} x={pos.x} y={pos.y} type={alien.type} />
+            return <AlienSprite key={`alien-${alien.id}`} x={pos.x} y={pos.y} type={alien.type} tick={state.tick} />
           })}
 
           {/* Bullets */}
@@ -278,14 +278,15 @@ export function GameScreen({ state, currentPlayerId, isMuted = false, isMusicMut
 
 // ─── Game Sprites ──────────────────────────────────────────────────────────────
 
-// 2-line alien sprite
-function AlienSprite({ x, y, type }: { x: number; y: number; type: ClassicAlienType }) {
-  const sprite = SPRITES.alien[type]
-  const color = COLORS.alien[type]
+// 2-line alien sprite with animation frames and gradient colors
+function AlienSprite({ x, y, type, tick }: { x: number; y: number; type: ClassicAlienType; tick: number }) {
+  const frames = SPRITES.alien[type]
+  const frame = getAnimationFrame(frames, tick)
+  const gradient = GRADIENT_COLORS.alien[type]
   return (
     <box position="absolute" top={y} left={x} flexDirection="column">
-      <text fg={color}>{sprite[0]}</text>
-      <text fg={color}>{sprite[1]}</text>
+      <text fg={gradient.bright}>{frame[0]}</text>
+      <text fg={gradient.dark}>{frame[1]}</text>
     </box>
   )
 }
@@ -310,17 +311,18 @@ function PlayerShip({
   }
 
   const playerColor = getPlayerColor(player.slot)
+  const gradient = GRADIENT_COLORS.player[player.slot]
 
-  // Center the 5-wide sprite on the visual X position (interpolated or server)
+  // Center the 7-wide sprite on the visual X position (interpolated or server)
   const spriteX = Math.round(visualX) - Math.floor(SPRITE_SIZE.player.width / 2)
 
   return (
     <box position="absolute" top={LAYOUT.PLAYER_Y} left={spriteX} flexDirection="column">
-      <text fg={player.alive ? playerColor : COLORS.ui.dim}>{SPRITES.player[0]}</text>
-      <text fg={player.alive ? playerColor : COLORS.ui.dim}>{SPRITES.player[1]}</text>
+      <text fg={player.alive ? gradient.bright : COLORS.ui.dim}>{SPRITES.player.a[0]}</text>
+      <text fg={player.alive ? gradient.dark : COLORS.ui.dim}>{SPRITES.player.a[1]}</text>
       {/* Player indicator below ship */}
       <text fg={playerColor}>
-        {'  '}{isCurrentPlayer ? 'v' : `P${player.slot}`}
+        {'   '}{isCurrentPlayer ? 'v' : `P${player.slot}`}
       </text>
     </box>
   )
@@ -379,11 +381,12 @@ function Barrier({ barrier }: { barrier: BarrierEntity }) {
 // UFO sprite - mystery ship at top of screen with color cycling
 function UFOSprite({ ufo, tick }: { ufo: UFOEntity; tick: number }) {
   const color = getUFOColor(tick)
+  const frame = getAnimationFrame(SPRITES.ufo, tick)
 
   return (
     <box position="absolute" top={ufo.y} left={ufo.x} flexDirection="column">
-      <text fg={color}>{SPRITES.ufo[0]}</text>
-      <text fg={color}>{SPRITES.ufo[1]}</text>
+      <text fg={color}>{frame[0]}</text>
+      <text fg={color}>{frame[1]}</text>
     </box>
   )
 }

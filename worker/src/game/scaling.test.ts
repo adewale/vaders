@@ -115,9 +115,9 @@ describe('getScaledConfig', () => {
       expect(scaled.alienMoveIntervalTicks).toBe(expectedInterval)
     })
 
-    it('returns alienCols = 15', () => {
+    it('returns alienCols = 13', () => {
       const scaled = getScaledConfig(4, DEFAULT_CONFIG)
-      expect(scaled.alienCols).toBe(15)
+      expect(scaled.alienCols).toBe(13)
     })
 
     it('returns alienRows = 6', () => {

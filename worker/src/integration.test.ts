@@ -772,9 +772,9 @@ describe('Integration: Complete 4-Player Game Flow', () => {
     expect(gameState.lives).toBe(5) // 4-player coop mode
     expect(gameState.mode).toBe('coop')
 
-    // Verify correct alien formation for 4 players (15 cols x 6 rows = 90 aliens)
+    // Verify correct alien formation for 4 players (13 cols x 6 rows = 78 aliens)
     const aliens = gameState.entities.filter(e => e.kind === 'alien')
-    expect(aliens.length).toBe(90)
+    expect(aliens.length).toBe(78)
 
     // All players should have received game_start event
     for (const ws of webSockets) {
