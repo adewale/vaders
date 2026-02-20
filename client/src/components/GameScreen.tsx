@@ -236,10 +236,11 @@ export function GameScreen({ state, currentPlayerId, isMuted = false, isMusicMut
             <Barrier key={barrier.id} barrier={barrier} />
           ))}
 
-          {/* Dissolve/shimmer effects */}
-          {dissolveCells.map((cell) => (
+          {/* Dissolve/shimmer effects — index keys are correct here because the
+             entire array is replaced each frame (no stable identity needed) */}
+          {dissolveCells.map((cell, i) => (
             <text
-              key={`d-${cell.x}-${cell.y}`}
+              key={`d-${i}`}
               position="absolute"
               top={cell.y}
               left={cell.x}

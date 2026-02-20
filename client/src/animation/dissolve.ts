@@ -206,12 +206,15 @@ export class DissolveSystem {
     }
   }
 
-  /** Get all visible cells for rendering. */
+  /** Get all visible cells for rendering. Deduplicates by (x,y), keeping the highest density. */
   getCells(): DissolveCellOutput[] {
     // Early-out: no allocations when idle
     if (this.getActiveCount() === 0) return EMPTY_CELLS
 
-    const output: DissolveCellOutput[] = []
+    // Deduplicate by position: when multiple effects produce cells at the same
+    // (x,y), keep the highest-density one. This prevents duplicate React keys
+    // which cause ghost elements that never get cleaned up.
+    const deduped = new Map<number, DissolveCellOutput>()
 
     for (const effect of this.effects) {
       if (!effect.active) continue
@@ -243,11 +246,16 @@ export class DissolveSystem {
           ? this.getAsciiChar(densityFrac)
           : BRAILLE_DENSITY[clamp(densityIndex, 0, MAX_DENSITY)]
 
-        output.push({ x, y, char, color: effect.color })
+        // Deduplicate: pack (x,y) into a single number key for fast Map lookup
+        const key = y * this.config.screenWidth + x
+        const existing = deduped.get(key)
+        if (!existing || char.charCodeAt(0) > existing.char.charCodeAt(0)) {
+          deduped.set(key, { x, y, char, color: effect.color })
+        }
       }
     }
 
-    return output
+    return Array.from(deduped.values())
   }
 
   private getAsciiChar(densityFrac: number): string {

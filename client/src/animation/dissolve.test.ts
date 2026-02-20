@@ -312,6 +312,51 @@ describe('variant differences', () => {
   })
 })
 
+// ─── Deduplication ──────────────────────────────────────────────────────────
+
+describe('getCells deduplication', () => {
+  test('no two cells share the same (x, y) position', () => {
+    // Spawn two effects at the exact same position so cells overlap
+    const system = makeSystem({ maxEffects: 5 }, 42)
+    system.spawn(50, 20, 5, 2, '#ff0000', 'shimmer')
+    system.spawn(50, 20, 5, 2, '#00ff00', 'shimmer')
+    system.update()
+
+    const cells = system.getCells()
+    const seen = new Set<string>()
+    for (const cell of cells) {
+      const key = `${cell.x},${cell.y}`
+      expect(seen.has(key)).toBe(false)
+      seen.add(key)
+    }
+  })
+
+  test('keeps the higher-density cell when positions collide', () => {
+    // Spawn two dissolve effects at same position with different ages
+    // so they produce different densities at the same coordinates
+    const system = makeSystem({ maxEffects: 5, dissolveLifetime: 20 }, 42)
+    system.spawn(50, 20, 5, 2, '#ff0000', 'dissolve')
+
+    // Age the first effect so its density is lower
+    for (let i = 0; i < 10; i++) system.update()
+
+    // Spawn a fresh effect at the same position (higher density)
+    system.spawn(50, 20, 5, 2, '#00ff00', 'dissolve')
+    system.update()
+
+    const cells = system.getCells()
+
+    // Find any position that both effects could produce cells at
+    // All cells must be unique by position
+    const positions = new Map<string, string>()
+    for (const cell of cells) {
+      const key = `${cell.x},${cell.y}`
+      expect(positions.has(key)).toBe(false)
+      positions.set(key, cell.char)
+    }
+  })
+})
+
 // ─── getActiveCount (loop counter, not .filter()) ────────────────────────────
 
 describe('getActiveCount', () => {
