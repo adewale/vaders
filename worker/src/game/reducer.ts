@@ -15,6 +15,11 @@ import {
   LAYOUT,
   HITBOX,
   WIPE_TIMING,
+  ALIEN_MOVE_STEP,
+  ALIEN_DROP_STEP,
+  UFO_SPAWN_PROBABILITY,
+  ALIEN_BULLET_SKIP_INTERVAL,
+  COUNTDOWN_SECONDS,
   getAliens,
   getBullets,
   getBarriers,
@@ -166,6 +171,11 @@ function playerLeaveReducer(state: GameState, playerId: string): ReducerResult {
   delete next.players[playerId]
   next.readyPlayerIds = next.readyPlayerIds.filter(id => id !== playerId)
 
+  // Clean up bullets belonging to the departing player (A3: orphaned bullet cleanup)
+  next.entities = next.entities.filter(e =>
+    e.kind !== 'bullet' || e.ownerId !== playerId
+  )
+
   const playerCount = Object.keys(next.players).length
   if (playerCount === 1) {
     next.mode = 'solo'
@@ -289,6 +299,7 @@ function startSoloReducer(state: GameState): ReducerResult {
   const next = structuredClone(state)
   next.status = 'wipe_hold'  // Skip exit, go straight to hold for game start
   next.mode = 'solo'
+  next.maxLives = 3
   next.lives = 3
   // Patch all players' lives to match solo config
   for (const player of Object.values(next.players)) {
@@ -313,11 +324,11 @@ function startCountdownReducer(state: GameState): ReducerResult {
 
   const next = structuredClone(state)
   next.status = 'countdown'
-  next.countdownRemaining = 3
+  next.countdownRemaining = COUNTDOWN_SECONDS
 
   return {
     state: next,
-    events: [{ type: 'event', name: 'countdown_tick', data: { count: 3 } }],
+    events: [{ type: 'event', name: 'countdown_tick', data: { count: COUNTDOWN_SECONDS } }],
     persist: true,
   }
 }
@@ -407,6 +418,10 @@ function wipeTickReducer(state: GameState): ReducerResult {
               entity.entering = false
             }
           }
+          // Clear all players' input state so movement from previous wave doesn't carry over
+          for (const player of Object.values(next.players)) {
+            player.inputState = { left: false, right: false }
+          }
           break
       }
     }
@@ -458,8 +473,8 @@ function tickReducer(state: GameState): ReducerResult {
   const bullets = getBullets(next.entities)
   for (const bullet of bullets) {
     // Player bullets (dy=-1) move every tick
-    // Alien bullets (dy=1) move 4 out of 5 ticks (20% slower)
-    if (bullet.dy === -1 || next.tick % 5 !== 0) {
+    // Alien bullets (dy=1) skip 1 out of every ALIEN_BULLET_SKIP_INTERVAL ticks (20% slower)
+    if (bullet.dy === -1 || next.tick % ALIEN_BULLET_SKIP_INTERVAL !== 0) {
       bullet.y += bullet.dy * next.config.baseBulletSpeed
     }
   }
@@ -600,7 +615,7 @@ function tickReducer(state: GameState): ReducerResult {
     // Check if we need to change direction
     let hitWall = false
     for (const alien of liveAliens) {
-      const nextX = alien.x + next.alienDirection * 2
+      const nextX = alien.x + next.alienDirection * ALIEN_MOVE_STEP
       if (nextX <= LAYOUT.ALIEN_MIN_X || nextX >= LAYOUT.ALIEN_MAX_X) {
         hitWall = true
         break
@@ -610,38 +625,41 @@ function tickReducer(state: GameState): ReducerResult {
     if (hitWall) {
       next.alienDirection = (next.alienDirection * -1) as 1 | -1
       for (const alien of liveAliens) {
-        alien.y += 1
+        alien.y += ALIEN_DROP_STEP
       }
     } else {
       for (const alien of liveAliens) {
-        alien.x += next.alienDirection * 2
+        alien.x += next.alienDirection * ALIEN_MOVE_STEP
       }
     }
 
     // Alien-barrier collision: aliens destroy barrier segments on contact
-    // Segments are 2x2 cells (matching visual), aliens are ALIEN_WIDTH x ALIEN_HEIGHT
+    // Uses HITBOX constants consistently for collision detection
     for (const alien of liveAliens) {
+      let hitBarrier = false
       for (const barrier of barriers) {
+        if (hitBarrier) break
         for (const seg of barrier.segments) {
           if (seg.health <= 0) continue
 
-          // Segment position (matching visual rendering with 2x multiplier)
+          // Segment position (matching visual rendering with segment size multiplier)
           const segX = barrier.x + seg.offsetX * HITBOX.BARRIER_SEGMENT_WIDTH
           const segY = LAYOUT.BARRIER_Y + seg.offsetY * HITBOX.BARRIER_SEGMENT_HEIGHT
 
-          // Check if alien sprite overlaps segment
-          // Alien occupies [alien.x, alien.x + width) × [alien.y, alien.y + height)
-          // Segment occupies [segX, segX + width) × [segY, segY + height)
+          // Check if alien sprite overlaps segment (AABB overlap)
+          // Alien occupies [alien.x, alien.x + width) x [alien.y, alien.y + height)
+          // Segment occupies [segX, segX + width) x [segY, segY + height)
           const alienRight = alien.x + HITBOX.ALIEN_WIDTH
-          const alienBottom = alien.y + LAYOUT.ALIEN_HEIGHT
+          const alienBottom = alien.y + HITBOX.ALIEN_HEIGHT
           const segRight = segX + HITBOX.BARRIER_SEGMENT_WIDTH
           const segBottom = segY + HITBOX.BARRIER_SEGMENT_HEIGHT
 
-          // AABB overlap check
           if (alien.x < segRight && alienRight > segX &&
               alien.y < segBottom && alienBottom > segY) {
             // Alien destroys the barrier segment completely
             seg.health = 0
+            hitBarrier = true
+            break  // B4: aliens only damage one segment at a time
           }
         }
       }
@@ -649,7 +667,7 @@ function tickReducer(state: GameState): ReducerResult {
 
     // Game over if aliens reach player level (invasion)
     for (const alien of liveAliens) {
-      if (alien.y + LAYOUT.ALIEN_HEIGHT >= LAYOUT.PLAYER_Y) {
+      if (alien.y + HITBOX.ALIEN_HEIGHT >= LAYOUT.PLAYER_Y) {
         // Invasion! Game over regardless of lives
         next.status = 'game_over'
         next.lives = 0
@@ -687,7 +705,7 @@ function tickReducer(state: GameState): ReducerResult {
           kind: 'bullet',
           id: `ab_${next.tick}_${alien.id}`,
           x: alien.x + Math.floor(LAYOUT.ALIEN_WIDTH / 2),  // Left edge + offset = center
-          y: alien.y + LAYOUT.ALIEN_HEIGHT,  // Below alien sprite
+          y: alien.y + HITBOX.ALIEN_HEIGHT,  // Below alien sprite
           ownerId: null,  // Alien bullet
           dy: 1,  // Moving down
         }
@@ -710,7 +728,7 @@ function tickReducer(state: GameState): ReducerResult {
   }
 
   // Spawn new UFO (only if none active, ~0.5% chance per tick = roughly every 6-7 seconds)
-  if (!activeUfo && seededRandom(next) < 0.005) {
+  if (!activeUfo && seededRandom(next) < UFO_SPAWN_PROBABILITY) {
     const direction = seededRandom(next) < 0.5 ? 1 : -1 as 1 | -1
     const startX = direction === 1 ? -3 : next.config.width + 3
     const mysteryPoints = [50, 100, 150, 200, 300][Math.floor(seededRandom(next) * 5)]
@@ -748,6 +766,8 @@ function tickReducer(state: GameState): ReducerResult {
     // Wave transition handled by shell
   } else if (aliensReachedBottom || allPlayersOutOfLives) {
     next.status = 'game_over'
+    // B6: Ensure lives reflects actual state at game_over
+    next.lives = 0
     events.push({ type: 'event', name: 'game_over', data: { result: 'defeat' } })
   }
 

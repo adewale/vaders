@@ -53,7 +53,7 @@ export function GameScreen({ state, currentPlayerId, isMuted = false, isMusicMut
   const playerCount = Object.keys(players).length
   const currentPlayer = players[currentPlayerId]
   const myLives = currentPlayer?.lives ?? 0
-  const maxLives = mode === 'solo' ? 3 : 5
+  const maxLives = state.maxLives
 
   // ─── Entrance Animation ─────────────────────────────────────────────────────
   const { start: startEntrance, getPosition: getEntrancePosition, isRunning: entranceRunning } = useEntranceAnimation()

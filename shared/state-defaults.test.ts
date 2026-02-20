@@ -193,10 +193,10 @@ describe('validateGameState', () => {
     expect(validateGameState(123)).toEqual(['State is not an object'])
   })
 
-  it('checks all 17 required fields', () => {
+  it('checks all 18 required fields', () => {
     const issues = validateGameState({})
-    // Should have 17 missing field errors (including roomId)
-    expect(issues.filter(i => i.includes('Missing field')).length).toBe(17)
+    // Should have 18 missing field errors (including roomId and maxLives)
+    expect(issues.filter(i => i.includes('Missing field')).length).toBe(18)
   })
 })
 

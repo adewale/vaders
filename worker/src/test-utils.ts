@@ -213,6 +213,7 @@ export function createTestPlayingState(
 
   state.status = 'playing'
   state.entities = entities
+  state.maxLives = playerCount === 1 ? 3 : 5
   state.lives = playerCount === 1 ? 3 : 5
 
   return { state, players }

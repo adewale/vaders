@@ -15,8 +15,13 @@ import type {
 import {
   DEFAULT_CONFIG,
   LAYOUT,
+  HITBOX,
   WIPE_TIMING,
   PLAYER_COLORS,
+  MAX_BARRIER_COUNT,
+  BARRIER_PLAYER_OFFSET,
+  BARRIER_SHAPE_COLS,
+  COUNTDOWN_SECONDS,
   getBarriers,
   createAlienFormation,
   createBarrierSegments,
@@ -332,6 +337,7 @@ export class GameRoom extends DurableObject<Env> {
         case 'start_solo': {
           if (Object.keys(this.game.players).length === 1 && playerId) {
             this.game.mode = 'solo'
+            this.game.maxLives = 3
             this.game.lives = 3
             await this.startGame()
           }
@@ -494,12 +500,12 @@ export class GameRoom extends DurableObject<Env> {
       wsCount: this.ctx.getWebSockets().length,
     })
     this.game.status = 'countdown'
-    this.game.countdownRemaining = 3
-    this.countdownRemaining = 3
+    this.game.countdownRemaining = COUNTDOWN_SECONDS
+    this.countdownRemaining = COUNTDOWN_SECONDS
 
     this.persistState()
     await this.updateRoomRegistry()
-    this.broadcast({ type: 'event', name: 'countdown_tick', data: { count: 3 } })
+    this.broadcast({ type: 'event', name: 'countdown_tick', data: { count: COUNTDOWN_SECONDS } })
     this.broadcastFullState()
 
     // Use alarm for countdown ticks (hibernation-compatible, no setInterval)
@@ -545,6 +551,7 @@ export class GameRoom extends DurableObject<Env> {
     this.game.status = 'wipe_hold'
     this.game.countdownRemaining = null
     this.countdownRemaining = null
+    this.game.maxLives = scaled.lives
     this.game.lives = scaled.lives
     // Patch all existing players' lives to match scaled config
     for (const player of Object.values(this.game.players)) {
@@ -735,13 +742,13 @@ export class GameRoom extends DurableObject<Env> {
   private createBarriers(playerCount: number): BarrierEntity[] {
     if (!this.game) return []
     const width = this.game.config.width
-    const barrierCount = Math.min(4, playerCount + 2)
+    const barrierCount = Math.min(MAX_BARRIER_COUNT, playerCount + BARRIER_PLAYER_OFFSET)
     const barriers: BarrierEntity[] = []
     const spacing = width / (barrierCount + 1)
 
     for (let i = 0; i < barrierCount; i++) {
-      // Center each barrier: 5 segments × 3 chars each = 15 chars total
-      const barrierTotalWidth = 5 * 3 // BARRIER_SHAPE cols × BARRIER_SEGMENT_WIDTH
+      // Center each barrier: BARRIER_SHAPE_COLS segments × BARRIER_SEGMENT_WIDTH chars each
+      const barrierTotalWidth = BARRIER_SHAPE_COLS * HITBOX.BARRIER_SEGMENT_WIDTH
       const x = Math.floor(spacing * (i + 1)) - Math.floor(barrierTotalWidth / 2)
       barriers.push({
         kind: 'barrier',
@@ -755,8 +762,14 @@ export class GameRoom extends DurableObject<Env> {
 
   private async removePlayer(playerId: string) {
     if (!this.game) return
-    delete this.game.players[playerId]
-    this.game.readyPlayerIds = this.game.readyPlayerIds.filter(id => id !== playerId)
+
+    // Use the reducer to handle player removal (A5: go through reducer pattern)
+    // This ensures bullet cleanup and state consistency
+    const result = gameReducer(this.game, { type: 'PLAYER_LEAVE', playerId })
+    this.game = result.state
+    for (const event of result.events) {
+      this.broadcast(event)
+    }
 
     const playerCount = Object.keys(this.game.players).length
 
@@ -766,11 +779,8 @@ export class GameRoom extends DurableObject<Env> {
       }
       // Schedule cleanup
       await this.ctx.storage.setAlarm(Date.now() + 5 * 60 * 1000)
-    } else if (playerCount === 1 && this.game.status === 'waiting') {
-      this.game.mode = 'solo'
     }
 
-    this.broadcast({ type: 'event', name: 'player_left', data: { playerId } })
     this.persistState()
     await this.updateRoomRegistry()
   }

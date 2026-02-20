@@ -2,28 +2,25 @@
 // Player count scaling logic
 
 import type { GameConfig, ScaledConfig, GameState } from '../../../shared/types'
-import { LAYOUT, getBullets, getAliens, applyPlayerInput } from '../../../shared/types'
+import { LAYOUT, ALIEN_MOVE_STEP, ALIEN_DROP_STEP, getBullets, getAliens, applyPlayerInput } from '../../../shared/types'
 
 export function getScaledConfig(playerCount: number, baseConfig: GameConfig): ScaledConfig {
-  // shootsPerSecond: average shots aliens fire per second (from bottom row)
-  // At 30Hz tick rate, probability per tick = shootsPerSecond / 30
-  // Monotonically increases with player count for increased difficulty
+  // Scaling table per player count. shootMult is applied to baseAlienShootRate
+  // from GameConfig so the base probability is configurable rather than hardcoded.
   const scaleTable = {
-    1: { speedMult: 1.0,  shootsPerSecond: 0.5,  cols: 11, rows: 5 }, // 0.5/s = 1 shot every 2s
-    2: { speedMult: 1.25, shootsPerSecond: 0.75, cols: 11, rows: 5 }, // 0.75/s = 1 shot every 1.3s
-    3: { speedMult: 1.5,  shootsPerSecond: 1.0,  cols: 13, rows: 5 }, // 1.0/s = 1 shot per second
-    4: { speedMult: 1.75, shootsPerSecond: 1.25, cols: 13, rows: 6 }, // 1.25/s = 1 shot every 0.8s
+    1: { speedMult: 1.0,  shootMult: 1.0,   cols: 11, rows: 5 }, // base rate
+    2: { speedMult: 1.25, shootMult: 1.5,   cols: 11, rows: 5 }, // 50% more shooting
+    3: { speedMult: 1.5,  shootMult: 2.0,   cols: 13, rows: 5 }, // 2x shooting
+    4: { speedMult: 1.75, shootMult: 2.5,   cols: 13, rows: 6 }, // 2.5x shooting
   }
   const scale = scaleTable[playerCount as keyof typeof scaleTable] ?? scaleTable[1]
 
-  // Convert shots/second to probability per tick
-  // P(shoot per tick) = shootsPerSecond / tickRate
-  const tickRate = 1000 / baseConfig.tickIntervalMs  // e.g., 1000/33 ≈ 30Hz
-  const shootProbability = scale.shootsPerSecond / tickRate
+  // Use baseAlienShootRate from config as the base, scaled by player count
+  const shootProbability = baseConfig.baseAlienShootRate * scale.shootMult
 
   return {
     alienMoveIntervalTicks: Math.floor(baseConfig.baseAlienMoveIntervalTicks / scale.speedMult),
-    alienShootProbability: shootProbability,  // ~0.017 to 0.042 per tick
+    alienShootProbability: shootProbability,  // ~0.016 to 0.040 per tick
     alienCols: scale.cols,
     alienRows: scale.rows,
     lives: playerCount === 1 ? 3 : 5,
@@ -71,14 +68,14 @@ export function tickMovementOnly(state: GameState, config: GameConfig): GameStat
   if (next.tick % scaled.alienMoveIntervalTicks === 0) {
     const aliens = getAliens(next.entities).filter(a => a.alive)
     for (const alien of aliens) {
-      alien.x += next.alienDirection * 2
+      alien.x += next.alienDirection * ALIEN_MOVE_STEP
     }
     // Check for wall collision and reverse
     const hitWall = aliens.some(a => a.x <= LAYOUT.ALIEN_MIN_X || a.x >= LAYOUT.ALIEN_MAX_X)
     if (hitWall) {
       next.alienDirection = (next.alienDirection * -1) as 1 | -1
       for (const alien of aliens) {
-        alien.y += 1
+        alien.y += ALIEN_DROP_STEP
       }
     }
   }

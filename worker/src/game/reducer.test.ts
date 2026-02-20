@@ -235,6 +235,64 @@ describe('PLAYER_LEAVE action', () => {
 
     expect(result.persist).toBe(true)
   })
+
+  it('removes bullets belonging to departing player', () => {
+    const { state, players } = createTestGameStateWithPlayers(2)
+    state.status = 'playing'
+    const p1 = players[0]
+    const p2 = players[1]
+
+    // Add bullets for both players and an alien bullet
+    const p1Bullet = createTestBullet('b1', 50, 10, p1.id, -1)
+    const p2Bullet = createTestBullet('b2', 60, 10, p2.id, -1)
+    const alienBullet = createTestBullet('ab1', 70, 20, null, 1)
+    state.entities = [p1Bullet, p2Bullet, alienBullet]
+
+    const result = gameReducer(state, { type: 'PLAYER_LEAVE', playerId: p1.id })
+
+    // p1's bullet should be removed, p2's bullet and alien bullet should remain
+    const bullets = getBullets(result.state.entities)
+    expect(bullets.length).toBe(2)
+    expect(bullets.find(b => b.id === 'b1')).toBeUndefined()
+    expect(bullets.find(b => b.id === 'b2')).toBeDefined()
+    expect(bullets.find(b => b.id === 'ab1')).toBeDefined()
+  })
+
+  it('does not remove alien bullets when player leaves', () => {
+    const { state, player } = createTestGameStateWithPlayer({ id: 'p1' })
+    state.status = 'playing'
+
+    // Add alien bullets (ownerId = null) and player bullet
+    const alienBullet1 = createTestBullet('ab1', 50, 20, null, 1)
+    const alienBullet2 = createTestBullet('ab2', 60, 20, null, 1)
+    const playerBullet = createTestBullet('b1', 70, 10, 'p1', -1)
+    state.entities = [alienBullet1, alienBullet2, playerBullet]
+
+    const result = gameReducer(state, { type: 'PLAYER_LEAVE', playerId: 'p1' })
+
+    // Both alien bullets should remain, player's bullet removed
+    const bullets = getBullets(result.state.entities)
+    expect(bullets.length).toBe(2)
+    expect(bullets.every(b => b.ownerId === null)).toBe(true)
+  })
+
+  it('preserves other entities (aliens, barriers) when player leaves', () => {
+    const { state, player } = createTestGameStateWithPlayer({ id: 'p1' })
+    state.status = 'playing'
+
+    const alien = createTestAlien('a1', 50, 5)
+    const barrier = createTestBarrier('bar1', 30)
+    const playerBullet = createTestBullet('b1', 60, 10, 'p1', -1)
+    state.entities = [alien, barrier, playerBullet]
+
+    const result = gameReducer(state, { type: 'PLAYER_LEAVE', playerId: 'p1' })
+
+    // Alien and barrier should remain, bullet removed
+    expect(result.state.entities.length).toBe(2)
+    expect(result.state.entities.find(e => e.kind === 'alien')).toBeDefined()
+    expect(result.state.entities.find(e => e.kind === 'barrier')).toBeDefined()
+    expect(result.state.entities.find(e => e.kind === 'bullet')).toBeUndefined()
+  })
 })
 
 // ============================================================================
@@ -1280,6 +1338,23 @@ describe('TICK action (tickReducer)', () => {
       const result = gameReducer(state, { type: 'TICK' })
 
       expect(result.state.status).toBe('playing')
+    })
+
+    it('sets lives to 0 at game_over from defeat (B6)', () => {
+      const { state, players } = createTestPlayingState(1, {
+        aliens: [createTestAlien('alien1', 50, 10)],
+      })
+      const player = players[0]
+      player.alive = false
+      player.lives = 0
+      state.players[player.id] = player
+      // Set lives to a non-zero value to verify it gets corrected
+      state.lives = 3
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      expect(result.state.status).toBe('game_over')
+      expect(result.state.lives).toBe(0)
     })
   })
 
@@ -2423,6 +2498,28 @@ describe('alien entering flag (prevents shooting during wipe_reveal)', () => {
       // Aliens should have entering=false after wipe_reveal ends
       const aliens = getAliens(result.state.entities)
       expect(aliens[0].entering).toBe(false)
+    })
+
+    it('wipe_reveal to playing clears all players input state (B5)', () => {
+      const { state, players } = createTestGameStateWithPlayers(2)
+      const alien = createTestAlien('a1', 50, 10, { entering: true })
+      state.status = 'wipe_reveal'
+      state.wipeTicksRemaining = 1 // Last tick
+      state.wipeWaveNumber = 2
+      state.entities = [alien]
+
+      // Set players to be holding movement keys from previous wave
+      for (const player of Object.values(state.players)) {
+        player.inputState = { left: true, right: false }
+      }
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      expect(result.state.status).toBe('playing')
+      // All players' input should be cleared
+      for (const player of Object.values(result.state.players)) {
+        expect(player.inputState).toEqual({ left: false, right: false })
+      }
     })
 
     it('wipe_exit transitions to wipe_hold after countdown', () => {

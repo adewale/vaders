@@ -3,16 +3,7 @@
 
 import {
   TERMINAL_CAPABILITIES,
-  TERMINAL_NAME,
-  getTerminalDisplayName,
-  getColorDepth,
-  getTerminalQuirks,
-  type TerminalCapabilities as FullTerminalCapabilities,
 } from './terminal'
-
-// Re-export the full terminal capabilities for advanced usage
-export type { FullTerminalCapabilities }
-export { TERMINAL_NAME, getTerminalDisplayName, getColorDepth, getTerminalQuirks }
 
 /**
  * Simplified capabilities interface for backwards compatibility
@@ -85,11 +76,3 @@ export const TERMINAL_CAPS = detectCapabilities()
 
 /** Cached symbols based on terminal capabilities */
 export const SYMBOLS = getSymbols(TERMINAL_CAPS)
-
-// Fallback sprite set for non-Unicode terminals
-export const ASCII_SPRITES = {
-  alien: { squid: '[=]', crab: '/o\\', octopus: '{o}' },
-  player: '^A^',
-  bullet: '|',
-  barrier: '#',
-}

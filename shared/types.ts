@@ -50,9 +50,8 @@ export const LAYOUT = {
 export const HITBOX = {
   PLAYER_HALF_WIDTH: 3,      // Player.x is center, sprite width 7, so half is 3
   ALIEN_WIDTH: 7,            // Left-edge based, full sprite width
-  ALIEN_HEIGHT: 2,           // Full sprite height
+  ALIEN_HEIGHT: 2,           // Full sprite height (used in alien-barrier collision)
   UFO_WIDTH: 7,              // Left-edge based, full sprite width
-  UFO_HEIGHT: 2,             // Full sprite height
   BARRIER_SEGMENT_WIDTH: 3,  // Each segment is 3 braille chars wide
   BARRIER_SEGMENT_HEIGHT: 2, // Each segment is 2 rows tall
 } as const
@@ -270,6 +269,32 @@ export function checkBarrierSegmentHit(bX: number, bY: number, segX: number, seg
          bY >= segY && bY < segY + HITBOX.BARRIER_SEGMENT_HEIGHT
 }
 
+// ─── Game Constants ──────────────────────────────────────────────────────────
+
+/** Alien horizontal move step size in cells per move interval */
+export const ALIEN_MOVE_STEP = 2
+
+/** Alien vertical drop step size when hitting a wall (cells) */
+export const ALIEN_DROP_STEP = 1
+
+/** UFO spawn probability per tick (~0.5% = roughly every 6-7 seconds at 30Hz) */
+export const UFO_SPAWN_PROBABILITY = 0.005
+
+/** Alien bullet speed ratio: alien bullets skip 1 out of every N ticks */
+export const ALIEN_BULLET_SKIP_INTERVAL = 5
+
+/** Maximum number of barriers placed in the game */
+export const MAX_BARRIER_COUNT = 4
+
+/** Minimum number of barriers added per player (barriers = min(MAX_BARRIER_COUNT, playerCount + BARRIER_PLAYER_OFFSET)) */
+export const BARRIER_PLAYER_OFFSET = 2
+
+/** Number of segments per row in barrier shape */
+export const BARRIER_SHAPE_COLS = 5
+
+/** Countdown duration in seconds before coop game starts */
+export const COUNTDOWN_SECONDS = 3
+
 // ─── Game Config ──────────────────────────────────────────────────────────────
 
 export interface GameConfig {
@@ -352,6 +377,9 @@ export interface GameState {
   entities: Entity[]
 
   wave: number
+  maxLives: number                  // Maximum lives per player (3 solo, 5 co-op). Set at game
+                                    // start from ScaledConfig.lives. Never changes during gameplay.
+                                    // Used by client to render empty heart indicators.
   lives: number                     // Display/initial value only (3 solo, 5 co-op). Set at game
                                     // start from ScaledConfig.lives and on invasion (set to 0).
                                     // NOT decremented on player death — the reducer decrements

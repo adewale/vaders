@@ -32,10 +32,9 @@ describe('getScaledConfig', () => {
       expect(scaled.alienRows).toBe(5)
     })
 
-    it('calculates alienShootProbability based on shootsPerSecond = 0.5', () => {
+    it('calculates alienShootProbability from baseAlienShootRate * 1.0 (solo)', () => {
       const scaled = getScaledConfig(1, DEFAULT_CONFIG)
-      const tickRate = 1000 / DEFAULT_CONFIG.tickIntervalMs // ~30Hz
-      const expectedProbability = 0.5 / tickRate
+      const expectedProbability = DEFAULT_CONFIG.baseAlienShootRate * 1.0
       expect(scaled.alienShootProbability).toBeCloseTo(expectedProbability, 5)
     })
   })
@@ -63,10 +62,9 @@ describe('getScaledConfig', () => {
       expect(scaled.alienRows).toBe(5)
     })
 
-    it('calculates alienShootProbability based on shootsPerSecond = 0.75', () => {
+    it('calculates alienShootProbability from baseAlienShootRate * 1.5 (2 players)', () => {
       const scaled = getScaledConfig(2, DEFAULT_CONFIG)
-      const tickRate = 1000 / DEFAULT_CONFIG.tickIntervalMs
-      const expectedProbability = 0.75 / tickRate
+      const expectedProbability = DEFAULT_CONFIG.baseAlienShootRate * 1.5
       expect(scaled.alienShootProbability).toBeCloseTo(expectedProbability, 5)
     })
   })
@@ -94,10 +92,9 @@ describe('getScaledConfig', () => {
       expect(scaled.alienRows).toBe(5)
     })
 
-    it('calculates alienShootProbability based on shootsPerSecond = 1.0', () => {
+    it('calculates alienShootProbability from baseAlienShootRate * 2.0 (3 players)', () => {
       const scaled = getScaledConfig(3, DEFAULT_CONFIG)
-      const tickRate = 1000 / DEFAULT_CONFIG.tickIntervalMs
-      const expectedProbability = 1.0 / tickRate
+      const expectedProbability = DEFAULT_CONFIG.baseAlienShootRate * 2.0
       expect(scaled.alienShootProbability).toBeCloseTo(expectedProbability, 5)
     })
   })
@@ -125,10 +122,9 @@ describe('getScaledConfig', () => {
       expect(scaled.alienRows).toBe(6)
     })
 
-    it('calculates alienShootProbability based on shootsPerSecond = 1.25', () => {
+    it('calculates alienShootProbability from baseAlienShootRate * 2.5 (4 players)', () => {
       const scaled = getScaledConfig(4, DEFAULT_CONFIG)
-      const tickRate = 1000 / DEFAULT_CONFIG.tickIntervalMs
-      const expectedProbability = 1.25 / tickRate
+      const expectedProbability = DEFAULT_CONFIG.baseAlienShootRate * 2.5
       expect(scaled.alienShootProbability).toBeCloseTo(expectedProbability, 5)
     })
   })
