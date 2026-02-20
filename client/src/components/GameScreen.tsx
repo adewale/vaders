@@ -310,6 +310,10 @@ function PlayerShip({
     if (Math.floor(tick / 10) % 2 === 0) return null
   }
 
+  // Blink effect during invulnerability (faster blink than death)
+  const isInvulnerable = player.alive && player.invulnerableUntilTick !== null && tick < player.invulnerableUntilTick
+  if (isInvulnerable && Math.floor(tick / 5) % 2 === 0) return null
+
   const playerColor = getPlayerColor(player.slot)
   const gradient = GRADIENT_COLORS.player[player.slot]
 

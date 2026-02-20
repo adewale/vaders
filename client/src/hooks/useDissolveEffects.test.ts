@@ -49,6 +49,7 @@ function makePlayer(overrides: Partial<Player> = {}): Player {
     alive: true,
     lives: 3,
     respawnAtTick: null,
+    invulnerableUntilTick: null,
     kills: 0,
     inputState: { left: false, right: false },
     ...overrides,

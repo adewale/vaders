@@ -1766,7 +1766,7 @@ describe('multiple players shooting simultaneously', () => {
 // ============================================================================
 
 describe('player respawn position', () => {
-  it('player respawns at death x position (does not reset to spawn)', () => {
+  it('player respawns at center of screen (not death position)', () => {
     const { state, players } = createTestPlayingState(1)
     const player = players[0]
     player.x = 90 // Player moved far right before death
@@ -1778,12 +1778,12 @@ describe('player respawn position', () => {
 
     const result = gameReducer(state, { type: 'TICK' })
 
-    // Player respawns at same x position where they died
+    // Player respawns at center of screen
     expect(result.state.players[player.id].alive).toBe(true)
-    expect(result.state.players[player.id].x).toBe(90) // Same position as death
+    expect(result.state.players[player.id].x).toBe(Math.floor(DEFAULT_CONFIG.width / 2))
   })
 
-  it('player x position is preserved through death-respawn cycle', () => {
+  it('player x resets to center through death-respawn cycle', () => {
     const { state, players } = createTestPlayingState(1)
     const player = players[0]
     const deathPosition = 45
@@ -1797,7 +1797,7 @@ describe('player respawn position', () => {
 
     const deathResult = gameReducer(state, { type: 'TICK' })
     expect(deathResult.state.players[player.id].alive).toBe(false)
-    expect(deathResult.state.players[player.id].x).toBe(deathPosition) // Position preserved
+    expect(deathResult.state.players[player.id].x).toBe(deathPosition) // Position preserved at death
 
     // Fast forward to respawn
     const respawnState = { ...deathResult.state }
@@ -1805,7 +1805,69 @@ describe('player respawn position', () => {
 
     const respawnResult = gameReducer(respawnState, { type: 'TICK' })
     expect(respawnResult.state.players[player.id].alive).toBe(true)
-    expect(respawnResult.state.players[player.id].x).toBe(deathPosition) // Still at death position
+    expect(respawnResult.state.players[player.id].x).toBe(Math.floor(DEFAULT_CONFIG.width / 2)) // Reset to center
+  })
+})
+
+// ============================================================================
+// Invulnerability After Respawn Tests
+// ============================================================================
+
+describe('invulnerability after respawn', () => {
+  it('sets invulnerableUntilTick on respawn', () => {
+    const { state, players } = createTestPlayingState(1)
+    const player = players[0]
+    player.alive = false
+    player.respawnAtTick = 10
+    player.lives = 2
+    state.tick = 9
+    state.players[player.id] = player
+
+    const result = gameReducer(state, { type: 'TICK' })
+
+    expect(result.state.players[player.id].invulnerableUntilTick).toBe(10 + DEFAULT_CONFIG.invulnerabilityTicks)
+  })
+
+  it('player cannot be killed during invulnerability', () => {
+    const { state, players } = createTestPlayingState(1)
+    const player = players[0]
+    const centerX = Math.floor(DEFAULT_CONFIG.width / 2)
+    player.x = centerX
+    player.lives = 2
+    player.invulnerableUntilTick = 100  // Invulnerable until tick 100
+    state.tick = 50
+    state.players[player.id] = player
+
+    // Alien bullet aimed at player
+    const bullet = createTestBullet('ab1', centerX + 1, LAYOUT.PLAYER_Y, null, 1)
+    state.entities = [bullet, createTestAlien('a1', 20, 5)]
+
+    const result = gameReducer(state, { type: 'TICK' })
+
+    // Player should still be alive
+    expect(result.state.players[player.id].alive).toBe(true)
+    expect(result.state.players[player.id].lives).toBe(2)
+  })
+
+  it('player can be killed after invulnerability expires', () => {
+    const { state, players } = createTestPlayingState(1)
+    const player = players[0]
+    const centerX = Math.floor(DEFAULT_CONFIG.width / 2)
+    player.x = centerX
+    player.lives = 2
+    player.invulnerableUntilTick = 50  // Invulnerability expired
+    state.tick = 50
+    state.players[player.id] = player
+
+    // Alien bullet aimed at player
+    const bullet = createTestBullet('ab1', centerX + 1, LAYOUT.PLAYER_Y, null, 1)
+    state.entities = [bullet, createTestAlien('a1', 20, 5)]
+
+    const result = gameReducer(state, { type: 'TICK' })
+
+    // Player should be killed (invulnerability expired at tick 50, now tick is 51)
+    expect(result.state.players[player.id].alive).toBe(false)
+    expect(result.state.players[player.id].lives).toBe(1)
   })
 })
 
@@ -3404,7 +3466,7 @@ describe('collision edge cases', () => {
 
 describe('boundary conditions', () => {
   describe('player movement at screen edges', () => {
-    it('player at x=PLAYER_MIN_X (2) trying to move left stays at PLAYER_MIN_X', () => {
+    it('player at x=PLAYER_MIN_X (3) trying to move left stays at PLAYER_MIN_X', () => {
       const { state, players } = createTestPlayingState(1)
       const player = players[0]
       player.x = LAYOUT.PLAYER_MIN_X
@@ -3427,11 +3489,11 @@ describe('boundary conditions', () => {
 
       const result = gameReducer(state, { type: 'TICK' })
 
-      // applyPlayerInput: Math.max(PLAYER_MIN_X, 0 - 1) = Math.max(2, -1) = 2
+      // applyPlayerInput: Math.max(PLAYER_MIN_X, 0 - 1) = Math.max(3, -1) = 3
       expect(result.state.players[player.id].x).toBe(LAYOUT.PLAYER_MIN_X)
     })
 
-    it('player at x=PLAYER_MAX_X (114) trying to move right stays at PLAYER_MAX_X', () => {
+    it('player at x=PLAYER_MAX_X (112) trying to move right stays at PLAYER_MAX_X', () => {
       const { state, players } = createTestPlayingState(1)
       const player = players[0]
       player.x = LAYOUT.PLAYER_MAX_X
@@ -3483,12 +3545,12 @@ describe('boundary conditions', () => {
       // Discrete move speed is 2, so moving left from MIN_X + 1 should clamp to MIN_X
       const { state, players } = createTestPlayingState(1)
       const player = players[0]
-      player.x = LAYOUT.PLAYER_MIN_X + 1  // x = 3
+      player.x = LAYOUT.PLAYER_MIN_X + 1  // x = 4
       state.players[player.id] = player
 
       const result = gameReducer(state, { type: 'PLAYER_MOVE', playerId: player.id, direction: 'left' })
 
-      // constrainPlayerX: Math.max(2, 3 - 2) = Math.max(2, 1) = 2
+      // constrainPlayerX: Math.max(3, 4 - 2) = Math.max(3, 2) = 3
       expect(result.state.players[player.id].x).toBe(LAYOUT.PLAYER_MIN_X)
     })
 
@@ -3790,12 +3852,12 @@ describe('boundary conditions', () => {
     })
 
     it('player hitbox at PLAYER_MIN_X does not extend below x=0', () => {
-      // Player at x=PLAYER_MIN_X (2)
-      // Hitbox: [2-2, 2+3) = [0, 5)
+      // Player at x=PLAYER_MIN_X (3)
+      // Hitbox: [3-3, 3+3+1) = [0, 7)
       // So x=0 IS within the hitbox (edge case)
       const { state, players } = createTestPlayingState(1)
       const player = players[0]
-      player.x = LAYOUT.PLAYER_MIN_X // x=2
+      player.x = LAYOUT.PLAYER_MIN_X // x=3
       player.lives = 3
       state.players[player.id] = player
 
@@ -3805,9 +3867,9 @@ describe('boundary conditions', () => {
 
       const result = gameReducer(state, { type: 'TICK' })
 
-      // checkPlayerHit: 0 >= 0 && 0 < 5 && |PLAYER_Y - PLAYER_Y+1| < 2
+      // checkPlayerHit: 0 >= 0 && 0 < 7 && |PLAYER_Y - PLAYER_Y+1| < 2
       // Actually bullet moves first: y = PLAYER_Y + 1 (moved down)
-      // Then check: 0 >= (2-2=0) && 0 < (2+2+1=5) && |PLAYER_Y+1 - PLAYER_Y| < 2 -> 1 < 2 -> true
+      // Then check: 0 >= (3-3=0) && 0 < (3+3+1=7) && |PLAYER_Y+1 - PLAYER_Y| < 2 -> 1 < 2 -> true
       // So bullet at x=0 DOES hit the player
       expect(result.state.players[player.id].alive).toBe(false)
     })

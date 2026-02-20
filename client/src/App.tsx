@@ -236,6 +236,7 @@ function GameContainer({
   const gameStatus = state?.status
   const playerCount = state ? Object.keys(state.players).length : 0
   const isReady = state && playerId ? state.readyPlayerIds.includes(playerId) : false
+  const localPlayerAlive = state && playerId ? state.players[playerId]?.alive ?? true : true
 
   // Use refs for values that need to be current inside keyboard callback
   // This prevents stale closure issues where the callback captures old values
@@ -243,6 +244,7 @@ function GameContainer({
   const menuIndexRef = useRef(menuIndex)
   const playerCountRef = useRef(playerCount)
   const isReadyRef = useRef(isReady)
+  const localPlayerAliveRef = useRef(localPlayerAlive)
 
   // Keep refs in sync with state - use useLayoutEffect for synchronous updates
   // This ensures refs are updated before the next keyboard event can fire
@@ -250,6 +252,7 @@ function GameContainer({
   useLayoutEffect(() => { menuIndexRef.current = menuIndex }, [menuIndex])
   useLayoutEffect(() => { playerCountRef.current = playerCount }, [playerCount])
   useLayoutEffect(() => { isReadyRef.current = isReady }, [isReady])
+  useLayoutEffect(() => { localPlayerAliveRef.current = localPlayerAlive }, [localPlayerAlive])
 
   // Track previous status to detect transitions
   const prevStatusRef = useRef(gameStatus)
@@ -426,6 +429,9 @@ function GameContainer({
 
     // During gameplay: handle movement and shooting
     if (currentStatus === 'playing' || currentStatus === 'countdown') {
+      // Skip input for dead players
+      if (!localPlayerAliveRef.current) return
+
       // Movement keys
       if (key.type === 'key' && (key.key === 'left' || key.key === 'right')) {
         if (isPress) {

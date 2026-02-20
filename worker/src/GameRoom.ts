@@ -303,6 +303,7 @@ export class GameRoom extends DurableObject<Env> {
             alive: true,
             lives: 5,
             respawnAtTick: null,
+            invulnerableUntilTick: null,
             kills: 0,
             inputState: { left: false, right: false },
           }
@@ -545,6 +546,10 @@ export class GameRoom extends DurableObject<Env> {
     this.game.countdownRemaining = null
     this.countdownRemaining = null
     this.game.lives = scaled.lives
+    // Patch all existing players' lives to match scaled config
+    for (const player of Object.values(this.game.players)) {
+      player.lives = this.game.lives
+    }
     this.game.tick = 0
     this.game.wipeTicksRemaining = WIPE_TIMING.HOLD_TICKS
     this.game.wipeWaveNumber = 1

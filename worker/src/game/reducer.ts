@@ -290,6 +290,10 @@ function startSoloReducer(state: GameState): ReducerResult {
   next.status = 'wipe_hold'  // Skip exit, go straight to hold for game start
   next.mode = 'solo'
   next.lives = 3
+  // Patch all players' lives to match solo config
+  for (const player of Object.values(next.players)) {
+    player.lives = next.lives
+  }
   next.tick = 0
   next.wipeTicksRemaining = WIPE_TIMING.HOLD_TICKS
   next.wipeWaveNumber = 1
@@ -432,10 +436,12 @@ function tickReducer(state: GameState): ReducerResult {
   // 1. Apply player movement from held input
   for (const player of Object.values(next.players)) {
     if (!player.alive) {
-      // Check respawn - player respawns at death position
+      // Check respawn - player respawns at center of screen
       if (player.respawnAtTick !== null && next.tick >= player.respawnAtTick) {
         player.alive = true
         player.respawnAtTick = null
+        player.x = Math.floor(next.config.width / 2)  // Reset to center of screen
+        player.invulnerableUntilTick = next.tick + next.config.invulnerabilityTicks
         // Clear input state on respawn - player must press keys again to move
         player.inputState = { left: false, right: false }
         events.push({ type: 'event', name: 'player_respawned', data: { playerId: player.id } })
@@ -462,6 +468,9 @@ function tickReducer(state: GameState): ReducerResult {
   const aliens = getAliens(next.entities)
   const barriers = getBarriers(next.entities)
 
+  // Track consumed bullets to avoid double-counting across collision phases
+  const consumedBullets = new Set<string>()
+
   // Bullet-alien collisions
   for (const bullet of bullets) {
     if (bullet.dy !== -1) continue  // Only player bullets hit aliens
@@ -472,6 +481,7 @@ function tickReducer(state: GameState): ReducerResult {
       if (checkAlienHit(bullet.x, bullet.y, alien.x, alien.y)) {
         alien.alive = false
         bullet.y = -100  // Mark for removal
+        consumedBullets.add(bullet.id)
 
         // Award points and track kill
         next.score += alien.points
@@ -498,6 +508,7 @@ function tickReducer(state: GameState): ReducerResult {
   const currentUfos = getUFOs(next.entities)
   for (const bullet of bullets) {
     if (bullet.dy !== -1) continue  // Only player bullets hit UFOs
+    if (consumedBullets.has(bullet.id)) continue
 
     for (const ufo of currentUfos) {
       if (!ufo.alive) continue
@@ -505,6 +516,7 @@ function tickReducer(state: GameState): ReducerResult {
       if (checkUfoHit(bullet.x, bullet.y, ufo.x, ufo.y)) {
         ufo.alive = false
         bullet.y = -100  // Mark for removal
+        consumedBullets.add(bullet.id)
 
         // Award mystery points
         next.score += ufo.points
@@ -525,12 +537,15 @@ function tickReducer(state: GameState): ReducerResult {
   // Bullet-player collisions (alien bullets)
   for (const bullet of bullets) {
     if (bullet.dy !== 1) continue  // Only alien bullets hit players
+    if (consumedBullets.has(bullet.id)) continue
 
     for (const player of Object.values(next.players)) {
       if (!player.alive) continue
+      if (player.invulnerableUntilTick !== null && next.tick < player.invulnerableUntilTick) continue
 
       if (checkPlayerHit(bullet.x, bullet.y, player.x, LAYOUT.PLAYER_Y)) {
         bullet.y = 100  // Mark for removal
+        consumedBullets.add(bullet.id)
         player.alive = false
         player.lives--
 
@@ -551,7 +566,11 @@ function tickReducer(state: GameState): ReducerResult {
   // Bullet-barrier collisions
   // Segments are rendered at 2x spacing to match visual position
   for (const bullet of bullets) {
+    if (consumedBullets.has(bullet.id)) continue
+
     for (const barrier of barriers) {
+      if (consumedBullets.has(bullet.id)) break
+
       for (const seg of barrier.segments) {
         if (seg.health <= 0) continue
 
@@ -562,6 +581,7 @@ function tickReducer(state: GameState): ReducerResult {
         if (checkBarrierSegmentHit(bullet.x, bullet.y, segX, segY)) {
           seg.health = Math.max(0, seg.health - 1) as 0 | 1 | 2 | 3 | 4
           bullet.y = bullet.dy === -1 ? -100 : 100  // Mark for removal
+          consumedBullets.add(bullet.id)
           break
         }
       }
@@ -612,7 +632,7 @@ function tickReducer(state: GameState): ReducerResult {
           // Check if alien sprite overlaps segment
           // Alien occupies [alien.x, alien.x + width) × [alien.y, alien.y + height)
           // Segment occupies [segX, segX + width) × [segY, segY + height)
-          const alienRight = alien.x + LAYOUT.ALIEN_WIDTH
+          const alienRight = alien.x + HITBOX.ALIEN_WIDTH
           const alienBottom = alien.y + LAYOUT.ALIEN_HEIGHT
           const segRight = segX + HITBOX.BARRIER_SEGMENT_WIDTH
           const segBottom = segY + HITBOX.BARRIER_SEGMENT_HEIGHT

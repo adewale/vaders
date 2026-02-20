@@ -31,6 +31,7 @@ export function createTestPlayer(overrides?: Partial<Player>): Player {
     alive: overrides?.alive ?? true,
     lives: overrides?.lives ?? 3,
     respawnAtTick: overrides?.respawnAtTick ?? null,
+    invulnerableUntilTick: overrides?.invulnerableUntilTick ?? null,
     kills: overrides?.kills ?? 0,
     inputState: overrides?.inputState ?? { left: false, right: false },
     ...overrides,

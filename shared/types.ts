@@ -26,7 +26,7 @@ export const STANDARD_HEIGHT = 36
 /** Layout constants for the 120×36 game grid */
 export const LAYOUT = {
   PLAYER_Y: 31,              // Y position for player ships (5 rows from bottom)
-  PLAYER_MIN_X: 2,           // Left boundary for player movement
+  PLAYER_MIN_X: 3,           // Left boundary for player movement (center-based: left edge = 3-3 = 0)
   PLAYER_MAX_X: 112,         // Right boundary for player movement (120 - 7 - 1)
   PLAYER_WIDTH: 7,           // Width of player sprite (2-line braille sprite)
   PLAYER_HEIGHT: 2,          // Height of player sprite
@@ -82,6 +82,7 @@ export interface Player {
                                     // Game ends when ALL players have lives <= 0 and are dead.
                                     // Default: 3. See also GameState.lives (display-only).
   respawnAtTick: number | null      // Tick to respawn after death
+  invulnerableUntilTick: number | null  // Tick until which player is invulnerable (after respawn)
   kills: number
 
   // Input state (server-authoritative, updated from client input messages)
@@ -284,6 +285,7 @@ export interface GameConfig {
   playerCooldownTicks: number          // Ticks between shots
   playerMoveSpeed: number              // Cells per tick when holding move key
   respawnDelayTicks: number            // Ticks until respawn (90 = 3s at 30Hz)
+  invulnerabilityTicks: number         // Ticks of invulnerability after respawn (60 = 2s at 30Hz)
 }
 
 export const DEFAULT_CONFIG: GameConfig = {
@@ -299,6 +301,7 @@ export const DEFAULT_CONFIG: GameConfig = {
   playerCooldownTicks: 6,              // ~200ms between shots
   playerMoveSpeed: 1,                  // 1 cell per tick when holding key (Space Invaders style)
   respawnDelayTicks: 90,               // 3 seconds at 30Hz
+  invulnerabilityTicks: 60,            // 2 seconds at 30Hz
 }
 
 /** Return type of getScaledConfig() - player-count-scaled game parameters */

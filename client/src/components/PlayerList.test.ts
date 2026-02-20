@@ -22,6 +22,7 @@ function createMockPlayer(overrides: Partial<Player> = {}): Player {
     kills: 0,
     lastShotTick: 0,
     respawnAtTick: null,
+    invulnerableUntilTick: null,
     inputState: { left: false, right: false },
     ...overrides,
   }

@@ -484,7 +484,7 @@ describe('Server Message Handling', () => {
       const event: ServerEvent = {
         type: 'event',
         name: 'player_joined',
-        data: { player: { id: 'p1', name: 'Alice', x: 60, slot: 1, color: 'cyan', lastShotTick: 0, alive: true, lives: 3, respawnAtTick: null, kills: 0, inputState: { left: false, right: false } } },
+        data: { player: { id: 'p1', name: 'Alice', x: 60, slot: 1, color: 'cyan', lastShotTick: 0, alive: true, lives: 3, respawnAtTick: null, invulnerableUntilTick: null, kills: 0, inputState: { left: false, right: false } } },
       }
 
       const updates = handleMessage(event, initialState)
