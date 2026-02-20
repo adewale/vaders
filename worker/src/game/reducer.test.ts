@@ -4,7 +4,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { gameReducer, canTransition, type GameAction } from './reducer'
 import type { GameState, Player, AlienEntity, BulletEntity, BarrierEntity } from '../../../shared/types'
-import { LAYOUT, DEFAULT_CONFIG, WIPE_TIMING, getBullets, getAliens, getUFOs } from '../../../shared/types'
+import { LAYOUT, DEFAULT_CONFIG, WIPE_TIMING, HITBOX, getBullets, getAliens, getUFOs, getBarriers, checkBarrierSegmentHit } from '../../../shared/types'
 import {
   createTestGameState,
   createTestPlayer,
@@ -4065,6 +4065,473 @@ describe('boundary conditions', () => {
       expect(result.state.alienDirection).toBe(-1)
       const aliens = getAliens(result.state.entities)
       expect(aliens[0].y).toBe(LAYOUT.BARRIER_Y - 1)
+    })
+  })
+})
+
+// ============================================================================
+// Bullet-Barrier Property-Based Tests
+// ============================================================================
+
+describe('Bullet-Barrier Property-Based Tests', () => {
+  // Seeded PRNG for reproducible randomness (mulberry32)
+  function mulberry32(seed: number) {
+    return function () {
+      seed |= 0
+      seed = (seed + 0x6d2b79f5) | 0
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+    }
+  }
+
+  // Canonical barrier segments (arch shape: 5 top, 4 bottom with center gap)
+  function createFullBarrierSegments(healthOverride?: number): import('../../../shared/types').BarrierSegment[] {
+    const h = (healthOverride ?? 4) as 0 | 1 | 2 | 3 | 4
+    return [
+      // Top row: 5 solid segments
+      { offsetX: 0, offsetY: 0, health: h },
+      { offsetX: 1, offsetY: 0, health: h },
+      { offsetX: 2, offsetY: 0, health: h },
+      { offsetX: 3, offsetY: 0, health: h },
+      { offsetX: 4, offsetY: 0, health: h },
+      // Bottom row: 4 segments with gap at center (offsetX=2)
+      { offsetX: 0, offsetY: 1, health: h },
+      { offsetX: 1, offsetY: 1, health: h },
+      { offsetX: 3, offsetY: 1, health: h },
+      { offsetX: 4, offsetY: 1, health: h },
+    ]
+  }
+
+  const BARRIER_X = 50 // Arbitrary barrier X for most tests
+  const SEG_W = 3 // HITBOX.BARRIER_SEGMENT_WIDTH
+  const SEG_H = 2 // HITBOX.BARRIER_SEGMENT_HEIGHT
+  const BARRIER_COLS = 5 // Number of columns in barrier shape
+  const BARRIER_FOOTPRINT = BARRIER_COLS * SEG_W // 15
+
+  // Helper: create a playing state with just one barrier and one bullet (no aliens to interfere)
+  function createBarrierTestState(
+    barrierX: number,
+    segments: import('../../../shared/types').BarrierSegment[],
+    bulletX: number,
+    bulletY: number,
+    bulletDy: -1 | 1,
+    bulletOwnerId: string | null = 'player-1'
+  ) {
+    const { state, players } = createTestPlayingState(1, {
+      aliens: [], // No aliens to avoid alien-related logic interfering
+      barriers: [
+        {
+          kind: 'barrier',
+          id: 'barrier-1',
+          x: barrierX,
+          segments: structuredClone(segments),
+        },
+      ],
+      bullets: [createTestBullet('bullet-1', bulletX, bulletY, bulletOwnerId, bulletDy)],
+    })
+    // Disable alien shooting to prevent random alien bullets
+    state.alienShootingDisabled = true
+    return { state, players }
+  }
+
+  // Helper: advance state by N ticks and return final state
+  function advanceTicks(initialState: GameState, n: number): GameState {
+    let current = initialState
+    for (let i = 0; i < n; i++) {
+      const result = gameReducer(current, { type: 'TICK' })
+      current = result.state
+    }
+    return current
+  }
+
+  // ─── P1: Column impermeability ─────────────────────────────────────────────
+
+  describe('P1: Column impermeability', () => {
+    it('a player bullet at any x within a fully intact barrier footprint must collide', () => {
+      const rng = mulberry32(42)
+      const segments = createFullBarrierSegments(4)
+      let failures: number[] = []
+
+      for (let trial = 0; trial < 120; trial++) {
+        // Random x within [BARRIER_X, BARRIER_X + BARRIER_FOOTPRINT - 1]
+        const x = BARRIER_X + Math.floor(rng() * BARRIER_FOOTPRINT)
+        // Bullet starts well below the barrier
+        const startY = LAYOUT.BARRIER_Y + SEG_H * 2 + 5
+        const { state } = createBarrierTestState(BARRIER_X, segments, x, startY, -1)
+
+        // Advance enough ticks for bullet to pass through the entire barrier
+        const finalState = advanceTicks(state, startY + 10)
+        const remainingBullets = getBullets(finalState.entities)
+
+        // Bullet should have been consumed (removed or marked off-screen)
+        const bulletStillActive = remainingBullets.some(
+          (b) => b.id === 'bullet-1' && b.y > 0 && b.y < finalState.config.height
+        )
+        if (bulletStillActive) {
+          failures.push(x)
+        }
+      }
+
+      expect(failures).toEqual([])
+    })
+  })
+
+  // ─── P2: No X-axis gaps between adjacent segments ────────────────────────
+
+  describe('P2: No X-axis gaps between adjacent segments', () => {
+    it('every integer x in the barrier footprint hits at least one top-row segment', () => {
+      const segments = createFullBarrierSegments(4)
+      const topRowSegments = segments.filter((s) => s.offsetY === 0)
+      const segY = LAYOUT.BARRIER_Y // Top row Y
+
+      const missingXPositions: number[] = []
+
+      for (let x = BARRIER_X; x < BARRIER_X + BARRIER_FOOTPRINT; x++) {
+        const hitsAny = topRowSegments.some((seg) => {
+          const segX = BARRIER_X + seg.offsetX * SEG_W
+          return checkBarrierSegmentHit(x, segY, segX, segY)
+        })
+
+        if (!hitsAny) {
+          missingXPositions.push(x)
+        }
+      }
+
+      expect(missingXPositions).toEqual([])
+    })
+  })
+
+  // ─── P3: No Y-axis gaps between segment rows ────────────────────────────
+
+  describe('P3: No Y-axis gaps between segment rows', () => {
+    it('every integer y in [BARRIER_Y, BARRIER_Y + 4) is covered by at least one row', () => {
+      const topSegY = LAYOUT.BARRIER_Y // offsetY=0 -> segY = 25
+      const bottomSegY = LAYOUT.BARRIER_Y + SEG_H // offsetY=1 -> segY = 27
+      const totalHeight = SEG_H * 2 // 4 rows total (25, 26, 27, 28)
+
+      const uncoveredYPositions: number[] = []
+
+      for (let y = LAYOUT.BARRIER_Y; y < LAYOUT.BARRIER_Y + totalHeight; y++) {
+        // Check if y is within top row [topSegY, topSegY + SEG_H) or bottom row [bottomSegY, bottomSegY + SEG_H)
+        const inTopRow = y >= topSegY && y < topSegY + SEG_H
+        const inBottomRow = y >= bottomSegY && y < bottomSegY + SEG_H
+
+        if (!inTopRow && !inBottomRow) {
+          uncoveredYPositions.push(y)
+        }
+      }
+
+      expect(uncoveredYPositions).toEqual([])
+    })
+  })
+
+  // ─── P4: Bullet traversal — player bullets from below ────────────────────
+
+  describe('P4: Bullet traversal — player bullets from below', () => {
+    it('player bullet at every x in barrier footprint is consumed before passing y=0', () => {
+      const failedPositions: { x: number; finalBulletY: number }[] = []
+
+      for (let x = BARRIER_X; x < BARRIER_X + BARRIER_FOOTPRINT; x++) {
+        const startY = LAYOUT.BARRIER_Y + SEG_H * 2 + 5
+        const segments = createFullBarrierSegments(4)
+        const { state } = createBarrierTestState(BARRIER_X, segments, x, startY, -1)
+
+        const finalState = advanceTicks(state, startY + 10)
+        const bullet = getBullets(finalState.entities).find((b) => b.id === 'bullet-1')
+
+        // Bullet should be gone or off-screen
+        if (bullet && bullet.y > 0 && bullet.y < finalState.config.height) {
+          failedPositions.push({ x, finalBulletY: bullet.y })
+        }
+      }
+
+      expect(failedPositions).toEqual([])
+    })
+
+    it('the correct segment is damaged when a player bullet hits from below', () => {
+      for (let x = BARRIER_X; x < BARRIER_X + BARRIER_FOOTPRINT; x++) {
+        const startY = LAYOUT.BARRIER_Y + SEG_H * 2 + 5
+        const segments = createFullBarrierSegments(4)
+        const { state } = createBarrierTestState(BARRIER_X, segments, x, startY, -1)
+
+        const finalState = advanceTicks(state, startY + 10)
+        const barriers = getBarriers(finalState.entities)
+        const barrier = barriers[0]
+
+        // Determine which column this x falls in
+        const col = Math.floor((x - BARRIER_X) / SEG_W)
+
+        // For a bullet coming from below, it should hit the BOTTOM row first (if a segment exists there)
+        const bottomSeg = barrier.segments.find((s) => s.offsetX === col && s.offsetY === 1)
+        const topSeg = barrier.segments.find((s) => s.offsetX === col && s.offsetY === 0)
+
+        if (bottomSeg) {
+          // Bottom segment exists in this column — it should have taken damage
+          expect(bottomSeg.health).toBeLessThan(4)
+        } else {
+          // No bottom segment (center gap at col=2) — top segment should have taken damage
+          expect(topSeg!.health).toBeLessThan(4)
+        }
+      }
+    })
+  })
+
+  // ─── P5: Bullet traversal — alien bullets from above ─────────────────────
+
+  describe('P5: Bullet traversal — alien bullets from above', () => {
+    it('alien bullet at every x in barrier footprint is consumed before passing off-screen', () => {
+      const failedPositions: { x: number; finalBulletY: number }[] = []
+
+      for (let x = BARRIER_X; x < BARRIER_X + BARRIER_FOOTPRINT; x++) {
+        const startY = LAYOUT.BARRIER_Y - 5
+        const segments = createFullBarrierSegments(4)
+        const { state } = createBarrierTestState(BARRIER_X, segments, x, startY, 1, null)
+
+        // Alien bullets move slower (skip every Nth tick), so allow more ticks
+        const finalState = advanceTicks(state, 50)
+        const bullet = getBullets(finalState.entities).find((b) => b.id === 'bullet-1')
+
+        if (bullet && bullet.y > 0 && bullet.y < finalState.config.height) {
+          failedPositions.push({ x, finalBulletY: bullet.y })
+        }
+      }
+
+      expect(failedPositions).toEqual([])
+    })
+  })
+
+  // ─── P6: Arch gap passthrough ─────────────────────────────────────────────
+
+  describe('P6: Arch gap passthrough', () => {
+    it('bullet through center gap hits top row, not bottom row', () => {
+      // Center gap is at offsetX=2, offsetY=1
+      // The gap's X range: barrier.x + 2*3 = barrier.x + 6 to barrier.x + 8
+      const gapCenterX = BARRIER_X + 2 * SEG_W + 1 // Middle of the gap column
+      const startY = LAYOUT.BARRIER_Y + SEG_H * 2 + 5
+      const segments = createFullBarrierSegments(4)
+      const { state } = createBarrierTestState(BARRIER_X, segments, gapCenterX, startY, -1)
+
+      const finalState = advanceTicks(state, startY + 10)
+      const barrier = getBarriers(finalState.entities)[0]
+
+      // The top row segment at offsetX=2 should have taken damage
+      const topCenterSeg = barrier.segments.find((s) => s.offsetX === 2 && s.offsetY === 0)
+      expect(topCenterSeg!.health).toBe(3) // Was 4, now 3
+
+      // Bottom row segments should be untouched (there is no segment at offsetX=2, offsetY=1)
+      const bottomSegments = barrier.segments.filter((s) => s.offsetY === 1)
+      for (const seg of bottomSegments) {
+        expect(seg.health).toBe(4)
+      }
+    })
+  })
+
+  // ─── P7: Destroyed segments are transparent ───────────────────────────────
+
+  describe('P7: Destroyed segments are transparent', () => {
+    it('bullets pass through a column where all segments have health=0', () => {
+      // Set all segments to health=0 in column 2
+      const segments = createFullBarrierSegments(4)
+      for (const seg of segments) {
+        if (seg.offsetX === 2) {
+          seg.health = 0
+        }
+      }
+
+      const bulletX = BARRIER_X + 2 * SEG_W + 1 // Center of column 2
+      const startY = LAYOUT.BARRIER_Y + SEG_H * 2 + 5
+      const { state } = createBarrierTestState(BARRIER_X, segments, bulletX, startY, -1)
+
+      const finalState = advanceTicks(state, startY + 10)
+      const bullet = getBullets(finalState.entities).find((b) => b.id === 'bullet-1')
+
+      // Bullet should have passed through completely (gone off-screen)
+      expect(bullet).toBeUndefined()
+
+      // No segment health should have changed
+      const barrier = getBarriers(finalState.entities)[0]
+      for (const seg of barrier.segments) {
+        if (seg.offsetX === 2) {
+          expect(seg.health).toBe(0)
+        } else {
+          expect(seg.health).toBe(4)
+        }
+      }
+    })
+
+    it('bullets pass through a fully destroyed barrier', () => {
+      const segments = createFullBarrierSegments(0) // All health=0
+      const bulletX = BARRIER_X + 7 // Middle of barrier
+      const startY = LAYOUT.BARRIER_Y + SEG_H * 2 + 5
+      const { state } = createBarrierTestState(BARRIER_X, segments, bulletX, startY, -1)
+
+      const finalState = advanceTicks(state, startY + 10)
+      const bullet = getBullets(finalState.entities).find((b) => b.id === 'bullet-1')
+
+      // Bullet should have gone off-screen (removed from entities)
+      expect(bullet).toBeUndefined()
+    })
+  })
+
+  // ─── P8: Random barrier configurations (100 trials) ──────────────────────
+
+  describe('P8: Random barrier configurations (100 trials)', () => {
+    it('bullets interact correctly with random barrier configs', () => {
+      const rng = mulberry32(98765)
+      const failures: { trial: number; x: number; barrierX: number; shouldHit: boolean }[] = []
+
+      for (let trial = 0; trial < 100; trial++) {
+        // Random barrier X in [10, 100]
+        const barrierX = 10 + Math.floor(rng() * 91)
+
+        // Random segment health pattern
+        const segments = createFullBarrierSegments(4)
+        for (const seg of segments) {
+          seg.health = Math.floor(rng() * 5) as 0 | 1 | 2 | 3 | 4
+        }
+
+        // Random x within barrier footprint
+        const bulletX = barrierX + Math.floor(rng() * BARRIER_FOOTPRINT)
+        const startY = LAYOUT.BARRIER_Y + SEG_H * 2 + 5
+
+        // Determine which column the bullet is in
+        const col = Math.floor((bulletX - barrierX) / SEG_W)
+
+        // Check if there's a live segment in that column
+        const hasLiveSegInColumn = segments.some(
+          (s) => s.offsetX === col && s.health > 0
+        )
+
+        const { state } = createBarrierTestState(barrierX, segments, bulletX, startY, -1)
+        const finalState = advanceTicks(state, startY + 10)
+        const bullet = getBullets(finalState.entities).find((b) => b.id === 'bullet-1')
+        const bulletConsumed = !bullet || bullet.y <= 0 || bullet.y >= finalState.config.height
+
+        if (hasLiveSegInColumn && !bulletConsumed) {
+          failures.push({ trial, x: bulletX, barrierX, shouldHit: true })
+        }
+        if (!hasLiveSegInColumn && !bulletConsumed) {
+          // Bullet should pass through but still go off-screen eventually
+          // This isn't necessarily a failure since the bullet just keeps going
+        }
+      }
+
+      expect(failures).toEqual([])
+    })
+  })
+
+  // ─── P9: Consumed bullet invariant ────────────────────────────────────────
+
+  describe('P9: Consumed bullet invariant', () => {
+    it('exactly one segment is damaged and bullet is removed on collision', () => {
+      for (let col = 0; col < BARRIER_COLS; col++) {
+        const bulletX = BARRIER_X + col * SEG_W + 1 // Center of column
+        const startY = LAYOUT.BARRIER_Y + SEG_H * 2 + 5
+        const segments = createFullBarrierSegments(4)
+        const { state } = createBarrierTestState(BARRIER_X, segments, bulletX, startY, -1)
+
+        const finalState = advanceTicks(state, startY + 10)
+        const barrier = getBarriers(finalState.entities)[0]
+
+        // Count how many segments changed health
+        const originalSegments = createFullBarrierSegments(4)
+        let damagedCount = 0
+        let damagedSegment: { offsetX: number; offsetY: number } | null = null
+
+        for (let i = 0; i < barrier.segments.length; i++) {
+          if (barrier.segments[i].health !== originalSegments[i].health) {
+            damagedCount++
+            damagedSegment = {
+              offsetX: barrier.segments[i].offsetX,
+              offsetY: barrier.segments[i].offsetY,
+            }
+          }
+        }
+
+        // Exactly one segment should be damaged
+        expect(damagedCount).toBe(1)
+
+        // The damaged segment should have lost exactly 1 health
+        const damagedSeg = barrier.segments.find(
+          (s) => s.offsetX === damagedSegment!.offsetX && s.offsetY === damagedSegment!.offsetY
+        )
+        expect(damagedSeg!.health).toBe(3) // Was 4, now 3
+
+        // Bullet should be removed
+        const bullet = getBullets(finalState.entities).find((b) => b.id === 'bullet-1')
+        expect(bullet).toBeUndefined()
+      }
+    })
+  })
+
+  // ─── P10: Multi-barrier non-interference ──────────────────────────────────
+
+  describe('P10: Multi-barrier non-interference', () => {
+    it('bullets only affect their own barrier segments', () => {
+      const barrier1X = 20
+      const barrier2X = 60
+
+      const segments1 = createFullBarrierSegments(4)
+      const segments2 = createFullBarrierSegments(4)
+
+      // Fire a bullet at barrier 1 (column 1)
+      const bullet1X = barrier1X + 1 * SEG_W + 1
+      // Fire a bullet at barrier 2 (column 3)
+      const bullet2X = barrier2X + 3 * SEG_W + 1
+
+      const startY = LAYOUT.BARRIER_Y + SEG_H * 2 + 5
+
+      const { state, players } = createTestPlayingState(1, {
+        aliens: [],
+        barriers: [
+          { kind: 'barrier', id: 'barrier-1', x: barrier1X, segments: structuredClone(segments1) },
+          { kind: 'barrier', id: 'barrier-2', x: barrier2X, segments: structuredClone(segments2) },
+        ],
+        bullets: [
+          createTestBullet('bullet-1', bullet1X, startY, 'player-1', -1),
+          createTestBullet('bullet-2', bullet2X, startY, 'player-1', -1),
+        ],
+      })
+      state.alienShootingDisabled = true
+
+      const finalState = advanceTicks(state, startY + 10)
+      const barriers = getBarriers(finalState.entities)
+      const b1 = barriers.find((b) => b.id === 'barrier-1')!
+      const b2 = barriers.find((b) => b.id === 'barrier-2')!
+
+      // Barrier 1: only column 1 should be damaged
+      for (const seg of b1.segments) {
+        if (seg.offsetX === 1) {
+          // Bottom row segment at col 1 exists, so it should take damage (bullet from below)
+          if (seg.offsetY === 1) {
+            expect(seg.health).toBe(3)
+          }
+        } else {
+          // Other columns should be untouched unless same column top row
+          if (seg.offsetX !== 1) {
+            expect(seg.health).toBe(4)
+          }
+        }
+      }
+
+      // Barrier 2: only column 3 should be damaged
+      for (const seg of b2.segments) {
+        if (seg.offsetX === 3) {
+          // Bottom row segment at col 3 exists, so it should take damage
+          if (seg.offsetY === 1) {
+            expect(seg.health).toBe(3)
+          }
+        } else {
+          if (seg.offsetX !== 3) {
+            expect(seg.health).toBe(4)
+          }
+        }
+      }
+
+      // Both bullets should be consumed
+      expect(getBullets(finalState.entities).find((b) => b.id === 'bullet-1')).toBeUndefined()
+      expect(getBullets(finalState.entities).find((b) => b.id === 'bullet-2')).toBeUndefined()
     })
   })
 })

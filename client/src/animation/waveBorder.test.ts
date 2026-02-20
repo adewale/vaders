@@ -272,6 +272,36 @@ describe('animation over time', () => {
     expect(serialize(cells1)).not.toBe(serialize(cells2))
   })
 
+  test('ripples reach all four borders of the box', () => {
+    // Simulate realistic game dimensions: 120×36 terminal → ~72×27 box
+    const config = makeConfig({ boxWidth: 72, boxHeight: 27, waveNumber: 1, contentWidth: 20, contentHeight: 8 })
+    const anim = new WaveBorderAnimation(config)
+    const period = anim.getHeartbeatPeriodTicks()
+
+    // Track which edges the ripple reaches across all ticks
+    let reachedTop = false
+    let reachedBottom = false
+    let reachedLeft = false
+    let reachedRight = false
+
+    // Run through two full heartbeat cycles, sampling every tick
+    for (let i = 0; i < period * 2; i++) {
+      anim.update()
+      const cells = anim.getCells()
+      // Interior ripple cells use #00ffff
+      const rippleCells = cells.filter(c => c.color === '#00ffff')
+      if (rippleCells.some(c => c.y <= 2)) reachedTop = true
+      if (rippleCells.some(c => c.y >= config.boxHeight - 3)) reachedBottom = true
+      if (rippleCells.some(c => c.x <= 2)) reachedLeft = true
+      if (rippleCells.some(c => c.x >= config.boxWidth - 3)) reachedRight = true
+    }
+
+    expect(reachedTop).toBe(true)
+    expect(reachedBottom).toBe(true)
+    expect(reachedLeft).toBe(true)
+    expect(reachedRight).toBe(true)
+  })
+
   test('ripples spawn on heartbeat boundaries', () => {
     const config = makeConfig({ waveNumber: 1 })
     const anim = new WaveBorderAnimation(config)

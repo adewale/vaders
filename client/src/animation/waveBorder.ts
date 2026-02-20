@@ -76,9 +76,9 @@ const HEARTBEAT_PERIOD_PER_WAVE_MS = 50
 const HEARTBEAT_RESTING = 0.3
 const HEARTBEAT_PEAK = 1.0
 
-const RIPPLE_SPEED = 1.0       // cells per tick
-const RIPPLE_RING_WIDTH = 1.5  // how thick the ring appears
-const RIPPLE_FADE = 0.85       // intensity multiplier per tick
+const RIPPLE_SPEED = 1.5       // cells per tick
+const RIPPLE_RING_WIDTH = 2.0  // how thick the ring appears
+const RIPPLE_MIN_INTENSITY = 0.15 // minimum intensity when ripple reaches border
 
 /** Terminal cells are ~2:1 aspect ratio (taller than wide). */
 export const ASPECT_RATIO = 0.5
@@ -109,6 +109,7 @@ export class WaveBorderAnimation {
   private centerX: number
   private centerY: number
   private maxRippleRadius: number
+  private rippleFade: number
 
   // Content bounding box (to avoid rendering ripples over digits)
   private contentLeft: number
@@ -148,8 +149,16 @@ export class WaveBorderAnimation {
     this.contentRight = this.contentLeft + config.contentWidth
     this.contentBottom = this.contentTop + config.contentHeight
 
-    // Max ripple radius = distance from center to a corner
-    this.maxRippleRadius = Math.max(config.boxWidth, config.boxHeight)
+    // Max ripple radius = distance from center to corner (aspect-corrected)
+    const cornerDx = (config.boxWidth / 2) * ASPECT_RATIO
+    const cornerDy = config.boxHeight / 2
+    this.maxRippleRadius = Math.sqrt(cornerDx * cornerDx + cornerDy * cornerDy)
+
+    // Calculate fade rate so ripples reach the farthest border point with visible intensity.
+    // After N ticks: intensity = fade^N. We want fade^N >= RIPPLE_MIN_INTENSITY
+    // where N = maxRippleRadius / RIPPLE_SPEED.
+    const ticksToReachBorder = Math.ceil(this.maxRippleRadius / RIPPLE_SPEED)
+    this.rippleFade = Math.pow(RIPPLE_MIN_INTENSITY, 1 / Math.max(1, ticksToReachBorder))
   }
 
   /** Build the ordered perimeter cells (clockwise from top-left). */
@@ -186,7 +195,7 @@ export class WaveBorderAnimation {
     // Advance ripples
     for (const ripple of this.ripples) {
       ripple.radius += RIPPLE_SPEED
-      ripple.intensity *= RIPPLE_FADE
+      ripple.intensity *= this.rippleFade
     }
 
     // Cull expired ripples (in-place swap to avoid allocation)
@@ -266,7 +275,7 @@ export class WaveBorderAnimation {
 
     // --- Interior ripple cells ---
     for (const ripple of this.ripples) {
-      if (ripple.intensity < 0.1) continue
+      if (ripple.intensity < 0.05) continue
       // Scan the interior area (between border and content)
       for (let y = 1; y < this.config.boxHeight - 1; y++) {
         for (let x = 1; x < this.config.boxWidth - 1; x++) {
