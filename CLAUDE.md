@@ -62,7 +62,7 @@ cd worker && bunx wrangler deploy
 - **Game tick rate**: 33ms intervals (~30Hz) in Durable Object
 - **State sync**: Full state sync on every tick (30Hz)
 - **Screen size**: Fixed 120×36 terminal grid
-- **Sprites**: 2-line tall, 5-char wide for players/aliens/UFO; bullets 1×1; barrier segments 2×2
+- **Sprites**: 2-line tall, 5-char wide for players/aliens/UFO; bullets 1×1; barrier segments 3×2
 - **Player colors**: cyan (P1), orange (P2), magenta (P3), lime (P4)
 - **Movement**: Space Invaders-style (1 cell/tick, no inertia)
 - **Game statuses**: `waiting` → `countdown` → `wipe_hold` → `wipe_reveal` → `playing` → `game_over` (wave transitions add `wipe_exit` → `wipe_hold` → `wipe_reveal` loop)

@@ -735,7 +735,9 @@ export class GameRoom extends DurableObject<Env> {
     const spacing = width / (barrierCount + 1)
 
     for (let i = 0; i < barrierCount; i++) {
-      const x = Math.floor(spacing * (i + 1)) - 3
+      // Center each barrier: 5 segments × 3 chars each = 15 chars total
+      const barrierTotalWidth = 5 * 3 // BARRIER_SHAPE cols × BARRIER_SEGMENT_WIDTH
+      const x = Math.floor(spacing * (i + 1)) - Math.floor(barrierTotalWidth / 2)
       barriers.push({
         kind: 'barrier',
         id: this.generateEntityId(),

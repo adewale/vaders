@@ -39,36 +39,51 @@ export function WaveAnnounce({ waveNumber, terminalWidth, terminalHeight }: Wave
     [waveNumber],
   )
 
-  // Box dimensions
-  const padding = 4
-  const boxWidth = digitWidth + padding * 2 + 2
-  const boxHeight = digitHeight + padding * 2 + 4 // +4 for "WAVE" label + spacing + border
+  // Box dimensions — fill most of the screen for dramatic effect
+  const boxWidth = Math.max(digitWidth + 10, Math.floor(terminalWidth * 0.6))
+  const boxHeight = Math.max(digitHeight + 12, Math.floor(terminalHeight * 0.75))
   const boxLeft = Math.max(0, Math.floor((terminalWidth - boxWidth) / 2))
   const boxTop = Math.max(0, Math.floor((terminalHeight - boxHeight) / 2))
+  const padding = Math.floor((boxWidth - digitWidth) / 2) - 1
 
-  // Content placement within the box
-  const labelTop = boxTop + 2
-  const digitTop = boxTop + 4
+  // Content placement within the box (vertically centered)
+  const contentTop = Math.floor((boxHeight - digitHeight - 2) / 2) // -2 for WAVE label + gap
+  const labelTop = boxTop + contentTop
+  const digitTop = boxTop + contentTop + 2
   const digitLeft = Math.floor((terminalWidth - digitWidth) / 2)
 
-  // Animation state
-  const [borderCells, setBorderCells] = useState<BorderCell[]>([])
+  // Build animation config (shared between initial frame and effect)
+  const animConfig = useMemo(() => ({
+    boxWidth,
+    boxHeight,
+    waveNumber,
+    contentWidth: digitWidth,
+    contentHeight: digitHeight + 2, // include "WAVE" label
+    innerPadding: padding,
+  }), [boxWidth, boxHeight, waveNumber, digitWidth, digitHeight, padding])
+
+  // Compute first frame synchronously so the initial render isn't empty
+  const initialCells = useMemo(() => {
+    if (!braille) return []
+    const anim = new WaveBorderAnimation(animConfig)
+    anim.update()
+    return anim.getCells()
+  }, [braille, animConfig])
+
+  // Animation state — seeded with the first frame to avoid flash
+  const [borderCells, setBorderCells] = useState<BorderCell[]>(initialCells)
+
+  useEffect(() => {
+    // Sync initial cells when config changes (useMemo runs before useEffect)
+    setBorderCells(initialCells)
+  }, [initialCells])
 
   useEffect(() => {
     if (!braille) return
 
-    const anim = new WaveBorderAnimation({
-      boxWidth,
-      boxHeight,
-      waveNumber,
-      contentWidth: digitWidth,
-      contentHeight: digitHeight + 2, // include "WAVE" label
-      innerPadding: padding,
-    })
-
-    // Render first frame immediately to avoid a blank-border flash
+    const anim = new WaveBorderAnimation(animConfig)
+    // Skip ahead past frame 0 since initialCells already rendered it
     anim.update()
-    setBorderCells(anim.getCells())
 
     const id = setInterval(() => {
       anim.update()
@@ -76,7 +91,7 @@ export function WaveAnnounce({ waveNumber, terminalWidth, terminalHeight }: Wave
     }, ANIMATION_INTERVAL_MS)
 
     return () => clearInterval(id)
-  }, [waveNumber, braille, boxWidth, boxHeight, digitWidth, digitHeight])
+  }, [braille, animConfig])
 
   // ASCII-only fallback: simple centered text
   if (useAscii) {

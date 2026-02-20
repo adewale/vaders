@@ -224,13 +224,13 @@ export const SPRITES = {
     alien: '▼',    // Moving down
   },
 
-  // Barrier states (based on health) - half-block damage patterns, 2x2
+  // Barrier states (based on health) - braille pixel art, 3x2
   barrier: {
-    4: ['██', '██'],  // Full health
-    3: ['▓█', '█▓'],  // 3/4 health - checkerboard damage
-    2: ['▒▓', '▓▒'],  // 2/4 health
-    1: ['░▒', '▒░'],  // 1/4 health
-    0: ['  ', '  '],  // Destroyed
+    4: ['⣿⣿⣿', '⣿⣿⣿'],  // Full health - solid
+    3: ['⣾⣿⡿', '⡿⣿⣿'],  // 3/4 health - edge erosion
+    2: ['⣞⣿⡵', '⢞⣯⢟'],  // 2/4 health - holes forming
+    1: ['⠔⡩⢂', '⠌⠔⡐'],  // 1/4 health - sparse, crumbling
+    0: ['⠀⠀⠀', '⠀⠀⠀'],  // Destroyed - empty braille
   },
 
   // Enhanced mode sprites (2 lines each)
@@ -254,7 +254,7 @@ export const SPRITE_SIZE = {
   player: { width: 7, height: 2 },
   ufo: { width: 7, height: 2 },
   bullet: { width: 1, height: 1 },
-  barrier: { width: 2, height: 2 },
+  barrier: { width: 3, height: 2 },
 } as const
 
 // ─── Gradient Colors ────────────────────────────────────────────────────────────
@@ -373,11 +373,11 @@ export const ASCII_SPRITES = {
     alien: 'v',
   },
   barrier: {
-    4: ['##', '##'],
-    3: ['%#', '#%'],
-    2: ['::', '::'],
-    1: ['..', '..'],
-    0: ['  ', '  '],
+    4: ['###', '###'],
+    3: ['%##', '#%#'],
+    2: ['.#.', '#..'],
+    1: ['...', '...'],
+    0: ['   ', '   '],
   },
   enhanced: {
     commander: {

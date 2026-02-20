@@ -53,7 +53,7 @@ export const HITBOX = {
   ALIEN_HEIGHT: 2,           // Full sprite height
   UFO_WIDTH: 7,              // Left-edge based, full sprite width
   UFO_HEIGHT: 2,             // Full sprite height
-  BARRIER_SEGMENT_WIDTH: 2,  // Each segment is 2 chars wide
+  BARRIER_SEGMENT_WIDTH: 3,  // Each segment is 3 braille chars wide
   BARRIER_SEGMENT_HEIGHT: 2, // Each segment is 2 rows tall
 } as const
 

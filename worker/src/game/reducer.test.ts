@@ -1536,10 +1536,10 @@ describe('barrier segment damage progression', () => {
 
   it('bullet must be exactly aligned with segment X to hit (integer coordinates)', () => {
     // This test verifies the collision detection boundary behavior:
-    // - Barrier at x=50 has segments at x=50, 51, 52 (offsets 0, 1, 2)
+    // - Barrier at x=50 has segments at x=50, 53, 56 (offsets 0, 1, 2 × width 3)
     // - Bullet at x=49 should miss (outside barrier on left)
     // - Bullet at x=50 should hit segment[0] at x=50
-    // - Bullet at x=53 should miss (outside barrier on right)
+    // - Bullet at x=59 should miss (outside barrier on right)
     // Note: Bullets start at BARRIER_Y + 1 so they move INTO the barrier on tick
 
     const { state: state1, players } = createTestPlayingState(1)
@@ -1566,12 +1566,12 @@ describe('barrier segment damage progression', () => {
     // Test bullet outside on right
     const { state: state3 } = createTestPlayingState(1)
     const barrier3 = createTestBarrier('barrier3', 50)
-    const bulletOutsideRight = createTestBullet('b3', 53, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
+    const bulletOutsideRight = createTestBullet('b3', 59, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
     state3.entities = [barrier3, bulletOutsideRight]
 
     const result3 = gameReducer(state3, { type: 'TICK' })
     const updatedBarrier3 = result3.state.entities.find(e => e.id === 'barrier3') as any
-    // Segment at x=52 should be undamaged - bullet at x=53 is outside barrier (only 3 segments wide in test)
+    // Segment at x=56 should be undamaged - bullet at x=59 is outside barrier (only 3 segments wide in test)
     expect(updatedBarrier3.segments[2].health).toBe(4)
   })
 })
@@ -1585,11 +1585,11 @@ describe('barrier protection vs player hitbox mismatch', () => {
   // With HITBOX.PLAYER_HALF_WIDTH=3, player hitbox is [pX-3, pX+4).
   //
   // Real barrier (5 segments): offsets 0,1,2,3,4 → for barrier at X=50,
-  //   segment collision ranges: [50,52), [52,54), [54,56), [56,58), [58,60)
+  //   segment collision ranges: [50,53), [53,56), [56,59), [59,62), [62,65)
   // Player at X=52, hitbox: [49, 56)
   //
   // A bullet at X=55 would:
-  //   - Hit barrier segment at offsetX=2 (range [54,56)) if at barrier Y
+  //   - Hit barrier segment at offsetX=1 (range [53,56)) if at barrier Y
   //   - Hit player at X=52 (55 >= 49 && 55 < 56) if at player Y
   // A bullet at X=56 would:
   //   - Miss player (56 not < 56)
@@ -1617,7 +1617,7 @@ describe('barrier protection vs player hitbox mismatch', () => {
 
   it('alien bullet at barrier edge should NOT hit player behind barrier', () => {
     // Setup: Player centered behind a 5-wide barrier
-    // Barrier at X=50, segment collision: [50,52), [52,54), [54,56), [56,58), [58,60)
+    // Barrier at X=50, segment collision: [50,53), [53,56), [56,59), [59,62), [62,65)
     // Player at X=52 (centered behind barrier), hitbox: [49, 56)
     // Alien bullet at X=56 (just outside player hitbox right edge)
     //
@@ -1640,7 +1640,7 @@ describe('barrier protection vs player hitbox mismatch', () => {
   })
 
   it('bullet 2 cells outside barrier misses player', () => {
-    // Barrier at X=50, segment collision: [50,52)...[58,60)
+    // Barrier at X=50, segment collision: [50,53)...[62,65)
     // Player at X=52, hitbox: [49, 56)
     // Bullet at X=56
     //
@@ -1662,7 +1662,7 @@ describe('barrier protection vs player hitbox mismatch', () => {
   })
 
   it('documents exact boundary where bullet misses barrier but player is still protected', () => {
-    // Barrier at X=50, segment collision: [50,52)...[58,60)
+    // Barrier at X=50, segment collision: [50,53)...[62,65)
     // Player at X=52, hitbox: [49, 56)
     // Bullet at X=56:
     //   - Barrier check: bullet at y=30 is below barrier at y=25, misses barrier
@@ -1696,16 +1696,16 @@ describe('barrier protection vs player hitbox mismatch', () => {
     state.players[player.id] = player
 
     const barrier = createFullBarrier('barrier1', 50)
-    // Bullet at X=54 - with 2x spacing, this hits segment at offsetX=2 (spans [54,56))
-    const alienBullet = createTestBullet('ab1', 54, LAYOUT.BARRIER_Y - 1, null, 1)
+    // Bullet at X=56 - with 3x spacing, this hits segment at offsetX=2 (spans [56,59))
+    const alienBullet = createTestBullet('ab1', 56, LAYOUT.BARRIER_Y - 1, null, 1)
     state.entities = [barrier, alienBullet]
 
     const result = gameReducer(state, { type: 'TICK' })
 
-    // Bullet should hit barrier segment at offsetX=2 (x = 50 + 2*2 = 54)
+    // Bullet should hit barrier segment at offsetX=2 (x = 50 + 2*3 = 56)
     const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
     const hitSegment = updatedBarrier.segments.find(s => s.health === 3)
-    expect(hitSegment?.offsetX).toBe(2)  // Segment 2 is at x=54
+    expect(hitSegment?.offsetX).toBe(2)  // Segment 2 is at x=56
 
     // Player should be unharmed
     const playerAfter = result.state.players[player.id]
@@ -2687,21 +2687,21 @@ describe('Sprite shape vs hitbox alignment', () => {
   // ─── Barrier Collision Tests ─────────────────────────────────────────────────
   describe('Barrier segment hitbox', () => {
     // Barrier collision now matches visual rendering!
-    // Both use 2x multiplier for segment spacing:
+    // Both use 3x multiplier for segment spacing:
     //   Collision: segX = barrier.x + seg.offsetX * HITBOX.BARRIER_SEGMENT_WIDTH
     //   Rendering: left = barrier.x + seg.offsetX * SPRITE_SIZE.barrier.width
     //
-    // HITBOX.BARRIER_SEGMENT_WIDTH = SPRITE_SIZE.barrier.width = 2
+    // HITBOX.BARRIER_SEGMENT_WIDTH = SPRITE_SIZE.barrier.width = 3
     //
     // A barrier at x=50 with segment offsetX=2:
-    // - Collision detects at x=54 (50 + 2*2)
-    // - Rendering shows at x=54 (50 + 2*2) ✓
+    // - Collision detects at x=56 (50 + 2*3)
+    // - Rendering shows at x=56 (50 + 2*3) ✓
 
     it('barrier collision matches visual position', () => {
       // Barrier at x=50 with standard segments:
-      // Both collision and render positions: 50, 52, 54, 56, 58 (offsetX 0-4, 2x width)
+      // Both collision and render positions: 50, 53, 56, 59, 62 (offsetX 0-4, 3x width)
       //
-      // A bullet at x=52 will hit segment at offsetX=1 (rendered at x=52-53)
+      // A bullet at x=53 will hit segment at offsetX=1 (rendered at x=53-55)
 
       const { state, players } = createTestPlayingState(1)
 
@@ -2719,21 +2719,21 @@ describe('Sprite shape vs hitbox alignment', () => {
         ],
       }
 
-      // Bullet at x=52 - should hit segment at offsetX=1 (visual and collision at 52-53)
-      const bullet = createTestBullet('b1', 52, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
+      // Bullet at x=53 - should hit segment at offsetX=1 (visual and collision at 53-55)
+      const bullet = createTestBullet('b1', 53, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
       state.entities = [barrier, bullet]
 
       const result = gameReducer(state, { type: 'TICK' })
       const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
 
-      // Collision: bullet x=52 is in segment offsetX=1 (spans [52, 54))
+      // Collision: bullet x=53 is in segment offsetX=1 (spans [53, 56))
       const hitSegment = updatedBarrier.segments.find(s => s.health === 3)
       expect(hitSegment?.offsetX).toBe(1)
     })
 
     it('bullet between visual segments misses (correct behavior)', () => {
-      // With 2x spacing, segments are at x=50-51, 52-53, 54-55
-      // A bullet at x=51 is inside segment 0's collision area
+      // With 3x spacing, segments are at x=50-52, 53-55, 56-58
+      // A bullet at x=52 is inside segment 0's collision area
 
       const { state, players } = createTestPlayingState(1)
 
@@ -2748,14 +2748,14 @@ describe('Sprite shape vs hitbox alignment', () => {
         ],
       }
 
-      // Bullet at x=51, should hit segment 0 (spans [50, 52))
-      const bullet = createTestBullet('b1', 51, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
+      // Bullet at x=52, should hit segment 0 (spans [50, 53))
+      const bullet = createTestBullet('b1', 52, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
       state.entities = [barrier, bullet]
 
       const result = gameReducer(state, { type: 'TICK' })
       const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
 
-      // Collision hits segment at offsetX=0 (spans [50, 52), bullet at 51 is inside)
+      // Collision hits segment at offsetX=0 (spans [50, 53), bullet at 52 is inside)
       const hitSegment = updatedBarrier.segments.find(s => s.health === 3)
       expect(hitSegment?.offsetX).toBe(0)
     })
@@ -2763,13 +2763,13 @@ describe('Sprite shape vs hitbox alignment', () => {
     it('collision and visual positions now match', () => {
       // For each segment, collision and visual X should be identical
       const barrierX = 50
-      const segmentWidth = 2
+      const segmentWidth = 3
       const segments = [
         { offsetX: 0, expectedX: 50 },
-        { offsetX: 1, expectedX: 52 },
-        { offsetX: 2, expectedX: 54 },
-        { offsetX: 3, expectedX: 56 },
-        { offsetX: 4, expectedX: 58 },
+        { offsetX: 1, expectedX: 53 },
+        { offsetX: 2, expectedX: 56 },
+        { offsetX: 3, expectedX: 59 },
+        { offsetX: 4, expectedX: 62 },
       ]
 
       for (const seg of segments) {
@@ -2807,8 +2807,8 @@ describe('Sprite shape vs hitbox alignment', () => {
   // ─── Barrier collision matching visual position ─────────────────────────────────
   describe('barrier collision should match visual position', () => {
     it('bullet at visual segment position should hit that segment', () => {
-      // Segment at offsetX=2 is RENDERED at x = 50 + 2*2 = 54
-      // A bullet at x=54 should hit that segment (collision now uses 2x multiplier)
+      // Segment at offsetX=2 is RENDERED at x = 50 + 2*3 = 56
+      // A bullet at x=56 should hit that segment (collision now uses 3x multiplier)
 
       const { state, players } = createTestPlayingState(1)
 
@@ -2819,26 +2819,26 @@ describe('Sprite shape vs hitbox alignment', () => {
         segments: [
           { offsetX: 0, offsetY: 0, health: 4 },
           { offsetX: 1, offsetY: 0, health: 4 },
-          { offsetX: 2, offsetY: 0, health: 4 }, // Rendered at x=54
+          { offsetX: 2, offsetY: 0, health: 4 }, // Rendered at x=56
           { offsetX: 3, offsetY: 0, health: 4 },
           { offsetX: 4, offsetY: 0, health: 4 },
         ],
       }
 
-      // Bullet at x=54 (where segment offsetX=2 is visually rendered)
-      const bullet = createTestBullet('b1', 54, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
+      // Bullet at x=56 (where segment offsetX=2 is visually rendered)
+      const bullet = createTestBullet('b1', 56, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
       state.entities = [barrier, bullet]
 
       const result = gameReducer(state, { type: 'TICK' })
       const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
 
-      // Should hit segment at offsetX=2 (visually at x=54-55)
+      // Should hit segment at offsetX=2 (visually at x=56-58)
       const hitSegment = updatedBarrier.segments.find(s => s.health === 3)
       expect(hitSegment?.offsetX).toBe(2)
     })
 
-    it('bullet at x=56 should hit segment visually at x=56', () => {
-      // Segment at offsetX=3 is RENDERED at x = 50 + 3*2 = 56
+    it('bullet at x=59 should hit segment visually at x=59', () => {
+      // Segment at offsetX=3 is RENDERED at x = 50 + 3*3 = 59
       // Collision now matches visual position
 
       const { state, players } = createTestPlayingState(1)
@@ -2851,13 +2851,13 @@ describe('Sprite shape vs hitbox alignment', () => {
           { offsetX: 0, offsetY: 0, health: 4 },
           { offsetX: 1, offsetY: 0, health: 4 },
           { offsetX: 2, offsetY: 0, health: 4 },
-          { offsetX: 3, offsetY: 0, health: 4 }, // Rendered at x=56
+          { offsetX: 3, offsetY: 0, health: 4 }, // Rendered at x=59
           { offsetX: 4, offsetY: 0, health: 4 },
         ],
       }
 
-      // Bullet at x=56 (where segment offsetX=3 is visually rendered)
-      const bullet = createTestBullet('b1', 56, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
+      // Bullet at x=59 (where segment offsetX=3 is visually rendered)
+      const bullet = createTestBullet('b1', 59, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
       state.entities = [barrier, bullet]
 
       const result = gameReducer(state, { type: 'TICK' })
@@ -2872,22 +2872,22 @@ describe('Sprite shape vs hitbox alignment', () => {
 
     it('barrier visual span should match collision span', () => {
       // A 5-segment barrier (offsetX 0-4):
-      // - Visual span: x=50 to x=59 (10 cells with 2-width segments)
-      // - Collision span now also: x=50 to x=59 (matching visual)
+      // - Visual span: x=50 to x=64 (15 cells with 3-width segments)
+      // - Collision span now also: x=50 to x=64 (matching visual)
 
       const barrierX = 50
       const segmentCount = 5
-      const spriteWidth = 2
+      const spriteWidth = 3
 
       // Visual span calculation
       const visualLeft = barrierX
       const visualRight = barrierX + (segmentCount - 1) * spriteWidth + spriteWidth - 1
-      // = 50 + 4*2 + 2 - 1 = 50 + 8 + 1 = 59
+      // = 50 + 4*3 + 3 - 1 = 50 + 12 + 2 = 64
 
-      // Collision span calculation (now fixed with 2x multiplier)
+      // Collision span calculation (now fixed with 3x multiplier)
       const collisionLeft = barrierX
       const collisionRight = barrierX + (segmentCount - 1) * spriteWidth + spriteWidth - 1
-      // = 50 + 4*2 + 2 - 1 = 59
+      // = 50 + 4*3 + 3 - 1 = 64
 
       // These should now match
       expect(collisionLeft).toBe(visualLeft)
@@ -3754,8 +3754,8 @@ describe('boundary conditions', () => {
       const result = gameReducer(state, { type: 'TICK' })
 
       const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as any
-      // Player bullet should damage segment at offset (0,0) or (1,0)
-      // Alien bullet should damage segment at offset (1,0)
+      // Player bullet should damage segment at offset (0,0)
+      // Alien bullet at x=52 also hits segment at offset (0,0) (spans [50,53))
       // Both bullets should be consumed
       const bullets = getBullets(result.state.entities)
       expect(bullets.length).toBe(0)

@@ -246,8 +246,8 @@ describe('Sprite Consistency Constraints', () => {
   describe('Barrier Sprite Consistency', () => {
     test('all barrier health states have same dimensions', () => {
       for (const health of [1, 2, 3, 4] as const) {
-        expect(SPRITES.barrier[health][0].length).toBe(2)
-        expect(SPRITES.barrier[health][1].length).toBe(2)
+        expect(SPRITES.barrier[health][0].length).toBe(3)
+        expect(SPRITES.barrier[health][1].length).toBe(3)
       }
     })
 
