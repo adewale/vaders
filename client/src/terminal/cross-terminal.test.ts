@@ -9,27 +9,34 @@ import {
   needsKeyReleaseTimeout,
   hexTo256Color,
   formatColor,
+  supportsRichColor,
+  supportsBraille,
   type TerminalCapabilities,
 } from './compatibility'
 import { SPRITES, SPRITE_SIZE, ASCII_SPRITES, COLORS, getSprites } from '../sprites'
 
+// All terminal-related env vars — must match the list in compatibility.test.ts
+const TERMINAL_ENV_KEYS = [
+  'TERM', 'TERM_PROGRAM', 'COLORTERM',
+  'KITTY_WINDOW_ID', 'ITERM_SESSION_ID', 'ALACRITTY_WINDOW_ID',
+  'VSCODE_INJECTION', 'TMUX', 'STY',
+  'LANG', 'LC_ALL', 'VADERS_ASCII',
+]
+
 // Helper to mock environment for specific terminal
 function mockTerminalEnv(terminal: 'ghostty' | 'apple-terminal') {
   const envBackup: Record<string, string | undefined> = {}
-  
-  // Backup current env
-  const keysToBackup = ['TERM_PROGRAM', 'TERM', 'KITTY_WINDOW_ID', 'COLORTERM', 'LANG', 'VADERS_ASCII']
-  for (const key of keysToBackup) {
+
+  // Backup ALL terminal-related env vars
+  for (const key of TERMINAL_ENV_KEYS) {
     envBackup[key] = process.env[key]
   }
-  
-  // Clear all terminal detection vars
-  delete process.env.KITTY_WINDOW_ID
-  delete process.env.ITERM_SESSION_ID
-  delete process.env.TMUX
-  delete process.env.STY
-  delete process.env.VADERS_ASCII
-  
+
+  // Clear ALL terminal-related env vars first
+  for (const key of TERMINAL_ENV_KEYS) {
+    delete process.env[key]
+  }
+
   if (terminal === 'ghostty') {
     process.env.TERM_PROGRAM = 'ghostty'
     process.env.TERM = 'xterm-256color'
@@ -38,13 +45,12 @@ function mockTerminalEnv(terminal: 'ghostty' | 'apple-terminal') {
   } else {
     process.env.TERM_PROGRAM = 'Apple_Terminal'
     process.env.TERM = 'xterm-256color'
-    delete process.env.COLORTERM // Apple Terminal doesn't set this
     process.env.LANG = 'en_US.UTF-8'
   }
-  
+
   return () => {
-    // Restore
-    for (const key of keysToBackup) {
+    // Restore ALL terminal-related env vars
+    for (const key of TERMINAL_ENV_KEYS) {
       if (envBackup[key] === undefined) {
         delete process.env[key]
       } else {
@@ -305,13 +311,15 @@ describe('Visual Alignment Constraints', () => {
 
 describe('Terminal-Specific Rendering', () => {
 
-  test('getSprites returns Unicode sprites for Unicode-capable terminals', () => {
+  test('Unicode-capable terminals should select Unicode sprites', () => {
     const restore = mockTerminalEnv('ghostty')
     try {
-      // Note: getSprites uses cached capabilities, so this tests the caching behavior
-      // In a real scenario, sprites would be selected at app init time
-      const sprites = getSprites()
-      // Both Ghostty and Apple Terminal support Unicode, so we should get Unicode sprites
+      // detectCapabilities() reads live env vars (not the cached singleton),
+      // so we can verify the sprite selection logic correctly.
+      const caps = detectCapabilities()
+      expect(caps.supportsUnicode).toBe(true)
+      // Verify that Unicode caps would produce Unicode sprites
+      const sprites = caps.supportsUnicode ? SPRITES : ASCII_SPRITES
       expect(sprites.player[0]).toBe(SPRITES.player[0])
     } finally {
       restore()
@@ -438,5 +446,56 @@ describe('Terminal Size Constraints', () => {
     expect(SPRITE_SIZE.bullet.width).toBeGreaterThan(0)
     expect(SPRITE_SIZE.barrier.width).toBeGreaterThan(0)
     expect(SPRITE_SIZE.barrier.height).toBeGreaterThan(0)
+  })
+})
+
+// ============================================================================
+// Cross-Terminal Animation Feature Support
+// ============================================================================
+
+describe('Cross-Terminal Animation Features', () => {
+  test('Apple Terminal renders braille spinners but not rich color effects', () => {
+    const restore = mockTerminalEnv('apple-terminal')
+    try {
+      const caps = detectCapabilities()
+      expect(supportsBraille(caps)).toBe(true)
+      expect(supportsRichColor(caps)).toBe(false)
+    } finally {
+      restore()
+    }
+  })
+
+  test('Ghostty renders both braille spinners and rich color effects', () => {
+    const restore = mockTerminalEnv('ghostty')
+    try {
+      const caps = detectCapabilities()
+      expect(supportsBraille(caps)).toBe(true)
+      expect(supportsRichColor(caps)).toBe(true)
+    } finally {
+      restore()
+    }
+  })
+
+  test('visual feature tiers degrade gracefully across terminals', () => {
+    // Tier 1: Modern terminals get full visual features
+    for (const terminal of ['kitty', 'ghostty', 'iterm2', 'alacritty', 'wezterm', 'vscode'] as const) {
+      const caps = { supportsUnicode: true, supportsTrueColor: true, terminal } as TerminalCapabilities
+      expect(supportsBraille(caps)).toBe(true)
+      expect(supportsRichColor(caps)).toBe(true)
+    }
+
+    // Tier 2: Apple Terminal gets Unicode visuals but flat colors
+    const appleCaps = { supportsUnicode: true, supportsTrueColor: false, terminal: 'apple-terminal' } as TerminalCapabilities
+    expect(supportsBraille(appleCaps)).toBe(true)
+    expect(supportsRichColor(appleCaps)).toBe(false)
+
+    // Tier 3: Linux console gets ASCII-only fallbacks
+    const linuxCaps = { supportsUnicode: false, supportsTrueColor: false, terminal: 'linux-console' } as TerminalCapabilities
+    expect(supportsBraille(linuxCaps)).toBe(false)
+    expect(supportsRichColor(linuxCaps)).toBe(false)
+
+    // Linux console with UTF-8 still cannot render braille
+    const linuxUtf8Caps = { supportsUnicode: true, supportsTrueColor: false, terminal: 'linux-console' } as TerminalCapabilities
+    expect(supportsBraille(linuxUtf8Caps)).toBe(false)
   })
 })

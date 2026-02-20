@@ -7,6 +7,8 @@ import { Logo } from './Logo'
 import { normalizeKey } from '../input'
 import { COLORS } from '../sprites'
 import { useTerminalSize } from '../hooks/useTerminalSize'
+import { AudioManager } from '../audio/AudioManager'
+import { MusicManager } from '../audio/MusicManager'
 
 interface LaunchScreenProps {
   onStartSolo: () => void
@@ -34,6 +36,8 @@ export function LaunchScreen({
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [joinMode, setJoinMode] = useState(false)
   const [roomCode, setRoomCode] = useState('')
+  const [isMuted, setIsMuted] = useState(() => AudioManager.getInstance().isMuted())
+  const [isMusicMuted, setIsMusicMuted] = useState(() => MusicManager.getInstance().isMuted())
 
   const handleSelect = useCallback(() => {
     const item = MENU_ITEMS[selectedIndex]
@@ -59,6 +63,18 @@ export function LaunchScreen({
 
     const key = normalizeKey(event)
     if (!key) return
+
+    // Audio toggles (available from any screen state)
+    if (key.type === 'key' && key.key === 'm') {
+      const muted = AudioManager.getInstance().toggleMute()
+      setIsMuted(muted)
+      return
+    }
+    if (key.type === 'key' && key.key === 'n') {
+      const musicMuted = MusicManager.getInstance().toggleMute()
+      setIsMusicMuted(musicMuted)
+      return
+    }
 
     // Join mode: typing room code
     if (joinMode) {
@@ -176,9 +192,13 @@ export function LaunchScreen({
       </box>
 
       <box height={1} />
-      <text fg={COLORS.ui.unselected}>
-        {'  '}↑/↓ Navigate   ENTER Select   Q Quit
-      </text>
+      <box paddingLeft={2}>
+        <text fg={COLORS.ui.unselected}>↑/↓ Navigate   ENTER Select   M SFX   N Music   Q Quit</text>
+        <box flexGrow={1} />
+        <text fg={isMuted ? COLORS.ui.dim : COLORS.ui.unselected}>{isMuted ? '[SFX OFF]' : '[SFX ON]'} </text>
+        <text fg={isMusicMuted ? COLORS.ui.dim : COLORS.ui.unselected}>{isMusicMuted ? '[MUSIC OFF]' : '[MUSIC ON]'} </text>
+        {MusicManager.getInstance().hasError() && <text fg={COLORS.ui.error}>[MUSIC ERR] </text>}
+      </box>
       <box flexGrow={1} />
       <box flexDirection="column">
         <box>

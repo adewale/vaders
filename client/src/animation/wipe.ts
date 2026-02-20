@@ -9,6 +9,7 @@
 // - Multiple wipe patterns (iris, horizontal, vertical)
 
 import { easeInQuad, easeOutQuad, clamp } from './easing'
+import { ASPECT_RATIO } from './waveBorder'
 
 // ─── Block Characters for Edge Precision ─────────────────────────────────────
 
@@ -87,7 +88,7 @@ export interface WipeConfig {
  * Default wipe configuration.
  *
  * NOTE: These durations intentionally differ from the server's WIPE_TIMING
- * constants (EXIT_TICKS=60, HOLD_TICKS=60, REVEAL_TICKS=120 in shared/types.ts).
+ * constants (EXIT_TICKS=60, HOLD_TICKS=90, REVEAL_TICKS=120 in shared/types.ts).
  * The server controls the authoritative status transitions (wipe_exit → wipe_hold
  * → wipe_reveal → playing). This client-side animation is purely visual and runs
  * independently — it just needs to complete within the server's timing window.
@@ -98,7 +99,7 @@ export const DEFAULT_WIPE_CONFIG: WipeConfig = {
   width: 120,
   height: 36,
   exitDuration: 30, // ~1 second at 30fps (server: 60 ticks = 2s)
-  holdDuration: 45, // ~1.5 seconds (server: 60 ticks = 2s)
+  holdDuration: 45, // ~1.5 seconds (server: 90 ticks = 3s)
   enterDuration: 30, // ~1 second at 30fps (server: 120 ticks = 4s)
   pattern: 'iris',
   useAscii: false,
@@ -117,9 +118,8 @@ export function createIrisMask(
   maxRadius: number
 ): MaskFunction {
   return (x: number, y: number, progress: number): boolean => {
-    // Calculate distance from center, accounting for aspect ratio
-    // Terminal cells are typically ~2:1 aspect ratio (taller than wide)
-    const dx = (x - centerX) * 0.5 // Adjust for aspect ratio
+    // Calculate distance from center, accounting for terminal aspect ratio
+    const dx = (x - centerX) * ASPECT_RATIO
     const dy = y - centerY
     const distance = Math.sqrt(dx * dx + dy * dy)
 
@@ -140,7 +140,7 @@ export function createIrisOpenMask(
   maxRadius: number
 ): MaskFunction {
   return (x: number, y: number, progress: number): boolean => {
-    const dx = (x - centerX) * 0.5
+    const dx = (x - centerX) * ASPECT_RATIO
     const dy = y - centerY
     const distance = Math.sqrt(dx * dx + dy * dy)
 
@@ -251,7 +251,7 @@ export class WipeTransition {
     const cx = this.config.centerX ?? this.config.width / 2
     const cy = this.config.centerY ?? this.config.height / 2
     this.maxRadius = Math.sqrt(
-      Math.pow(Math.max(cx, this.config.width - cx) * 0.5, 2) +
+      Math.pow(Math.max(cx, this.config.width - cx) * ASPECT_RATIO, 2) +
       Math.pow(Math.max(cy, this.config.height - cy), 2)
     ) * 1.2 // Extra margin to ensure full coverage
 
@@ -530,7 +530,7 @@ export function createWaveWipe(
     height,
     pattern: 'iris',
     exitDuration: 25,  // Client-only visual (server: 60 ticks)
-    holdDuration: 50,  // Client-only visual (server: 60 ticks)
+    holdDuration: 50,  // Client-only visual (server: 90 ticks)
     enterDuration: 25, // Client-only visual (server: 120 ticks)
     useAscii,
     maskColor: '#000000',

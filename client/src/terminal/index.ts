@@ -53,6 +53,10 @@ export {
   // Diagnostics
   getTerminalQuirks,
 
+  // Feature detection helpers
+  supportsRichColor,
+  supportsBraille,
+
   // Singleton instances (for convenience)
   TERMINAL_NAME,
   TERMINAL_CAPABILITIES,

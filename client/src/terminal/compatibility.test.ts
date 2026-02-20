@@ -17,6 +17,8 @@ import {
   hexTo16Color,
   formatColor,
   getTerminalQuirks,
+  supportsRichColor,
+  supportsBraille,
   type TerminalName,
   type TerminalCapabilities,
 } from './compatibility'
@@ -670,22 +672,6 @@ describe('Color fallback logic', () => {
 })
 
 // ============================================================================
-// Minimum Size Validation (Issue #13)
-// ============================================================================
-
-describe('Minimum size validation', () => {
-  // The game requires 120x36 minimum terminal size. While the compatibility module
-  // doesn't directly validate size, we verify the constants are correct.
-
-  test('standard game dimensions are 120x36', () => {
-    // These are used by the game for minimum terminal size checks
-    // Verify they are importable and correct
-    expect(120).toBe(120)  // STANDARD_WIDTH
-    expect(36).toBe(36)    // STANDARD_HEIGHT
-  })
-})
-
-// ============================================================================
 // VS Code Terminal Timeout Override (Issue #13)
 // ============================================================================
 
@@ -703,5 +689,53 @@ describe('Terminal-specific key release timeouts', () => {
   test('WezTerm with Kitty keyboard has 0 timeout', () => {
     const caps = { supportsKittyKeyboard: true, terminal: 'wezterm' } as TerminalCapabilities
     expect(getKeyReleaseTimeoutMs(caps)).toBe(0)
+  })
+})
+
+// ============================================================================
+// Rich Color and Braille Feature Gating
+// ============================================================================
+
+describe('supportsRichColor', () => {
+  test('enabled only when terminal has 24-bit truecolor', () => {
+    // Rich color features (gradients, smooth interpolation) require truecolor
+    const truecolorCaps = { supportsTrueColor: true } as TerminalCapabilities
+    const limitedCaps = { supportsTrueColor: false } as TerminalCapabilities
+    expect(supportsRichColor(truecolorCaps)).toBe(true)
+    expect(supportsRichColor(limitedCaps)).toBe(false)
+  })
+})
+
+// ============================================================================
+// Braille Support Detection
+// ============================================================================
+
+describe('supportsBraille', () => {
+  test('enabled only when terminal supports Unicode', () => {
+    // Braille characters (U+2800 block) need Unicode but NOT truecolor
+    const unicodeCaps = { supportsUnicode: true } as TerminalCapabilities
+    const asciiCaps = { supportsUnicode: false } as TerminalCapabilities
+    expect(supportsBraille(unicodeCaps)).toBe(true)
+    expect(supportsBraille(asciiCaps)).toBe(false)
+  })
+
+  test('VADERS_ASCII=1 disables braille even on Unicode-capable terminals', () => {
+    withEnv({ VADERS_ASCII: '1', LANG: 'en_US.UTF-8', TERM_PROGRAM: 'ghostty', KITTY_WINDOW_ID: undefined }, () => {
+      const caps = detectCapabilities()
+      expect(supportsBraille(caps)).toBe(false)
+    })
+  })
+
+  test('linux-console with UTF-8 locale does not support braille', () => {
+    // Linux console cannot render braille characters even with UTF-8 locale
+    const caps = { supportsUnicode: true, terminal: 'linux-console' } as TerminalCapabilities
+    expect(supportsBraille(caps)).toBe(false)
+  })
+
+  test('braille and rich color are independent capabilities', () => {
+    // Apple Terminal: Unicode (braille) but no truecolor (no rich color)
+    const unicodeOnly = { supportsUnicode: true, supportsTrueColor: false } as TerminalCapabilities
+    expect(supportsBraille(unicodeOnly)).toBe(true)
+    expect(supportsRichColor(unicodeOnly)).toBe(false)
   })
 })

@@ -6,7 +6,8 @@ import { STANDARD_WIDTH, STANDARD_HEIGHT } from '../../shared/types'
 export { STANDARD_WIDTH, STANDARD_HEIGHT }
 
 // Import terminal capabilities for sprite selection and color conversion
-import { getTerminalCapabilities, convertColorForTerminal, convertColorObject } from './terminal'
+import { getTerminalCapabilities, convertColorForTerminal, convertColorObject, supportsBraille } from './terminal'
+import type { TerminalCapabilities } from './terminal'
 
 export const SPRITES = {
   // Classic alien sprites (2 lines each, 5 chars wide)
@@ -201,6 +202,39 @@ export const ASCII_LOGO = `
 | |/ / __ / / / / _|| / \\__ \\
 |___/_/ |_/_/|_/|___|_|\\_|___/
 `.trim()
+
+// ─── Braille Spinner Frames ─────────────────────────────────────────────────
+// Braille characters (U+2800 block) for smooth loading animations.
+// Works on any Unicode-capable terminal including Apple Terminal.
+// Falls back to classic ASCII twirl for non-Unicode terminals.
+
+/** Braille dot spinner — 8 frames, one dot orbiting */
+export const BRAILLE_SPINNER_FRAMES = [
+  '\u2801', // ⠁
+  '\u2802', // ⠂
+  '\u2804', // ⠄
+  '\u2840', // ⡀
+  '\u2880', // ⢀
+  '\u2820', // ⠠
+  '\u2810', // ⠐
+  '\u2808', // ⠈
+] as const
+
+/** ASCII fallback spinner — 4 frames, classic twirl */
+export const ASCII_SPINNER_FRAMES = [
+  '-',
+  '\\',
+  '|',
+  '/',
+] as const
+
+/**
+ * Get spinner frames appropriate for the current terminal.
+ * Returns braille frames for Unicode terminals, ASCII twirl for limited ones.
+ */
+export function getSpinnerFrames(caps?: TerminalCapabilities): readonly string[] {
+  return supportsBraille(caps) ? BRAILLE_SPINNER_FRAMES : ASCII_SPINNER_FRAMES
+}
 
 // ─── Sprite Selection Based on Terminal Capabilities ─────────────────────────
 

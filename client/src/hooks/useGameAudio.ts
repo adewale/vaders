@@ -34,10 +34,14 @@ export function useGameAudio(
           // Countdown start - tick sound handled by countdown_tick event
           break
         case 'playing':
-          if (prevState.status === 'countdown') {
-            audio.play('game_start')
-            // Start background music when game starts
+          if (prevState.status !== 'playing') {
+            // Start background music on any transition into playing
+            // (wipe_reveal → playing for both game start and wave transitions).
+            // music.start() is idempotent — calling it when already playing is a no-op.
             music.start()
+            if (currentState.wave === 1) {
+              audio.play('game_start')
+            }
           }
           break
         case 'game_over':

@@ -161,8 +161,8 @@ describe('Wipe Hold Flash Prevention', () => {
     // wipe_hold should NOT return GameScreen
     expect(wipeHoldBlock).not.toContain('return <GameScreen')
 
-    // wipe_hold should render a black screen with wave title
-    expect(wipeHoldBlock).toContain('WAVE')
+    // wipe_hold should render wave announce component
+    expect(wipeHoldBlock).toContain('WaveAnnounce')
   })
 
   test('autoStartSolo skips LobbyScreen to prevent flash', async () => {

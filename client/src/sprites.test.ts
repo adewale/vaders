@@ -6,7 +6,11 @@ import {
   SPRITES,
   ASCII_SPRITES,
   SPRITE_SIZE,
+  BRAILLE_SPINNER_FRAMES,
+  ASCII_SPINNER_FRAMES,
+  getSpinnerFrames,
 } from './sprites'
+import type { TerminalCapabilities } from './terminal/compatibility'
 import { LAYOUT } from '../../shared/types'
 
 // ─── Helper Functions ─────────────────────────────────────────────────────────
@@ -568,5 +572,74 @@ describe('Visual Alignment Contract', () => {
     // Document that we expect 5-wide sprites
     expect(LAYOUT.PLAYER_WIDTH).toBe(5)
     expect(LAYOUT.ALIEN_WIDTH).toBe(5)
+  })
+})
+
+// ─── Braille Spinner Tests ──────────────────────────────────────────────────
+
+describe('Braille Spinner Frames', () => {
+  test('braille frames are all single characters', () => {
+    for (const frame of BRAILLE_SPINNER_FRAMES) {
+      expect(frame.length).toBe(1)
+    }
+  })
+
+  test('braille frames are in the U+2800 block', () => {
+    for (const frame of BRAILLE_SPINNER_FRAMES) {
+      const code = frame.charCodeAt(0)
+      expect(code).toBeGreaterThanOrEqual(0x2800)
+      expect(code).toBeLessThanOrEqual(0x28FF)
+    }
+  })
+
+  test('braille spinner has 8 frames', () => {
+    expect(BRAILLE_SPINNER_FRAMES.length).toBe(8)
+  })
+
+  test('ASCII spinner frames are all single characters', () => {
+    for (const frame of ASCII_SPINNER_FRAMES) {
+      expect(frame.length).toBe(1)
+    }
+  })
+
+  test('ASCII spinner frames are basic ASCII', () => {
+    for (const frame of ASCII_SPINNER_FRAMES) {
+      expect(frame.charCodeAt(0)).toBeLessThan(128)
+    }
+  })
+
+  test('ASCII spinner has 4 frames', () => {
+    expect(ASCII_SPINNER_FRAMES.length).toBe(4)
+  })
+
+  test('all braille frames are unique', () => {
+    const unique = new Set(BRAILLE_SPINNER_FRAMES)
+    expect(unique.size).toBe(BRAILLE_SPINNER_FRAMES.length)
+  })
+
+  test('all ASCII frames are unique', () => {
+    const unique = new Set(ASCII_SPINNER_FRAMES)
+    expect(unique.size).toBe(ASCII_SPINNER_FRAMES.length)
+  })
+
+  test('getSpinnerFrames returns an array of strings', () => {
+    const frames = getSpinnerFrames()
+    expect(frames.length).toBeGreaterThan(0)
+    for (const frame of frames) {
+      expect(typeof frame).toBe('string')
+      expect(frame.length).toBe(1)
+    }
+  })
+
+  test('getSpinnerFrames returns braille frames for Unicode-capable terminal', () => {
+    const caps = { supportsUnicode: true } as TerminalCapabilities
+    const frames = getSpinnerFrames(caps)
+    expect(frames).toBe(BRAILLE_SPINNER_FRAMES)
+  })
+
+  test('getSpinnerFrames returns ASCII frames for non-Unicode terminal', () => {
+    const caps = { supportsUnicode: false } as TerminalCapabilities
+    const frames = getSpinnerFrames(caps)
+    expect(frames).toBe(ASCII_SPINNER_FRAMES)
   })
 })

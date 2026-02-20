@@ -128,3 +128,33 @@ export {
   type RenderPosition,
   type FrameTiming,
 } from './interpolation'
+
+// ─── Wave Announce Border Animation ─────────────────────────────────────────
+
+export {
+  // Main class
+  WaveBorderAnimation,
+  // Constants
+  BRAILLE_DENSITY,
+  MAX_DENSITY,
+  ASPECT_RATIO,
+  // Types
+  type WaveBorderConfig,
+  type BorderCell,
+} from './waveBorder'
+
+// ─── Dissolve Effects ──────────────────────────────────────────────────────
+
+export {
+  // Main class
+  DissolveSystem,
+  // Constants
+  DISSOLVE_ASCII_CHARS,
+  // Configuration
+  DEFAULT_DISSOLVE_CONFIG,
+  // Types
+  type DissolveConfig,
+  type DissolveVariant,
+  type DissolveEffect,
+  type DissolveCellOutput,
+} from './dissolve'

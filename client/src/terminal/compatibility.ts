@@ -703,6 +703,33 @@ export function getTerminalQuirks(caps: TerminalCapabilities): string[] {
   return quirks
 }
 
+/**
+ * Check if the terminal supports rich color rendering (24-bit truecolor).
+ * Rich color enables smooth gradients, color interpolation, and full RGB palette.
+ * Terminals limited to 256 colors (Apple Terminal) need quantized-color fallbacks.
+ *
+ * @param caps - Terminal capabilities (uses cached if not provided)
+ * @returns true if the terminal can render 24-bit RGB colors
+ */
+export function supportsRichColor(caps?: TerminalCapabilities): boolean {
+  const termCaps = caps ?? TERMINAL_CAPABILITIES
+  return termCaps.supportsTrueColor
+}
+
+/**
+ * Check if the terminal supports braille Unicode characters (U+2800 block).
+ * Requires Unicode support but NOT truecolor — Apple Terminal can render these.
+ *
+ * @param caps - Terminal capabilities (uses cached if not provided)
+ * @returns true if braille characters will render correctly
+ */
+export function supportsBraille(caps?: TerminalCapabilities): boolean {
+  const termCaps = caps ?? TERMINAL_CAPABILITIES
+  // Linux console cannot render braille characters even with UTF-8 locale
+  if (termCaps.terminal === 'linux-console') return false
+  return termCaps.supportsUnicode
+}
+
 // ─── Platform Detection ─────────────────────────────────────────────────────
 
 /**

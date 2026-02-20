@@ -17,11 +17,15 @@ import {
   getBarriers,
   getUFOs,
 } from '../../../shared/types'
+import type { ServerEvent } from '../../../shared/protocol'
 import { SPRITES, SPRITE_SIZE, COLORS, getPlayerColor } from '../sprites'
+import { MusicManager } from '../audio/MusicManager'
 import { SYMBOLS as SYM } from '../capabilities'
 import { useTerminalSize } from '../hooks/useTerminalSize'
 import { useEntranceAnimation } from '../hooks/useEntranceAnimation'
 import { useInterpolation } from '../hooks/useInterpolation'
+import { useDissolveEffects } from '../hooks/useDissolveEffects'
+import { convertColorForTerminal, getTerminalCapabilities } from '../terminal'
 
 // Terminal-compatible color cycling effects
 import {
@@ -33,10 +37,13 @@ interface GameScreenProps {
   currentPlayerId: string
   isMuted?: boolean
   isMusicMuted?: boolean
+  lastEvent?: ServerEvent | null
+  prevState?: GameState | null
 }
 
-export function GameScreen({ state, currentPlayerId, isMuted = false, isMusicMuted = false }: GameScreenProps) {
+export function GameScreen({ state, currentPlayerId, isMuted = false, isMusicMuted = false, lastEvent = null, prevState = null }: GameScreenProps) {
   const { terminalWidth, terminalHeight, gameWidth, gameHeight, offsetX, offsetY, isTooSmall } = useTerminalSize()
+  const caps = getTerminalCapabilities()
 
   const { entities, players, score, wave, mode, status } = state
   const aliens = getAliens(entities)
@@ -147,6 +154,9 @@ export function GameScreen({ state, currentPlayerId, isMuted = false, isMusicMut
     return pos ?? { x: bullet.x, y: bullet.y }
   }
 
+  // ─── Dissolve Effects ──────────────────────────────────────────────────────
+  const { cells: dissolveCells } = useDissolveEffects(state, prevState, lastEvent)
+
   // If terminal too small, show warning
   if (isTooSmall) {
     return (
@@ -226,6 +236,19 @@ export function GameScreen({ state, currentPlayerId, isMuted = false, isMusicMut
             <Barrier key={barrier.id} barrier={barrier} />
           ))}
 
+          {/* Dissolve/shimmer effects */}
+          {dissolveCells.map((cell) => (
+            <text
+              key={`d-${cell.x}-${cell.y}`}
+              position="absolute"
+              top={cell.y}
+              left={cell.x}
+              fg={convertColorForTerminal(cell.color, caps)}
+            >
+              {cell.char}
+            </text>
+          ))}
+
           {/* Players - 2 line sprites */}
           {Object.values(players).map(player => (
             <PlayerShip
@@ -244,6 +267,7 @@ export function GameScreen({ state, currentPlayerId, isMuted = false, isMusicMut
           <box flexGrow={1} />
           {isMuted && <text fg={COLORS.ui.dim}>[SFX OFF] </text>}
           {isMusicMuted && <text fg={COLORS.ui.dim}>[MUSIC OFF] </text>}
+          {MusicManager.getInstance().hasError() && <text fg={COLORS.ui.error}>[MUSIC ERR] </text>}
           <PlayerScores players={players} currentPlayerId={currentPlayerId} />
         </box>
       </box>
