@@ -5,6 +5,9 @@ import type { GameState } from '../../../shared/types'
 import { COLORS } from '../sprites'
 import { useTerminalSize } from '../hooks/useTerminalSize'
 import { PlayerList } from './PlayerList'
+import { GradientText } from './GradientText'
+import { GRADIENT_PRESETS, interpolateGradient } from '../gradient'
+import { supportsRichColor } from '../terminal'
 
 interface LobbyScreenProps {
   state: GameState
@@ -29,6 +32,7 @@ export function LobbyScreen({
   const readyCount = state.readyPlayerIds.length
 
   const { terminalWidth, terminalHeight, gameWidth, gameHeight } = useTerminalSize()
+  const richColor = supportsRichColor()
 
   // Menu items depend on player count
   const menuItems = playerCount === 1
@@ -58,11 +62,23 @@ export function LobbyScreen({
         paddingTop={1}
         paddingBottom={1}
     >
-      <text fg={COLORS.ui.title}><b>VADERS</b></text>
+      {richColor
+        ? <GradientText text="VADERS" colors={GRADIENT_PRESETS.ocean} fallbackColor={COLORS.ui.title} richColor={richColor} />
+        : <text fg={COLORS.ui.title}><b>VADERS</b></text>
+      }
       <box height={1} />
-      <text fg={COLORS.ui.selectedText}>Room: <span fg={COLORS.ui.score}>{state.roomId}</span></text>
+      <text fg={COLORS.ui.selectedText}>Room: {richColor
+        ? (() => {
+            const colors = interpolateGradient(GRADIENT_PRESETS.victory, state.roomId.length)
+            return state.roomId.split('').map((ch, i) => <span key={i} fg={colors[i]}>{ch}</span>)
+          })()
+        : <span fg={COLORS.ui.score}>{state.roomId}</span>
+      }</text>
       <box height={1} />
-      <text fg={COLORS.ui.score}>Players ({playerCount}/4):</text>
+      {richColor
+        ? <GradientText text={`Players (${playerCount}/4):`} colors={GRADIENT_PRESETS.ocean} fallbackColor={COLORS.ui.score} richColor={richColor} />
+        : <text fg={COLORS.ui.score}>Players ({playerCount}/4):</text>
+      }
       <box height={1} />
 
       {/* Player list with ship sprites and colored ready indicators */}
@@ -75,19 +91,26 @@ export function LobbyScreen({
 
       <box flexGrow={1} />
       <box borderStyle="single" borderColor={COLORS.ui.border} paddingLeft={1} paddingRight={1} flexDirection="column">
-        {menuItems.map((item, i) => (
-          <box key={i}>
-            <text fg={selectedIndex === i ? COLORS.ui.selected : COLORS.ui.unselected}>
-              {selectedIndex === i ? '▶ ' : '  '}
-            </text>
-            <text fg={selectedIndex === i ? COLORS.ui.selectedText : COLORS.ui.label}>
-              {item.label}
-            </text>
-            {item.desc && (
-              <text fg={COLORS.ui.unselected}> {item.desc}</text>
-            )}
-          </box>
-        ))}
+        {menuItems.map((item, i) => {
+          const selected = selectedIndex === i
+          const labelColors = selected && richColor ? interpolateGradient(GRADIENT_PRESETS.vaders, item.label.length) : null
+          return (
+            <box key={i}>
+              <text fg={selected ? COLORS.ui.selected : COLORS.ui.unselected}>
+                {selected ? '▶ ' : '  '}
+              </text>
+              <text fg={selected ? COLORS.ui.selectedText : COLORS.ui.label}>
+                {labelColors
+                  ? item.label.split('').map((ch, ci) => <span key={ci} fg={labelColors[ci]}>{ch}</span>)
+                  : item.label
+                }
+              </text>
+              {item.desc && (
+                <text fg={COLORS.ui.unselected}> {item.desc}</text>
+              )}
+            </box>
+          )
+        })}
         {playerCount > 1 && (
           <text fg={readyCount === playerCount ? COLORS.ui.success : COLORS.ui.unselected}>
             {readyCount}/{playerCount} ready{readyCount === playerCount ? ' - Starting...' : ''}

@@ -10,6 +10,26 @@
 import { BRAILLE_DENSITY, MAX_DENSITY } from './waveBorder'
 import { clamp } from './easing'
 
+// ─── Dissolve Braille Characters ──────────────────────────────────────────────
+
+/**
+ * Braille characters for dissolve effects, organized by density level (0-8).
+ * Multiple variants per level create scattered debris/spark visuals instead of
+ * the monotonous progressive fill of BRAILLE_DENSITY.
+ * Cell index modulo variant count selects a stable char per cell (no flicker).
+ */
+export const DISSOLVE_BRAILLE: readonly (readonly string[])[] = [
+  ['\u2800'],                                                         // 0: empty
+  ['\u2801', '\u2808', '\u2802', '\u2810', '\u2840', '\u2880'],       // 1: single sparks
+  ['\u2881', '\u2848', '\u2822', '\u2814', '\u2821', '\u280A'],       // 2: scattered pairs
+  ['\u2851', '\u288A', '\u2861', '\u288C', '\u284A', '\u28A1'],       // 3: triangular scatters
+  ['\u2895', '\u286A', '\u2869', '\u2896', '\u2871', '\u288E'],       // 4: checkerboard fragments
+  ['\u2873', '\u289E', '\u28AD', '\u28CB', '\u287A', '\u28D5'],       // 5: dense scatters
+  ['\u28DB', '\u28ED', '\u28F6', '\u28F3', '\u287D', '\u28EE'],       // 6: near-full, 2 holes
+  ['\u28FE', '\u28FD', '\u28FB', '\u28F7', '\u28EF', '\u28DF'],       // 7: near-full, 1 hole
+  ['\u28FF'],                                                         // 8: full block
+] as const
+
 // ─── ASCII Fallback ──────────────────────────────────────────────────────────
 
 /** ASCII fallback characters ordered by visual density (heaviest to lightest). */
@@ -241,10 +261,10 @@ export class DissolveSystem {
         // Bounds check: skip cells outside the screen
         if (x < 0 || x >= this.config.screenWidth || y < 0 || y >= this.config.screenHeight) continue
 
-        // Get character
+        // Get character — dissolve braille uses scattered patterns for debris look
         const char = this.config.useAscii
           ? this.getAsciiChar(densityFrac)
-          : BRAILLE_DENSITY[clamp(densityIndex, 0, MAX_DENSITY)]
+          : this.getDissolveBraille(densityIndex, i)
 
         // Deduplicate: pack (x,y) into a single number key for fast Map lookup
         const key = y * this.config.screenWidth + x
@@ -256,6 +276,11 @@ export class DissolveSystem {
     }
 
     return Array.from(deduped.values())
+  }
+
+  private getDissolveBraille(densityIndex: number, cellIndex: number): string {
+    const level = DISSOLVE_BRAILLE[clamp(densityIndex, 0, MAX_DENSITY)]
+    return level[cellIndex % level.length]
   }
 
   private getAsciiChar(densityFrac: number): string {

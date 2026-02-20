@@ -3,6 +3,7 @@
 
 import type { Player, PlayerSlot } from '../../../shared/types'
 import { getSprites, getTerminalPlayerColor, getColors } from '../sprites'
+import { supportsBraille, getTerminalCapabilities } from '../terminal'
 
 interface PlayerListProps {
   players: Player[]
@@ -31,15 +32,18 @@ function PlayerRow({ player, isReady, isCurrentPlayer }: PlayerRowProps) {
   const playerColor = getTerminalPlayerColor(player.slot)
 
   // Use first line of ship sprite for compact display
-  const shipSprite = sprites.player[0]
+  const shipSprite = sprites.player.a[0]
 
   // Format name with (you) indicator
   const displayName = isCurrentPlayer
     ? `${player.name} (you)`
     : player.name
 
-  // Ready indicator: filled box when ready, empty when waiting
-  const readyIndicator = isReady ? '[■]' : '[ ]'
+  // Ready indicator: braille density when supported, filled box fallback
+  const braille = supportsBraille(getTerminalCapabilities())
+  const readyIndicator = braille
+    ? (isReady ? '[\u28FF]' : '[\u2800]')
+    : (isReady ? '[■]' : '[ ]')
   const readyText = isReady ? 'READY' : 'waiting'
 
   return (

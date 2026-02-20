@@ -266,9 +266,9 @@ describe('animation over time', () => {
     const cells1 = anim.getCells()
     for (let i = 0; i < 5; i++) anim.update()
     const cells2 = anim.getCells()
-    // Cells should differ (snakes moved)
+    // Cells should differ (snakes moved — density pattern changes)
     const serialize = (cells: typeof cells1) =>
-      cells.map(c => `${c.x},${c.y}`).sort().join(';')
+      cells.map(c => `${c.x},${c.y},${c.char}`).sort().join(';')
     expect(serialize(cells1)).not.toBe(serialize(cells2))
   })
 

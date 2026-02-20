@@ -246,6 +246,11 @@ export class WaveBorderAnimation {
       }
     }
 
+    // Ensure border outline is always faintly visible
+    for (let i = 0; i < borderDensity.length; i++) {
+      borderDensity[i] = Math.max(1, borderDensity[i])
+    }
+
     // Emit border cells
     for (let i = 0; i < this.perimeter.length; i++) {
       const density = Math.round(borderDensity[i])

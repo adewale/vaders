@@ -6,6 +6,8 @@ import { useState, useCallback } from 'react'
 import { Logo } from './Logo'
 import { normalizeKey } from '../input'
 import { COLORS } from '../sprites'
+import { GRADIENT_PRESETS, interpolateGradient } from '../gradient'
+import { supportsRichColor } from '../terminal'
 import { useTerminalSize } from '../hooks/useTerminalSize'
 import { AudioManager } from '../audio/AudioManager'
 import { MusicManager } from '../audio/MusicManager'
@@ -143,6 +145,7 @@ export function LaunchScreen({
   useKeyboard(handleKeyInput)
 
   const { terminalWidth, terminalHeight, gameWidth, gameHeight } = useTerminalSize()
+  const richColor = supportsRichColor()
 
   return (
     // Outer box fills terminal, inner box is centered game area
@@ -158,12 +161,14 @@ export function LaunchScreen({
           label="SOLO GAME"
           desc="Start immediately, 3 lives"
           selected={selectedIndex === 0}
+          richColor={richColor}
         />
         <MenuItemRow
           hotkey="2"
           label="CREATE ROOM"
           desc="Get room code to share with friends"
           selected={selectedIndex === 1}
+          richColor={richColor}
         />
         {joinMode ? (
           <box>
@@ -181,6 +186,7 @@ export function LaunchScreen({
             label="JOIN ROOM"
             desc="Enter a room code"
             selected={selectedIndex === 2}
+            richColor={richColor}
           />
         )}
         <MenuItemRow
@@ -188,6 +194,7 @@ export function LaunchScreen({
           label="MATCHMAKING"
           desc="Auto-join an open game"
           selected={selectedIndex === 3}
+          richColor={richColor}
         />
       </box>
 
@@ -220,19 +227,27 @@ function MenuItemRow({
   hotkey,
   label,
   desc,
-  selected
+  selected,
+  richColor,
 }: {
   hotkey: string
   label: string
   desc: string
   selected: boolean
+  richColor: boolean
 }) {
+  const labelColors = selected && richColor ? interpolateGradient(GRADIENT_PRESETS.vaders, label.length) : null
   return (
     <box>
       <text fg={selected ? COLORS.ui.selected : COLORS.ui.unselected}>{selected ? '▶ ' : '  '}</text>
       <text fg={COLORS.ui.hotkey}>[{hotkey}]</text>
       <box width={1} />
-      <text fg={selected ? COLORS.ui.selectedText : COLORS.ui.label} width={16}>{label}</text>
+      <text fg={selected ? COLORS.ui.selectedText : COLORS.ui.label} width={16}>
+        {labelColors
+          ? label.split('').map((ch, i) => <span key={i} fg={labelColors[i]}>{ch}</span>)
+          : label
+        }
+      </text>
       <text fg={COLORS.ui.unselected}>{desc}</text>
     </box>
   )

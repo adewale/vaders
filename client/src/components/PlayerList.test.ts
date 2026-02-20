@@ -378,13 +378,13 @@ describe('Full Player Row Data', () => {
 
     const sprites = getSprites()
     const playerColor = getTerminalPlayerColor(player.slot)
-    const shipSprite = sprites.player[0]
+    const shipSprite = sprites.player.a[0]
     const displayName = isCurrentPlayer ? `${player.name} (you)` : player.name
     const readyIndicator = isReady ? '[■]' : '[ ]'
     const readyText = isReady ? 'READY' : 'waiting'
 
     // Verify all components are correctly computed
-    expect(shipSprite).toBe(sprites.player[0])
+    expect(shipSprite).toBe(sprites.player.a[0])
     expect(playerColor).toBeDefined()
     expect(displayName).toBe('TestUser (you)')
     expect(readyIndicator).toBe('[■]')

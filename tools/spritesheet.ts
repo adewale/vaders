@@ -25,8 +25,8 @@ import {
 } from '../client/src/digitFont'
 
 import { GRADIENT_PRESETS, interpolateGradient } from '../client/src/gradient'
-import { BRAILLE_DENSITY, MAX_DENSITY } from '../client/src/animation/waveBorder'
-import { DISSOLVE_ASCII_CHARS } from '../client/src/animation/dissolve'
+import { BRAILLE_DENSITY, MAX_DENSITY, WaveBorderAnimation } from '../client/src/animation/waveBorder'
+import { DISSOLVE_ASCII_CHARS, DISSOLVE_BRAILLE } from '../client/src/animation/dissolve'
 import { CONFETTI_CHARS, CONFETTI_COLORS } from '../client/src/animation/confetti'
 import { WIPE_BLOCKS } from '../client/src/animation/wipe'
 import { HALF_BLOCKS } from '../client/src/animation/interpolation'
@@ -320,7 +320,113 @@ function renderBarriers(): void {
   label(`Each segment: ${HITBOX.BARRIER_SEGMENT_WIDTH}x${HITBOX.BARRIER_SEGMENT_HEIGHT} chars  Barrier Y: ${LAYOUT.BARRIER_Y}`)
 }
 
-// ─── Section 8: Wave Announce Digits ────────────────────────────────────────────
+// ─── Section 8: Wave Announce Screen ─────────────────────────────────────────
+
+function renderWaveAnnounce(): void {
+  section('WAVE ANNOUNCE SCREEN')
+
+  const boxWidth = 46
+  const boxHeight = 18
+  const waveNumber = 3
+
+  // Compose digit art
+  const { text: digitText, width: digitWidth, height: digitHeight } = composeDigits(waveNumber)
+  const digitLines = digitText.split('\n')
+
+  // Content placement
+  const contentTop = Math.floor((boxHeight - digitHeight - 2) / 2)
+  const labelTop = contentTop
+  const digitTop = contentTop + 2
+  const digitLeft = Math.floor((boxWidth - digitWidth) / 2)
+  const labelLeft = Math.floor((boxWidth - 4) / 2)
+
+  // Gradient for digits
+  const waveGradient = interpolateGradient(GRADIENT_PRESETS.vaders, digitWidth)
+
+  // Render two frames side by side
+  const frames = [1, 12]
+  const grids: { chars: string[][]; colors: string[][] }[] = []
+
+  for (const targetTick of frames) {
+    // Build animation
+    const anim = new WaveBorderAnimation({
+      boxWidth,
+      boxHeight,
+      waveNumber,
+      contentWidth: digitWidth,
+      contentHeight: digitHeight + 2,
+      innerPadding: Math.floor((boxWidth - digitWidth) / 2) - 1,
+    })
+
+    for (let t = 0; t < targetTick; t++) anim.update()
+    const cells = anim.getCells()
+
+    // Build 2D grid
+    const chars: string[][] = Array.from({ length: boxHeight }, () => Array(boxWidth).fill(' '))
+    const colors: string[][] = Array.from({ length: boxHeight }, () => Array(boxWidth).fill(''))
+
+    // Paint border cells
+    for (const cell of cells) {
+      if (cell.y >= 0 && cell.y < boxHeight && cell.x >= 0 && cell.x < boxWidth) {
+        chars[cell.y][cell.x] = cell.char
+        colors[cell.y][cell.x] = cell.color
+      }
+    }
+
+    // Paint "WAVE" label
+    const waveLabel = 'WAVE'
+    for (let i = 0; i < waveLabel.length; i++) {
+      if (labelTop >= 0 && labelTop < boxHeight && labelLeft + i >= 0 && labelLeft + i < boxWidth) {
+        chars[labelTop][labelLeft + i] = waveLabel[i]
+        colors[labelTop][labelLeft + i] = waveGradient[0] ?? '#ffff00'
+      }
+    }
+
+    // Paint digit art
+    for (let row = 0; row < digitLines.length; row++) {
+      const line = digitLines[row]
+      for (let col = 0; col < line.length; col++) {
+        const ch = line[col]
+        if (ch !== ' ') {
+          const y = digitTop + row
+          const x = digitLeft + col
+          if (y >= 0 && y < boxHeight && x >= 0 && x < boxWidth) {
+            chars[y][x] = ch
+            colors[y][x] = waveGradient[col % waveGradient.length]
+          }
+        }
+      }
+    }
+
+    grids.push({ chars, colors })
+  }
+
+  // Print frames side by side
+  label(`Wave ${waveNumber} announcement  (tick ${frames[0]} vs tick ${frames[1]})  ${boxWidth}x${boxHeight}`)
+  const gap = '    '
+  for (let row = 0; row < boxHeight; row++) {
+    let line = '  '
+    for (const grid of grids) {
+      for (let col = 0; col < boxWidth; col++) {
+        const ch = grid.chars[row][col]
+        const color = grid.colors[row][col]
+        if (ch === ' ' || !color) {
+          line += ' '
+        } else {
+          line += `${fg(color)}${ch}${RST}`
+        }
+      }
+      line += gap
+    }
+    console.log(line)
+  }
+
+  console.log()
+  label('Border: snake trails + heartbeat pulse + radial ripple (always-visible baseline)')
+  label(`Snakes: ${Math.min(Math.max(waveNumber, 1), 6)}  Box: ${boxWidth}x${boxHeight}`)
+}
+
+// ─── Section 9: Wave Announce Digits ────────────────────────────────────────────
 
 function renderDigits(): void {
   section('WAVE ANNOUNCE DIGITS')
@@ -384,7 +490,7 @@ function renderDigits(): void {
   label(`${composed.width}x${composed.height} chars  DIGIT_WIDTH=${DIGIT_WIDTH}  DIGIT_GAP=${DIGIT_GAP}`)
 }
 
-// ─── Section 9: Effect Characters & Animations ─────────────────────────────────
+// ─── Section 10: Effect Characters & Animations ────────────────────────────────
 
 function renderEffects(): void {
   section('EFFECT CHARACTERS & ANIMATIONS')
@@ -412,6 +518,19 @@ function renderEffects(): void {
     dissolveLine += `${fg('#ff8888')}${display}${RST}  `
   }
   console.log(dissolveLine)
+
+  console.log()
+
+  // Dissolve braille explosion chars
+  label('Dissolve braille chars (DISSOLVE_BRAILLE, scattered debris per density)')
+  for (let level = 1; level <= 7; level++) {
+    const chars = DISSOLVE_BRAILLE[level]
+    let line = `  ${DIM}${fg('#888888')}${level} dot${level > 1 ? 's' : ' '}:${RST} `
+    for (const ch of chars) {
+      line += `${fg('#ff8888')}${ch}${RST} `
+    }
+    console.log(line)
+  }
 
   console.log()
 
@@ -488,7 +607,7 @@ function renderEffects(): void {
   }
 }
 
-// ─── Section 10: Color Palette ──────────────────────────────────────────────────
+// ─── Section 11: Color Palette ──────────────────────────────────────────────────
 
 function renderColorPalette(): void {
   section('COLOR PALETTE')
@@ -547,6 +666,7 @@ renderPlayers()
 renderUFO()
 renderProjectiles()
 renderBarriers()
+renderWaveAnnounce()
 renderDigits()
 renderEffects()
 renderColorPalette()
