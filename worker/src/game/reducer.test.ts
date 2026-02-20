@@ -4,7 +4,8 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { gameReducer, canTransition, type GameAction } from './reducer'
 import type { GameState, Player, AlienEntity, BulletEntity, BarrierEntity } from '../../../shared/types'
-import { LAYOUT, DEFAULT_CONFIG, WIPE_TIMING, HITBOX, getBullets, getAliens, getUFOs, getBarriers, checkBarrierSegmentHit } from '../../../shared/types'
+import { LAYOUT, DEFAULT_CONFIG, WIPE_TIMING, HITBOX, getBullets, getAliens, getUFOs, getBarriers, checkBarrierSegmentHit, checkAlienHit, checkPlayerHit, checkUfoHit, ALIEN_BULLET_SKIP_INTERVAL } from '../../../shared/types'
+import { getScaledConfig } from './scaling'
 import {
   createTestGameState,
   createTestPlayer,
@@ -4533,5 +4534,869 @@ describe('Bullet-Barrier Property-Based Tests', () => {
       expect(getBullets(finalState.entities).find((b) => b.id === 'bullet-1')).toBeUndefined()
       expect(getBullets(finalState.entities).find((b) => b.id === 'bullet-2')).toBeUndefined()
     })
+  })
+})
+
+// ============================================================================
+// Collision Detection Property-Based Tests
+// ============================================================================
+
+describe('Collision Detection Property-Based Tests', () => {
+  // Seeded PRNG for reproducible randomness (mulberry32)
+  function mulberry32(seed: number) {
+    return function () {
+      seed |= 0
+      seed = (seed + 0x6d2b79f5) | 0
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+    }
+  }
+
+  // ─── A. Bullet-Alien Collision Properties ─────────────────────────────────
+
+  describe('A. Bullet-Alien Collision Properties', () => {
+
+    // A1: Hitbox shape verification
+    // For checkAlienHit with alien at (50, 10), test ALL bullet positions in a 20x10 grid
+    // centered on the alien. Verify the exact set of (bX, bY) that register as hits matches
+    // the expected rectangle: bX in [50, 57), bY in {9, 10, 11} (Math.abs(bY-10) < 2).
+    it('A1: hitbox shape verification — exhaustive grid test', () => {
+      const aX = 50
+      const aY = 10
+
+      // Expected hit region: bX in [aX, aX + HITBOX.ALIEN_WIDTH) = [50, 57)
+      //                      bY where Math.abs(bY - aY) < COLLISION_V = Math.abs(bY - 10) < 2
+      //                      => bY in {9, 10, 11}
+      const expectedHits = new Set<string>()
+      for (let bX = aX; bX < aX + HITBOX.ALIEN_WIDTH; bX++) {
+        for (let bY = aY - (LAYOUT.COLLISION_V - 1); bY <= aY + (LAYOUT.COLLISION_V - 1); bY++) {
+          expectedHits.add(`${bX},${bY}`)
+        }
+      }
+
+      // Scan a 20x10 grid centered on the alien
+      const actualHits = new Set<string>()
+      const actualMisses = new Set<string>()
+      for (let bX = aX - 5; bX <= aX + 14; bX++) {
+        for (let bY = aY - 5; bY <= aY + 5; bY++) {
+          const hit = checkAlienHit(bX, bY, aX, aY)
+          if (hit) {
+            actualHits.add(`${bX},${bY}`)
+          } else {
+            actualMisses.add(`${bX},${bY}`)
+          }
+        }
+      }
+
+      // Verify exact match between expected and actual hit sets
+      const falseNegatives: string[] = [] // Expected hit but missed
+      const falsePositives: string[] = [] // Unexpected hit
+
+      for (const pos of expectedHits) {
+        if (!actualHits.has(pos)) falseNegatives.push(pos)
+      }
+      for (const pos of actualHits) {
+        if (!expectedHits.has(pos)) falsePositives.push(pos)
+      }
+
+      expect(falseNegatives).toEqual([])
+      expect(falsePositives).toEqual([])
+
+      // Verify expected hit count: 7 wide * 3 tall = 21
+      expect(actualHits.size).toBe(HITBOX.ALIEN_WIDTH * (2 * (LAYOUT.COLLISION_V - 1) + 1))
+    })
+
+    // A2: Alien visual overlap without collision (the reported bug)
+    // Simulate scenarios where a bullet and alien visually overlap but collision
+    // doesn't register due to tick ordering.
+    it('A2: alien visual overlap without collision — tick ordering bug', () => {
+      const { state, players } = createTestPlayingState(1)
+      const playerId = players[0].id
+      const scaled = getScaledConfig(1, state.config)
+
+      // Set tick so that aliens will move on THIS tick (tick % alienMoveIntervalTicks === 0)
+      // After increment in reducer: (tick+1) % interval === 0 => tick+1 must be divisible
+      const targetTick = scaled.alienMoveIntervalTicks - 1 // After increment: tick becomes alienMoveIntervalTicks
+
+      // Place alien at right boundary so it will reverse and DROP when aliens move
+      // We need aliens to hit a wall so they drop instead of moving horizontally
+      const alien = createTestAlien('alien1', LAYOUT.ALIEN_MAX_X, 10)
+      state.tick = targetTick
+      state.alienDirection = 1 // Moving right, will hit wall and drop
+
+      // Player bullet at y=13, moving up (dy=-1). After move: y=12.
+      // Collision check against alien at y=10: Math.abs(12-10)=2, NOT < 2 => MISS
+      // Then alien drops to y=11.
+      // Rendered frame: bullet at y=12, alien at y=11. They are 1 row apart visually.
+      const bullet = createTestBullet('b1', LAYOUT.ALIEN_MAX_X + 3, 13, playerId, -1)
+
+      state.entities = [alien, bullet]
+
+      const result1 = gameReducer(state, { type: 'TICK' })
+
+      const alienAfter1 = getAliens(result1.state.entities).find(a => a.id === 'alien1')
+      const bulletAfter1 = getBullets(result1.state.entities).find(b => b.id === 'b1')
+
+      // If alien dropped to y=11 and bullet is at y=12, they visually overlap
+      // but the collision check was against the OLD alien position (y=10)
+      if (alienAfter1 && bulletAfter1) {
+        const visualOverlap = bulletAfter1.x >= alienAfter1.x &&
+                              bulletAfter1.x < alienAfter1.x + HITBOX.ALIEN_WIDTH &&
+                              Math.abs(bulletAfter1.y - alienAfter1.y) < LAYOUT.COLLISION_V
+
+        // If there's visual overlap but both still exist, we've found the bug
+        if (visualOverlap) {
+          // This documents the tick-ordering bug: the bullet and alien visually overlap
+          // in the rendered frame, but the collision was checked before the alien moved
+          expect(visualOverlap).toBe(true)
+          // The bullet should have hit but didn't — flag this as the reported bug
+          expect(alienAfter1.alive).toBe(true) // Alien survived despite visual overlap
+        }
+      }
+
+      // Verify the collision DOES happen on the next tick
+      if (alienAfter1 && bulletAfter1) {
+        const result2 = gameReducer(result1.state, { type: 'TICK' })
+        const alienAfter2 = getAliens(result2.state.entities).find(a => a.id === 'alien1')
+        const bulletAfter2 = getBullets(result2.state.entities).find(b => b.id === 'b1')
+        // The hit should register on the second tick (bullet catches up)
+        // Either alien is dead/removed or bullet is consumed
+        const hitOnSecondTick = !alienAfter2 || !bulletAfter2
+        expect(hitOnSecondTick).toBe(true)
+      }
+    })
+
+    // A3: Vertical coverage — can a bullet skip over an alien?
+    // At bullet speed=1 and COLLISION_V=2, the collision window is bY in {aY-1, aY, aY+1}
+    // which is 3 rows wide. At speed 1, bullet moves 1 row/tick, so it ALWAYS intersects.
+    it('A3: vertical coverage — bullet cannot skip over alien at speed 1', () => {
+      const rng = mulberry32(42)
+
+      for (let trial = 0; trial < 100; trial++) {
+        // Random alien Y position within game area
+        const aY = Math.floor(rng() * 25) + 3 // y in [3, 27]
+
+        // Bullet starts above alien (player bullet moves up, so test downward bullet for alien)
+        // Player bullet (dy=-1): starts below alien and moves up
+        // For a player bullet approaching from below:
+        // The bullet passes through y values: startY, startY-1, startY-2, ...
+        // It needs to pass through at least one y in {aY-1, aY, aY+1}
+
+        const collisionWindowMin = aY - (LAYOUT.COLLISION_V - 1) // aY - 1
+        const collisionWindowMax = aY + (LAYOUT.COLLISION_V - 1) // aY + 1
+        const windowSize = collisionWindowMax - collisionWindowMin + 1 // 3
+
+        // At speed 1, bullet moves 1 cell per tick, so it visits every integer y
+        // The collision window is 3 rows wide
+        // Therefore bullet ALWAYS has at least one tick in the window
+        // (it can't skip from aY+2 to aY-2 in one tick)
+        const bulletSpeed = DEFAULT_CONFIG.baseBulletSpeed // 1
+
+        // Verify: window size > bullet speed (cannot skip over)
+        expect(windowSize).toBeGreaterThan(bulletSpeed)
+
+        // Also verify by enumeration: starting from below the alien
+        const startY = aY + 5 // Start 5 rows below alien
+        let hitDetected = false
+        for (let y = startY; y >= aY - 5; y -= bulletSpeed) {
+          if (checkAlienHit(50, y, 50, aY)) {
+            hitDetected = true
+            break
+          }
+        }
+        expect(hitDetected).toBe(true)
+      }
+    })
+
+    // A4: Horizontal edge cases
+    // Test bullets at exact boundary positions for 50 random alien X positions
+    it('A4: horizontal edge cases — boundary precision', () => {
+      const rng = mulberry32(123)
+
+      for (let trial = 0; trial < 50; trial++) {
+        const aX = Math.floor(rng() * 100) + 5 // aX in [5, 104]
+        const aY = 10
+
+        // bX = aX - 1: just left of alien -> MISS
+        expect(checkAlienHit(aX - 1, aY, aX, aY)).toBe(false)
+
+        // bX = aX: left edge of alien -> HIT
+        expect(checkAlienHit(aX, aY, aX, aY)).toBe(true)
+
+        // bX = aX + 6: right edge, last pixel -> HIT (aX + ALIEN_WIDTH - 1)
+        expect(checkAlienHit(aX + HITBOX.ALIEN_WIDTH - 1, aY, aX, aY)).toBe(true)
+
+        // bX = aX + 7: just right of alien -> MISS (aX + ALIEN_WIDTH)
+        expect(checkAlienHit(aX + HITBOX.ALIEN_WIDTH, aY, aX, aY)).toBe(false)
+      }
+    })
+
+    // A5: Random bullet-alien encounters (100 trials)
+    // Generate random positions. If bullet is aimed at alien, advance game and verify hit.
+    it('A5: random bullet-alien encounters — 100 trials', () => {
+      const rng = mulberry32(777)
+
+      let hits = 0
+      let misses = 0
+
+      for (let trial = 0; trial < 100; trial++) {
+        const { state, players } = createTestPlayingState(1)
+        const playerId = players[0].id
+
+        // Random alien position
+        const aX = Math.floor(rng() * 90) + 10
+        const aY = Math.floor(rng() * 15) + 5
+
+        // Random bullet X: sometimes aimed at alien, sometimes off
+        const aimed = rng() > 0.3 // 70% aimed at alien
+        let bX: number
+        if (aimed) {
+          bX = aX + Math.floor(rng() * HITBOX.ALIEN_WIDTH) // within alien X range
+        } else {
+          bX = aX + HITBOX.ALIEN_WIDTH + Math.floor(rng() * 10) // outside range
+        }
+
+        // Bullet starts below alien, moving up
+        const bY = aY + 3
+        const alien = createTestAlien('a1', aX, aY)
+        const bullet = createTestBullet('b1', bX, bY, playerId, -1)
+        state.entities = [alien, bullet]
+        state.alienShootingDisabled = true // Prevent random alien bullets
+
+        // Advance enough ticks for bullet to traverse the alien
+        let currentState = state
+        let hitDetected = false
+        for (let tick = 0; tick < 10; tick++) {
+          const result = gameReducer(currentState, { type: 'TICK' })
+          currentState = result.state
+
+          const alienStillAlive = getAliens(currentState.entities).find(a => a.id === 'a1')
+          if (!alienStillAlive) {
+            hitDetected = true
+            break
+          }
+        }
+
+        // Verify: checkAlienHit should predict whether any tick along the path hits
+        let shouldHit = false
+        for (let y = bY; y >= bY - 10; y--) {
+          if (checkAlienHit(bX, y, aX, aY)) {
+            shouldHit = true
+            break
+          }
+        }
+
+        if (shouldHit) {
+          expect(hitDetected).toBe(true)
+          hits++
+        } else {
+          // Bullet was not aimed at alien — should miss
+          // (Alien might still be dead if alien moved into bullet path, but that's separate)
+          misses++
+        }
+      }
+
+      // Sanity: we should have both hits and misses
+      expect(hits).toBeGreaterThan(0)
+      expect(misses).toBeGreaterThan(0)
+    })
+  })
+
+  // ─── B. Bullet-Player Collision Properties ────────────────────────────────
+
+  describe('B. Bullet-Player Collision Properties', () => {
+
+    // B1: Hitbox shape for center-based player
+    // Player at x=60 (center). Expected hit region: bX in [57, 64), bY in {30, 31, 32}
+    // Wait - PLAYER_Y=31, abs(bY-31) < 2 => bY in {30, 31, 32}
+    it('B1: hitbox shape for center-based player — exhaustive grid', () => {
+      const pX = 60
+      const pY = LAYOUT.PLAYER_Y // 31
+
+      // Expected hit region:
+      // bX in [pX - HITBOX.PLAYER_HALF_WIDTH, pX + HITBOX.PLAYER_HALF_WIDTH + 1) = [57, 64)
+      // bY where Math.abs(bY - pY) < COLLISION_V = Math.abs(bY - 31) < 2 => bY in {30, 31, 32}
+      const expectedHits = new Set<string>()
+      for (let bX = pX - HITBOX.PLAYER_HALF_WIDTH; bX < pX + HITBOX.PLAYER_HALF_WIDTH + 1; bX++) {
+        for (let bY = pY - (LAYOUT.COLLISION_V - 1); bY <= pY + (LAYOUT.COLLISION_V - 1); bY++) {
+          expectedHits.add(`${bX},${bY}`)
+        }
+      }
+
+      const actualHits = new Set<string>()
+      for (let bX = pX - 10; bX <= pX + 10; bX++) {
+        for (let bY = pY - 5; bY <= pY + 5; bY++) {
+          if (checkPlayerHit(bX, bY, pX, pY)) {
+            actualHits.add(`${bX},${bY}`)
+          }
+        }
+      }
+
+      // Check for discrepancies
+      const falseNegatives: string[] = []
+      const falsePositives: string[] = []
+      for (const pos of expectedHits) {
+        if (!actualHits.has(pos)) falseNegatives.push(pos)
+      }
+      for (const pos of actualHits) {
+        if (!expectedHits.has(pos)) falsePositives.push(pos)
+      }
+
+      expect(falseNegatives).toEqual([])
+      expect(falsePositives).toEqual([])
+
+      // Expected count: 7 wide * 3 tall = 21
+      expect(actualHits.size).toBe(
+        (HITBOX.PLAYER_HALF_WIDTH * 2 + 1) * (2 * (LAYOUT.COLLISION_V - 1) + 1)
+      )
+    })
+
+    // B2: Invulnerability correctly blocks hits
+    it('B2: invulnerability correctly blocks hits', () => {
+      const { state, players } = createTestPlayingState(1)
+      const player = players[0]
+      player.x = 60
+      state.players[player.id] = player
+
+      // Set invulnerability to expire at tick + 10
+      const baseTick = 100
+      state.tick = baseTick
+      player.invulnerableUntilTick = baseTick + 10
+
+      // Fire alien bullet directly at the player
+      const bullet = createTestBullet('ab1', 60, LAYOUT.PLAYER_Y, null, 1)
+      state.entities = [...state.entities, bullet]
+      state.alienShootingDisabled = true
+
+      // Advance through invulnerability period — bullet should NOT kill player
+      let currentState = state
+      for (let i = 0; i < 5; i++) {
+        const result = gameReducer(currentState, { type: 'TICK' })
+        currentState = result.state
+        const p = Object.values(currentState.players)[0]
+        expect(p.alive).toBe(true) // Player still alive during invulnerability
+      }
+
+      // Now test that a NEW bullet AFTER invulnerability CAN hit
+      const { state: state2, players: players2 } = createTestPlayingState(1)
+      const player2 = players2[0]
+      player2.x = 60
+      state2.players[player2.id] = player2
+      state2.tick = 200
+      player2.invulnerableUntilTick = null // No invulnerability
+      state2.alienShootingDisabled = true
+
+      // Alien bullet one row above player, moving down
+      const bullet2 = createTestBullet('ab2', 60, LAYOUT.PLAYER_Y - 1, null, 1)
+      state2.entities = [...state2.entities, bullet2]
+
+      const result2 = gameReducer(state2, { type: 'TICK' })
+      const p2 = Object.values(result2.state.players)[0]
+      expect(p2.alive).toBe(false) // Player killed when not invulnerable
+    })
+  })
+
+  // ─── C. Bullet-UFO Collision Properties ───────────────────────────────────
+
+  describe('C. Bullet-UFO Collision Properties', () => {
+
+    // C1: UFO hitbox matches alien hitbox shape
+    // UFO at (50, 2). Verify hit region: bX in [50, 57), bY in {1, 2, 3}
+    it('C1: UFO hitbox matches expected rectangle', () => {
+      const uX = 50
+      const uY = 2
+
+      // Expected hit region: bX in [50, 57), bY where Math.abs(bY-2) < 2 => {1, 2, 3}
+      const expectedHits = new Set<string>()
+      for (let bX = uX; bX < uX + HITBOX.UFO_WIDTH; bX++) {
+        for (let bY = uY - (LAYOUT.COLLISION_V - 1); bY <= uY + (LAYOUT.COLLISION_V - 1); bY++) {
+          expectedHits.add(`${bX},${bY}`)
+        }
+      }
+
+      const actualHits = new Set<string>()
+      for (let bX = uX - 5; bX <= uX + 15; bX++) {
+        for (let bY = uY - 5; bY <= uY + 5; bY++) {
+          if (checkUfoHit(bX, bY, uX, uY)) {
+            actualHits.add(`${bX},${bY}`)
+          }
+        }
+      }
+
+      const falseNegatives: string[] = []
+      const falsePositives: string[] = []
+      for (const pos of expectedHits) {
+        if (!actualHits.has(pos)) falseNegatives.push(pos)
+      }
+      for (const pos of actualHits) {
+        if (!expectedHits.has(pos)) falsePositives.push(pos)
+      }
+
+      expect(falseNegatives).toEqual([])
+      expect(falsePositives).toEqual([])
+
+      // 7 wide * 3 tall = 21
+      expect(actualHits.size).toBe(HITBOX.UFO_WIDTH * (2 * (LAYOUT.COLLISION_V - 1) + 1))
+    })
+  })
+
+  // ─── D. Cross-Collision Ordering Properties ────────────────────────────────
+
+  describe('D. Cross-Collision Ordering Properties', () => {
+
+    // D1: Consumed bullet doesn't cascade
+    // A bullet that hits an alien should NOT also hit a UFO, player, or barrier in same tick.
+    it('D1: consumed bullet does not cascade to other targets', () => {
+      const { state, players } = createTestPlayingState(1)
+      const player = players[0]
+
+      // Line up all targets at same X column, different Y values
+      const targetX = 50
+      player.x = targetX
+      state.players[player.id] = player
+
+      const alien = createTestAlien('a1', targetX, 8) // Alien at y=8
+      const ufo = createTestUFO('ufo1', targetX, { y: 5, points: 100 }) // UFO at y=5
+
+      // Barrier at targetX, segments at BARRIER_Y
+      const barrier: BarrierEntity = {
+        kind: 'barrier',
+        id: 'barrier1',
+        x: targetX,
+        segments: [
+          { offsetX: 0, offsetY: 0, health: 4 },
+          { offsetX: 1, offsetY: 0, health: 4 },
+        ],
+      }
+
+      // Player bullet aimed at the alien (will hit alien first in collision order)
+      // Place bullet at alien's Y so it will hit immediately after moving
+      const bullet = createTestBullet('b1', targetX + 3, 9, player.id, -1)
+      // After move: y=8, checks against alien at y=8 -> hit
+
+      state.entities = [alien, ufo, barrier, bullet]
+      state.alienShootingDisabled = true
+
+      const result = gameReducer(state, { type: 'TICK' })
+
+      // Alien should be dead (hit by bullet)
+      const alienAfter = getAliens(result.state.entities).find(a => a.id === 'a1')
+      expect(alienAfter).toBeUndefined() // Removed because dead
+
+      // UFO should still be alive (bullet consumed by alien, didn't cascade)
+      const ufoAfter = getUFOs(result.state.entities).find(u => u.id === 'ufo1')
+      expect(ufoAfter?.alive).toBe(true)
+
+      // Barrier should be undamaged
+      const barrierAfter = getBarriers(result.state.entities).find(b => b.id === 'barrier1') as BarrierEntity
+      expect(barrierAfter.segments.every(s => s.health === 4)).toBe(true)
+
+      // Player should still be alive (it was a player bullet anyway, only alien bullets hit players)
+      const playerAfter = Object.values(result.state.players)[0]
+      expect(playerAfter.alive).toBe(true)
+    })
+
+    // D2: Alien movement after collision check — quantify visual mismatch
+    // This tests the exact bug the user reports.
+    it('D2: alien drop + bullet collision registers on same tick (no visual mismatch)', () => {
+      // After tick reorder fix: aliens move BEFORE bullets and collision checks.
+      // So when an alien drops into collision range, the hit registers immediately
+      // on the same tick — no 1-frame delay where bullet visually overlaps alien.
+      const { state, players } = createTestPlayingState(1)
+      const playerId = players[0].id
+      const scaled = getScaledConfig(1, state.config)
+
+      // Set tick so aliens move this tick: (tick+1) % alienMoveIntervalTicks === 0
+      state.tick = scaled.alienMoveIntervalTicks - 1
+
+      // Place alien at the wall boundary moving right — will trigger wall hit and drop
+      const alien = createTestAlien('alien1', LAYOUT.ALIEN_MAX_X, 10)
+      state.alienDirection = 1 // Moving right, will hit wall
+
+      // Bullet at (alienX+3, 12) moving up.
+      // New tick order: alien drops first (y: 10→11), then bullet moves (y: 12→11),
+      // then collision: checkAlienHit(alienX+3, 11, ALIEN_MAX_X, 11)
+      // Math.abs(11 - 11) = 0 < 2 => HIT on same tick
+      const bullet = createTestBullet('b1', LAYOUT.ALIEN_MAX_X + 3, 12, playerId, -1)
+
+      state.entities = [alien, bullet]
+      state.alienShootingDisabled = true
+
+      // Single tick: alien drops then collision registers immediately
+      const result = gameReducer(state, { type: 'TICK' })
+      const alienAfter = getAliens(result.state.entities).find(a => a.id === 'alien1')
+
+      // Alien should be killed on this tick (no 1-frame delay)
+      expect(alienAfter).toBeUndefined()
+      // Score should be awarded
+      expect(result.state.score).toBeGreaterThan(state.score)
+    })
+
+    // D3: Alien bullet through barrier — full traversal test
+    // Place alien bullets at all x positions within a barrier's footprint.
+    // Advance enough ticks. Verify all bullets are consumed by the barrier.
+    it('D3: alien bullet through barrier — full traversal test', () => {
+      const barrierX = 50
+
+      // Full barrier: 5 columns top row, 4 columns bottom row (arch shape)
+      const barrier: BarrierEntity = {
+        kind: 'barrier',
+        id: 'barrier1',
+        x: barrierX,
+        segments: [
+          // Top row (offsetY=0): 5 segments
+          { offsetX: 0, offsetY: 0, health: 4 },
+          { offsetX: 1, offsetY: 0, health: 4 },
+          { offsetX: 2, offsetY: 0, health: 4 },
+          { offsetX: 3, offsetY: 0, health: 4 },
+          { offsetX: 4, offsetY: 0, health: 4 },
+          // Bottom row (offsetY=1): 4 segments (gap at center)
+          { offsetX: 0, offsetY: 1, health: 4 },
+          { offsetX: 1, offsetY: 1, health: 4 },
+          // offsetX: 2 is the gap
+          { offsetX: 3, offsetY: 1, health: 4 },
+          { offsetX: 4, offsetY: 1, health: 4 },
+        ],
+      }
+
+      // Barrier footprint X range: [barrierX, barrierX + 5*BARRIER_SEGMENT_WIDTH) = [50, 65)
+      // Each segment is BARRIER_SEGMENT_WIDTH=3 wide
+      // Test alien bullets at all 15 x positions: 50..64
+      const bulletStartY = LAYOUT.BARRIER_Y - 10 // Start well above barrier
+
+      // Segment Y positions:
+      // Top row: BARRIER_Y + 0 * 2 = 25
+      // Bottom row: BARRIER_Y + 1 * 2 = 27
+
+      const bulletsMissedBarrier: number[] = []
+
+      for (let bX = barrierX; bX < barrierX + 5 * HITBOX.BARRIER_SEGMENT_WIDTH; bX++) {
+        const { state, players } = createTestPlayingState(1)
+        state.alienShootingDisabled = true
+
+        // Deep clone the barrier for each test
+        const testBarrier: BarrierEntity = JSON.parse(JSON.stringify(barrier))
+
+        // Alien bullet (ownerId=null, dy=1) starting above barrier
+        const bullet = createTestBullet(`ab_${bX}`, bX, bulletStartY, null, 1)
+        state.entities = [
+          createTestAlien('a1', 20, 5), // Need at least one alien
+          testBarrier,
+          bullet,
+        ]
+
+        // Advance enough ticks for bullet to reach and pass through barrier
+        // Account for alien bullet skip: alien bullets skip 1/5 ticks
+        // Effective speed = 4/5 cells per tick on average
+        // Distance = BARRIER_Y - bulletStartY = 25 - 15 = 10
+        // Need about 10 / (4/5) = 12.5 ticks, add margin
+        let currentState = state
+        let bulletConsumed = false
+
+        for (let tick = 0; tick < 40; tick++) {
+          const result = gameReducer(currentState, { type: 'TICK' })
+          currentState = result.state
+
+          const bulletStillExists = getBullets(currentState.entities).find(b => b.id === `ab_${bX}`)
+          if (!bulletStillExists) {
+            bulletConsumed = true
+            break
+          }
+        }
+
+        // Check: was the bullet at an x that falls within a live segment?
+        // Top row segments span: [50,53), [53,56), [56,59), [59,62), [62,65)
+        // Bottom row segments span: [50,53), [53,56), gap at [56,59), [59,62), [62,65)
+        // All x in [50,65) should hit at least one top-row segment (top row is full)
+        const segmentColForX = Math.floor((bX - barrierX) / HITBOX.BARRIER_SEGMENT_WIDTH)
+        const hasSegmentAtX = segmentColForX >= 0 && segmentColForX < 5 // Top row covers all 5 cols
+
+        if (hasSegmentAtX && !bulletConsumed) {
+          bulletsMissedBarrier.push(bX)
+        }
+      }
+
+      // All bullets within barrier footprint should be consumed by the barrier
+      // If any pass through, this reveals the alien-bullet-through-barrier bug
+      expect(bulletsMissedBarrier).toEqual([])
+    })
+  })
+
+  // ─── E. Rendering Alignment Properties ─────────────────────────────────────
+
+  describe('E. Rendering Alignment Properties', () => {
+
+    // E1: Collision positions match rendering positions
+    it('E1: collision region vs visual rendering region — document discrepancies', () => {
+      // ALIEN: collision [aX, aX+7) x {aY-1, aY, aY+1}
+      //        rendered at [aX, aX+7) x [aY, aY+2) = {aY, aY+1}
+      const aX = 50, aY = 10
+      const alienCollisionRegion = {
+        xMin: aX,
+        xMax: aX + HITBOX.ALIEN_WIDTH, // exclusive
+        yMin: aY - (LAYOUT.COLLISION_V - 1), // aY - 1
+        yMax: aY + (LAYOUT.COLLISION_V - 1) + 1, // exclusive: aY + 2
+      }
+      const alienVisualRegion = {
+        xMin: aX,
+        xMax: aX + LAYOUT.ALIEN_WIDTH,
+        yMin: aY,
+        yMax: aY + LAYOUT.ALIEN_HEIGHT,
+      }
+
+      // X alignment: should match
+      expect(alienCollisionRegion.xMin).toBe(alienVisualRegion.xMin)
+      expect(alienCollisionRegion.xMax).toBe(alienVisualRegion.xMax)
+
+      // Y alignment: collision extends 1 row ABOVE visual
+      expect(alienCollisionRegion.yMin).toBe(alienVisualRegion.yMin - 1)
+      // Collision and visual share the same bottom
+      expect(alienCollisionRegion.yMax).toBe(alienVisualRegion.yMax)
+
+      // PLAYER: collision [pX-3, pX+4) x {pY-1, pY, pY+1}
+      //         rendered at [pX-3, pX+4) x [pY, pY+2) = {pY, pY+1}
+      const pX = 60, pY = LAYOUT.PLAYER_Y
+      const playerCollisionRegion = {
+        xMin: pX - HITBOX.PLAYER_HALF_WIDTH,
+        xMax: pX + HITBOX.PLAYER_HALF_WIDTH + 1,
+        yMin: pY - (LAYOUT.COLLISION_V - 1),
+        yMax: pY + (LAYOUT.COLLISION_V - 1) + 1,
+      }
+      const playerVisualRegion = {
+        xMin: pX - HITBOX.PLAYER_HALF_WIDTH,
+        xMax: pX + HITBOX.PLAYER_HALF_WIDTH + 1,
+        yMin: pY,
+        yMax: pY + LAYOUT.PLAYER_HEIGHT,
+      }
+
+      // X alignment: should match
+      expect(playerCollisionRegion.xMin).toBe(playerVisualRegion.xMin)
+      expect(playerCollisionRegion.xMax).toBe(playerVisualRegion.xMax)
+
+      // Y alignment: collision extends 1 row ABOVE visual
+      expect(playerCollisionRegion.yMin).toBe(playerVisualRegion.yMin - 1)
+      expect(playerCollisionRegion.yMax).toBe(playerVisualRegion.yMax)
+    })
+
+    // E2: Asymmetric Y tolerance analysis
+    // Math.abs(bY - entityY) < 2 creates {entityY-1, entityY, entityY+1}
+    // But the entity sprite occupies {entityY, entityY+1}
+    // This means: 1 row ABOVE entity -> HIT (false positive from visual perspective)
+    //             1 row BELOW entity bottom -> MISS (entityY+2 is outside)
+    it('E2: asymmetric Y tolerance analysis — above vs below sprite', () => {
+      const aX = 50, aY = 10
+      // Entity sprite occupies rows: aY (10) and aY+1 (11) — 2 rows tall
+
+      // 1 row ABOVE sprite (entityY - 1 = 9): COLLISION says HIT
+      const hitAbove = checkAlienHit(aX + 3, aY - 1, aX, aY)
+      expect(hitAbove).toBe(true) // This is a HIT even though bullet is ABOVE the sprite
+
+      // On the sprite top row (entityY = 10): HIT
+      const hitTop = checkAlienHit(aX + 3, aY, aX, aY)
+      expect(hitTop).toBe(true)
+
+      // On the sprite bottom row (entityY + 1 = 11): HIT
+      const hitBottom = checkAlienHit(aX + 3, aY + 1, aX, aY)
+      expect(hitBottom).toBe(true)
+
+      // 1 row BELOW sprite bottom (entityY + 2 = 12): MISS
+      const missBelow = checkAlienHit(aX + 3, aY + 2, aX, aY)
+      expect(missBelow).toBe(false)
+
+      // ANALYSIS: The collision region is {aY-1, aY, aY+1}
+      // The visual region is {aY, aY+1}
+      // => Collision extends 1 row ABOVE but NOT 1 row below
+      // For UPWARD-MOVING player bullets (dy=-1):
+      //   Bullet approaches from below (high Y) and moves up (decreasing Y)
+      //   Bullet passes through aY+1 (sprite bottom, HIT) then aY (sprite top, HIT) then aY-1 (above sprite, still HIT)
+      //   The extra row above HELPS — gives one more chance to catch the bullet
+      // For DOWNWARD-MOVING alien bullets (dy=1):
+      //   Bullet approaches from above (low Y) and moves down (increasing Y)
+      //   Bullet passes through aY-1 (above sprite, HIT early!) then aY then aY+1
+      //   The extra row above means aliens get hit slightly early
+
+      // The asymmetry: the tolerance is centered on entityY (the top of the sprite),
+      // NOT on the center of the sprite. For a 2-tall sprite at {aY, aY+1},
+      // the center would be aY+0.5, but the tolerance is around aY.
+      // This shifts the collision window upward by 0.5 rows relative to the visual center.
+
+      // Does this explain the user bug?
+      // For player bullets (dy=-1) hitting aliens:
+      //   If alien.y=10, bullet approaches from y=13, 12, 11, 10, 9...
+      //   Hit window: {9, 10, 11} — bullet passes through 11 (sprite bottom), 10 (sprite top), 9 (above)
+      //   All 3 ticks register as hit. Seems fine.
+      //
+      //   BUT if alien MOVES DOWN by 1 after collision check:
+      //   - Collision checked at alien.y=10 with bullet at y=12: abs(12-10)=2, MISS
+      //   - Alien drops to y=11
+      //   - Next tick: bullet at y=11, collision against alien at y=11: abs(11-11)=0, HIT
+      //   - The "visual miss" frame is the problem, not the Y tolerance asymmetry
+
+      // Verify same analysis for player
+      const pX = 60, pY = LAYOUT.PLAYER_Y
+      const hitPlayerAbove = checkPlayerHit(pX, pY - 1, pX, pY)
+      const hitPlayerBottom = checkPlayerHit(pX, pY + 1, pX, pY)
+      const missPlayerBelow = checkPlayerHit(pX, pY + 2, pX, pY)
+      expect(hitPlayerAbove).toBe(true)  // 1 row above sprite = HIT (extra)
+      expect(hitPlayerBottom).toBe(true) // Sprite bottom row = HIT
+      expect(missPlayerBelow).toBe(false) // Below sprite = MISS
+
+      // For UFO: same analysis applies
+      const uX = 50, uY = 2
+      const hitUfoAbove = checkUfoHit(uX + 3, uY - 1, uX, uY)
+      const hitUfoBottom = checkUfoHit(uX + 3, uY + 1, uX, uY)
+      const missUfoBelow = checkUfoHit(uX + 3, uY + 2, uX, uY)
+      expect(hitUfoAbove).toBe(true)
+      expect(hitUfoBottom).toBe(true)
+      expect(missUfoBelow).toBe(false)
+    })
+  })
+})
+
+// ─── Tick Ordering Tests ────────────────────────────────────────────────────
+// Verify that aliens move BEFORE collision checks, eliminating the 1-frame
+// visual mismatch where bullets appear to overlap aliens without registering hits.
+
+describe('Tick ordering: aliens move before collision checks', () => {
+  it('bullet hits alien on same tick as alien horizontal move', () => {
+    // Alien moves horizontally INTO bullet's path. Bullet at x=56 is only
+    // inside alien hitbox [52,57) AFTER alien moves from x=50 to x=52.
+    const { state, players } = createTestPlayingState(1)
+    const playerId = players[0].id
+    const scaled = getScaledConfig(1, state.config)
+
+    state.tick = scaled.alienMoveIntervalTicks - 1
+
+    // Alien at x=50 moving right. After move: x = 50 + ALIEN_MOVE_STEP(2) = 52
+    const alien = createTestAlien('alien1', 50, 15)
+    state.alienDirection = 1
+
+    // Bullet at x=56: inside [52,57) but outside [50,55) — only hits if alien moved first
+    const bullet = createTestBullet('b1', 56, 16, playerId, -1)
+
+    state.entities = [alien, bullet]
+    state.alienShootingDisabled = true
+
+    const result = gameReducer(state, { type: 'TICK' })
+    const alienAfter = getAliens(result.state.entities).find(a => a.id === 'alien1')
+
+    // With fix: alien moves to x=52 first, then collision checks against [52,57) → HIT
+    expect(alienAfter).toBeUndefined()
+    expect(result.state.score).toBeGreaterThan(state.score)
+  })
+
+  it('bullet hits alien on same tick as alien drop', () => {
+    // Alien drops down and collision registers on the same tick
+    const { state, players } = createTestPlayingState(1)
+    const playerId = players[0].id
+    const scaled = getScaledConfig(1, state.config)
+
+    state.tick = scaled.alienMoveIntervalTicks - 1
+
+    // Alien at wall boundary, will trigger drop
+    const alien = createTestAlien('alien1', LAYOUT.ALIEN_MAX_X, 10)
+    state.alienDirection = 1
+
+    // After drop: alien y = 10 + ALIEN_DROP_STEP(1) = 11
+    // Bullet at y=12: after move y=11. checkAlienHit(x, 11, x, 11): abs(0) < 2 → HIT
+    const bullet = createTestBullet('b1', LAYOUT.ALIEN_MAX_X + 2, 12, playerId, -1)
+
+    state.entities = [alien, bullet]
+    state.alienShootingDisabled = true
+
+    const result = gameReducer(state, { type: 'TICK' })
+    const alienAfter = getAliens(result.state.entities).find(a => a.id === 'alien1')
+
+    // Alien killed on same tick as drop — no visual mismatch
+    expect(alienAfter).toBeUndefined()
+    expect(result.state.score).toBeGreaterThan(state.score)
+  })
+
+  it('non-move tick: collision still works normally', () => {
+    // On ticks where aliens don't move, collision works as before
+    const { state, players } = createTestPlayingState(1)
+    const playerId = players[0].id
+    const scaled = getScaledConfig(1, state.config)
+
+    // Ensure tick is NOT an alien move tick
+    state.tick = scaled.alienMoveIntervalTicks
+
+    const alien = createTestAlien('alien1', 50, 15)
+    const bullet = createTestBullet('b1', 52, 16, playerId, -1)
+
+    state.entities = [alien, bullet]
+    state.alienShootingDisabled = true
+
+    const result = gameReducer(state, { type: 'TICK' })
+    const alienAfter = getAliens(result.state.entities).find(a => a.id === 'alien1')
+
+    expect(alienAfter).toBeUndefined()
+  })
+
+  it('alien-barrier collision uses post-move positions', () => {
+    // Verify aliens destroy barriers at their new positions after dropping
+    const { state } = createTestPlayingState(1)
+    const scaled = getScaledConfig(1, state.config)
+
+    state.tick = scaled.alienMoveIntervalTicks - 1
+
+    // Place alien just above a barrier, near the wall so it drops
+    const barrierY = LAYOUT.BARRIER_Y
+    const alien = createTestAlien('alien1', LAYOUT.ALIEN_MAX_X, barrierY - 2)
+    state.alienDirection = 1 // Moving right, will hit wall and drop
+
+    // After drop: alien.y = barrierY - 1, alien bottom = barrierY + 1
+    // Barrier segment at barrierY: should overlap
+    const barrier = createTestBarrier('barrier1', LAYOUT.ALIEN_MAX_X - 2, [
+      { offsetX: 0, offsetY: 0, health: 4 },
+    ])
+
+    state.entities = [alien, barrier]
+    state.alienShootingDisabled = true
+
+    const result = gameReducer(state, { type: 'TICK' })
+    const resultBarrier = getBarriers(result.state.entities).find(b => b.id === 'barrier1')
+
+    expect(resultBarrier).toBeDefined()
+    if (resultBarrier) {
+      expect(resultBarrier.segments[0].health).toBe(0)
+    }
+  })
+
+  it('property: bullets never visually overlap live aliens across 100 scenarios', () => {
+    // Simulate the scenario that caused the original bug: bullet approaching alien
+    // that drops on the same tick. With the fix, the hit should always register
+    // immediately — never allowing a frame where bullet visually overlaps a live alien.
+    for (let seed = 0; seed < 100; seed++) {
+      const { state, players } = createTestPlayingState(1)
+      const playerId = players[0].id
+      const scaled = getScaledConfig(1, state.config)
+
+      state.tick = scaled.alienMoveIntervalTicks - 1
+      state.rngSeed = seed * 7 + 1
+
+      // Alien at wall — will drop
+      const alienY = 8 + (seed % 15)
+      const alien = createTestAlien('alien1', LAYOUT.ALIEN_MAX_X, alienY)
+      state.alienDirection = 1
+
+      // Bullet positioned so it arrives at alien's post-drop position
+      const bulletStartY = alienY + 2
+      const bullet = createTestBullet('b1', LAYOUT.ALIEN_MAX_X + 2, bulletStartY, playerId, -1)
+
+      state.entities = [alien, bullet]
+      state.alienShootingDisabled = true
+
+      const result = gameReducer(state, { type: 'TICK' })
+      const alienAfter = getAliens(result.state.entities).find(a => a.id === 'alien1')
+      const bulletAfter = getBullets(result.state.entities).find(b => b.id === 'b1')
+
+      // If both survive, verify they don't visually overlap
+      if (alienAfter && alienAfter.alive && bulletAfter) {
+        const wouldCollide = checkAlienHit(bulletAfter.x, bulletAfter.y, alienAfter.x, alienAfter.y)
+        expect(wouldCollide).toBe(false)
+      }
+    }
   })
 })

@@ -469,7 +469,79 @@ function tickReducer(state: GameState): ReducerResult {
     player.x = applyPlayerInput(player.x, player.inputState, next.config.playerMoveSpeed)
   }
 
-  // 2. Move bullets
+  // 2. Move aliens (before bullets/collisions so collision checks use rendered positions)
+  const aliens = getAliens(next.entities)
+  const barriers = getBarriers(next.entities)
+
+  if (next.tick % scaled.alienMoveIntervalTicks === 0) {
+    const liveAliens = aliens.filter(a => a.alive)
+
+    // Check if we need to change direction
+    let hitWall = false
+    for (const alien of liveAliens) {
+      const nextX = alien.x + next.alienDirection * ALIEN_MOVE_STEP
+      if (nextX <= LAYOUT.ALIEN_MIN_X || nextX >= LAYOUT.ALIEN_MAX_X) {
+        hitWall = true
+        break
+      }
+    }
+
+    if (hitWall) {
+      next.alienDirection = (next.alienDirection * -1) as 1 | -1
+      for (const alien of liveAliens) {
+        alien.y += ALIEN_DROP_STEP
+      }
+    } else {
+      for (const alien of liveAliens) {
+        alien.x += next.alienDirection * ALIEN_MOVE_STEP
+      }
+    }
+
+    // Alien-barrier collision: aliens destroy barrier segments on contact
+    // Uses HITBOX constants consistently for collision detection
+    for (const alien of liveAliens) {
+      let hitBarrier = false
+      for (const barrier of barriers) {
+        if (hitBarrier) break
+        for (const seg of barrier.segments) {
+          if (seg.health <= 0) continue
+
+          // Segment position (matching visual rendering with segment size multiplier)
+          const segX = barrier.x + seg.offsetX * HITBOX.BARRIER_SEGMENT_WIDTH
+          const segY = LAYOUT.BARRIER_Y + seg.offsetY * HITBOX.BARRIER_SEGMENT_HEIGHT
+
+          // Check if alien sprite overlaps segment (AABB overlap)
+          // Alien occupies [alien.x, alien.x + width) x [alien.y, alien.y + height)
+          // Segment occupies [segX, segX + width) x [segY, segY + height)
+          const alienRight = alien.x + HITBOX.ALIEN_WIDTH
+          const alienBottom = alien.y + HITBOX.ALIEN_HEIGHT
+          const segRight = segX + HITBOX.BARRIER_SEGMENT_WIDTH
+          const segBottom = segY + HITBOX.BARRIER_SEGMENT_HEIGHT
+
+          if (alien.x < segRight && alienRight > segX &&
+              alien.y < segBottom && alienBottom > segY) {
+            // Alien destroys the barrier segment completely
+            seg.health = 0
+            hitBarrier = true
+            break  // B4: aliens only damage one segment at a time
+          }
+        }
+      }
+    }
+
+    // Game over if aliens reach player level (invasion)
+    for (const alien of liveAliens) {
+      if (alien.y + HITBOX.ALIEN_HEIGHT >= LAYOUT.PLAYER_Y) {
+        // Invasion! Game over regardless of lives
+        next.status = 'game_over'
+        next.lives = 0
+        events.push({ type: 'event', name: 'invasion', data: undefined })
+        return { state: next, events, persist: true }
+      }
+    }
+  }
+
+  // 3. Move bullets
   const bullets = getBullets(next.entities)
   for (const bullet of bullets) {
     // Player bullets (dy=-1) move every tick
@@ -479,10 +551,7 @@ function tickReducer(state: GameState): ReducerResult {
     }
   }
 
-  // 3. Check collisions
-  const aliens = getAliens(next.entities)
-  const barriers = getBarriers(next.entities)
-
+  // 4. Check collisions (aliens already at their rendered positions)
   // Track consumed bullets to avoid double-counting across collision phases
   const consumedBullets = new Set<string>()
 
@@ -608,76 +677,8 @@ function tickReducer(state: GameState): ReducerResult {
     e.kind !== 'bullet' || (e.y > 0 && e.y < next.config.height)
   )
 
-  // 4. Move aliens
-  if (next.tick % scaled.alienMoveIntervalTicks === 0) {
-    const liveAliens = aliens.filter(a => a.alive)
-
-    // Check if we need to change direction
-    let hitWall = false
-    for (const alien of liveAliens) {
-      const nextX = alien.x + next.alienDirection * ALIEN_MOVE_STEP
-      if (nextX <= LAYOUT.ALIEN_MIN_X || nextX >= LAYOUT.ALIEN_MAX_X) {
-        hitWall = true
-        break
-      }
-    }
-
-    if (hitWall) {
-      next.alienDirection = (next.alienDirection * -1) as 1 | -1
-      for (const alien of liveAliens) {
-        alien.y += ALIEN_DROP_STEP
-      }
-    } else {
-      for (const alien of liveAliens) {
-        alien.x += next.alienDirection * ALIEN_MOVE_STEP
-      }
-    }
-
-    // Alien-barrier collision: aliens destroy barrier segments on contact
-    // Uses HITBOX constants consistently for collision detection
-    for (const alien of liveAliens) {
-      let hitBarrier = false
-      for (const barrier of barriers) {
-        if (hitBarrier) break
-        for (const seg of barrier.segments) {
-          if (seg.health <= 0) continue
-
-          // Segment position (matching visual rendering with segment size multiplier)
-          const segX = barrier.x + seg.offsetX * HITBOX.BARRIER_SEGMENT_WIDTH
-          const segY = LAYOUT.BARRIER_Y + seg.offsetY * HITBOX.BARRIER_SEGMENT_HEIGHT
-
-          // Check if alien sprite overlaps segment (AABB overlap)
-          // Alien occupies [alien.x, alien.x + width) x [alien.y, alien.y + height)
-          // Segment occupies [segX, segX + width) x [segY, segY + height)
-          const alienRight = alien.x + HITBOX.ALIEN_WIDTH
-          const alienBottom = alien.y + HITBOX.ALIEN_HEIGHT
-          const segRight = segX + HITBOX.BARRIER_SEGMENT_WIDTH
-          const segBottom = segY + HITBOX.BARRIER_SEGMENT_HEIGHT
-
-          if (alien.x < segRight && alienRight > segX &&
-              alien.y < segBottom && alienBottom > segY) {
-            // Alien destroys the barrier segment completely
-            seg.health = 0
-            hitBarrier = true
-            break  // B4: aliens only damage one segment at a time
-          }
-        }
-      }
-    }
-
-    // Game over if aliens reach player level (invasion)
-    for (const alien of liveAliens) {
-      if (alien.y + HITBOX.ALIEN_HEIGHT >= LAYOUT.PLAYER_Y) {
-        // Invasion! Game over regardless of lives
-        next.status = 'game_over'
-        next.lives = 0
-        events.push({ type: 'event', name: 'invasion', data: undefined })
-        return { state: next, events, persist: true }
-      }
-    }
-  }
-
   // 5. Alien shooting (seeded RNG) - skip if aliens are entering, disabled, or all players dead
+  // Note: uses `aliens` from step 2 (already moved this tick)
   const liveAliens = aliens.filter(a => a.alive)
   const aliensEntering = liveAliens.some(a => a.entering)
   const allPlayersDead = Object.values(next.players).every(p => !p.alive)
@@ -715,6 +716,7 @@ function tickReducer(state: GameState): ReducerResult {
   }
 
   // 6. UFO spawning and movement
+  // Note: UFO collision was already checked in step 4
   const ufos = getUFOs(next.entities)
   const activeUfo = ufos.find(u => u.alive)
 
@@ -753,6 +755,7 @@ function tickReducer(state: GameState): ReducerResult {
   next.entities = next.entities.filter(e => e.kind !== 'alien' || e.alive)
 
   // 7. Check end conditions
+  // Note: invasion game-over is checked in step 2 (alien movement)
   const allLiveAliens = getAliens(next.entities).filter(a => a.alive)
   const allAliensKilled = allLiveAliens.length === 0
 
