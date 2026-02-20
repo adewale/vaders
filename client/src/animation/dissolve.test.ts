@@ -6,6 +6,7 @@ import {
   DISSOLVE_ASCII_CHARS,
   DEFAULT_DISSOLVE_CONFIG,
   type DissolveConfig,
+  type DissolveCellOutput,
 } from './dissolve'
 import { BRAILLE_DENSITY, MAX_DENSITY } from './waveBorder'
 
@@ -286,9 +287,9 @@ describe('variant differences', () => {
   })
 
   test('shimmer cells stay closer to origin than dissolve cells', () => {
-    // Shimmer should have less drift
+    // Use same spawn dimensions for fair comparison (shimmer has less drift)
     const shimmerSystem = makeSystem({}, 42)
-    shimmerSystem.spawn(50, 20, 2, 2, '#ff0000', 'shimmer')
+    shimmerSystem.spawn(50, 20, 5, 2, '#ff0000', 'shimmer')
     for (let i = 0; i < 5; i++) shimmerSystem.update()
     const shimmerCells = shimmerSystem.getCells()
 
@@ -308,6 +309,53 @@ describe('variant differences', () => {
       const dissolveDist = avgDist(dissolveCells, 50, 20)
       expect(shimmerDist).toBeLessThanOrEqual(dissolveDist + 5) // Allow some tolerance
     }
+  })
+})
+
+// ─── getActiveCount (loop counter, not .filter()) ────────────────────────────
+
+describe('getActiveCount', () => {
+  test('returns 0 with no effects', () => {
+    const system = makeSystem()
+    expect(system.getActiveCount()).toBe(0)
+  })
+
+  test('increments correctly as effects are spawned', () => {
+    const system = makeSystem({ maxEffects: 5 })
+    system.spawn(0, 0, 5, 2, '#ff0000', 'dissolve')
+    expect(system.getActiveCount()).toBe(1)
+    system.spawn(10, 0, 5, 2, '#ff0000', 'dissolve')
+    expect(system.getActiveCount()).toBe(2)
+    system.spawn(20, 0, 5, 2, '#ff0000', 'shimmer')
+    expect(system.getActiveCount()).toBe(3)
+  })
+
+  test('decrements when effects expire', () => {
+    const system = makeSystem({ maxEffects: 5, dissolveLifetime: 2, shimmerLifetime: 1 })
+    system.spawn(0, 0, 5, 2, '#ff0000', 'shimmer')
+    system.spawn(10, 0, 5, 2, '#ff0000', 'dissolve')
+    expect(system.getActiveCount()).toBe(2)
+    system.update() // tick 1: shimmer expires
+    expect(system.getActiveCount()).toBe(1)
+    system.update() // tick 2: dissolve expires
+    expect(system.getActiveCount()).toBe(0)
+  })
+})
+
+// ─── EMPTY_CELLS frozen ──────────────────────────────────────────────────────
+
+describe('EMPTY_CELLS safety', () => {
+  test('getCells returns frozen array when idle', () => {
+    const system = makeSystem()
+    const cells = system.getCells()
+    expect(cells).toHaveLength(0)
+    expect(Object.isFrozen(cells)).toBe(true)
+  })
+
+  test('frozen empty array cannot be mutated', () => {
+    const system = makeSystem()
+    const cells = system.getCells()
+    expect(() => { (cells as DissolveCellOutput[]).push({ x: 0, y: 0, char: 'x', color: '#000' }) }).toThrow()
   })
 })
 

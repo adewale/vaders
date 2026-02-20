@@ -90,7 +90,9 @@ type RandomFn = () => number
 // ─── Shared Constants ────────────────────────────────────────────────────────
 
 /** Shared empty array returned when no effects are active, to avoid allocations. */
-const EMPTY_CELLS: DissolveCellOutput[] = []
+// Frozen at runtime to prevent accidental mutation (tested in dissolve.test.ts).
+// Cast preserves the mutable return type to avoid cascading readonly changes through callers.
+const EMPTY_CELLS = Object.freeze([] as DissolveCellOutput[]) as DissolveCellOutput[]
 
 // ─── DissolveSystem ──────────────────────────────────────────────────────────
 
@@ -256,7 +258,11 @@ export class DissolveSystem {
 
   /** Get count of active effects. */
   getActiveCount(): number {
-    return this.effects.filter(e => e.active).length
+    let count = 0
+    for (const effect of this.effects) {
+      if (effect.active) count++
+    }
+    return count
   }
 
   /** Get total pool size. */

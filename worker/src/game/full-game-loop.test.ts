@@ -62,7 +62,7 @@ describe('Full Game Loop: Solo Game', () => {
     expect(startResult.state.wipeTicksRemaining).toBe(WIPE_TIMING.HOLD_TICKS)
     expect(hasEvent(startResult.events, 'game_start')).toBe(true)
 
-    // Tick through wipe_hold (60 ticks)
+    // Tick through wipe_hold (HOLD_TICKS ticks)
     let current = startResult.state
     for (let i = 0; i < WIPE_TIMING.HOLD_TICKS; i++) {
       const r = gameReducer(current, { type: 'TICK' })

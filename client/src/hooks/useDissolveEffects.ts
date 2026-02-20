@@ -121,12 +121,20 @@ export function useDissolveEffects(
   }, [state.entities, prevState])
 
   // Handle UFO death via state diffing (no server event for UFO kills)
+  const prevUfosRef = useRef<string | null>(null)
+
   useEffect(() => {
     if (!prevState) return
     const system = systemRef.current!
 
     const prevUfos = getUFOs(prevState.entities)
     const currentUfos = getUFOs(state.entities)
+
+    // Quick serialization check to avoid re-processing on every render
+    // (state.entities is a new array reference each sync due to structuredClone)
+    const currentKey = currentUfos.map(u => `${u.id}:${u.alive ? 1 : 0}`).join(';')
+    if (currentKey === prevUfosRef.current) return
+    prevUfosRef.current = currentKey
 
     for (const prevUfo of prevUfos) {
       if (!prevUfo.alive) continue
@@ -145,8 +153,9 @@ export function useDissolveEffects(
     }
   }, [state.entities, prevState])
 
-  // Animation loop
-  // Track previous cells reference to avoid unnecessary re-renders (ISSUE 1)
+  // Animation loop — runs continuously but early-outs avoid React re-renders
+  // when idle. The setInterval cost (~70ms) is negligible; the savings come from
+  // avoiding setCells (which triggers React reconciliation) when nothing changed.
   const prevCellsRef = useRef<DissolveCellOutput[]>([])
 
   useEffect(() => {
@@ -154,13 +163,13 @@ export function useDissolveEffects(
     const id = setInterval(() => {
       system.update()
 
-      // ISSUE 2: Early-out when no active effects and cells already empty
+      // Early-out: skip setCells when no active effects and already rendered empty
       const prev = prevCellsRef.current
       if (system.getActiveCount() === 0 && prev.length === 0) return
 
       const newCells = system.getCells()
 
-      // ISSUE 1: Skip setCells when both old and new are empty arrays
+      // Skip setCells when both old and new are empty (transition to idle)
       if (newCells.length === 0 && prev.length === 0) return
 
       prevCellsRef.current = newCells

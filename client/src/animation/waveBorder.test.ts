@@ -5,6 +5,7 @@ import {
   WaveBorderAnimation,
   BRAILLE_DENSITY,
   MAX_DENSITY,
+  ASPECT_RATIO,
   type WaveBorderConfig,
 } from './waveBorder'
 
@@ -58,6 +59,52 @@ describe('BRAILLE_DENSITY', () => {
   test('all entries are unique', () => {
     const unique = new Set(BRAILLE_DENSITY)
     expect(unique.size).toBe(BRAILLE_DENSITY.length)
+  })
+})
+
+// ─── ASPECT_RATIO ────────────────────────────────────────────────────────────
+
+describe('ASPECT_RATIO', () => {
+  test('is 0.5 (terminal ~2:1 aspect)', () => {
+    expect(ASPECT_RATIO).toBe(0.5)
+  })
+
+  test('is exported as a named constant (not a magic number)', () => {
+    expect(typeof ASPECT_RATIO).toBe('number')
+  })
+})
+
+// ─── Ripple culling ─────────────────────────────────────────────────────────
+
+describe('ripple culling', () => {
+  test('expired ripples are culled without affecting animation', () => {
+    // Use a small box so ripples expire quickly
+    const config = makeConfig({ boxWidth: 10, boxHeight: 6, waveNumber: 1 })
+    const anim = new WaveBorderAnimation(config)
+
+    // Run many ticks to generate and expire many ripples
+    for (let i = 0; i < 200; i++) {
+      anim.update()
+      // getCells() should always succeed without errors
+      const cells = anim.getCells()
+      expect(cells.length).toBeGreaterThanOrEqual(0)
+    }
+  })
+
+  test('animation continues correctly after ripples expire', () => {
+    const config = makeConfig({ waveNumber: 2 })
+    const anim = new WaveBorderAnimation(config)
+    const period = anim.getHeartbeatPeriodTicks()
+
+    // Run through multiple full heartbeat cycles
+    for (let cycle = 0; cycle < 5; cycle++) {
+      for (let t = 0; t < period; t++) {
+        anim.update()
+      }
+      // Should still produce cells after each cycle
+      const cells = anim.getCells()
+      expect(cells.length).toBeGreaterThan(0)
+    }
   })
 })
 

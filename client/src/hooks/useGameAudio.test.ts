@@ -3,6 +3,11 @@
 //
 // These tests verify that music.start() would be called during the
 // actual game status transition sequence produced by the server.
+//
+// NOTE: We test the extracted pure logic (wouldMusicStart) rather than the
+// React hook directly, because useGameAudio depends on AudioManager and
+// MusicManager singletons that spawn OS processes. The pure-logic approach
+// isolates the critical condition (line 37) without process side effects.
 
 import { describe, test, expect } from 'bun:test'
 import type { GameStatus } from '../../../shared/types'

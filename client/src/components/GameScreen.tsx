@@ -237,9 +237,9 @@ export function GameScreen({ state, currentPlayerId, isMuted = false, isMusicMut
           ))}
 
           {/* Dissolve/shimmer effects */}
-          {dissolveCells.map((cell, i) => (
+          {dissolveCells.map((cell) => (
             <text
-              key={`dissolve-${i}`}
+              key={`d-${cell.x}-${cell.y}`}
               position="absolute"
               top={cell.y}
               left={cell.x}

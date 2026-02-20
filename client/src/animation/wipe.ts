@@ -9,6 +9,7 @@
 // - Multiple wipe patterns (iris, horizontal, vertical)
 
 import { easeInQuad, easeOutQuad, clamp } from './easing'
+import { ASPECT_RATIO } from './waveBorder'
 
 // ─── Block Characters for Edge Precision ─────────────────────────────────────
 
@@ -117,9 +118,8 @@ export function createIrisMask(
   maxRadius: number
 ): MaskFunction {
   return (x: number, y: number, progress: number): boolean => {
-    // Calculate distance from center, accounting for aspect ratio
-    // Terminal cells are typically ~2:1 aspect ratio (taller than wide)
-    const dx = (x - centerX) * 0.5 // Adjust for aspect ratio
+    // Calculate distance from center, accounting for terminal aspect ratio
+    const dx = (x - centerX) * ASPECT_RATIO
     const dy = y - centerY
     const distance = Math.sqrt(dx * dx + dy * dy)
 
@@ -140,7 +140,7 @@ export function createIrisOpenMask(
   maxRadius: number
 ): MaskFunction {
   return (x: number, y: number, progress: number): boolean => {
-    const dx = (x - centerX) * 0.5
+    const dx = (x - centerX) * ASPECT_RATIO
     const dy = y - centerY
     const distance = Math.sqrt(dx * dx + dy * dy)
 
@@ -251,7 +251,7 @@ export class WipeTransition {
     const cx = this.config.centerX ?? this.config.width / 2
     const cy = this.config.centerY ?? this.config.height / 2
     this.maxRadius = Math.sqrt(
-      Math.pow(Math.max(cx, this.config.width - cx) * 0.5, 2) +
+      Math.pow(Math.max(cx, this.config.width - cx) * ASPECT_RATIO, 2) +
       Math.pow(Math.max(cy, this.config.height - cy), 2)
     ) * 1.2 // Extra margin to ensure full coverage
 

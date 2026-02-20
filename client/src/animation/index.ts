@@ -137,6 +137,7 @@ export {
   // Constants
   BRAILLE_DENSITY,
   MAX_DENSITY,
+  ASPECT_RATIO,
   // Types
   type WaveBorderConfig,
   type BorderCell,

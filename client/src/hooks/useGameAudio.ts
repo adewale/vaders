@@ -36,7 +36,8 @@ export function useGameAudio(
         case 'playing':
           if (prevState.status !== 'playing') {
             // Start background music on any transition into playing
-            // (wipe_reveal → playing for both game start and wave transitions)
+            // (wipe_reveal → playing for both game start and wave transitions).
+            // music.start() is idempotent — calling it when already playing is a no-op.
             music.start()
             if (currentState.wave === 1) {
               audio.play('game_start')

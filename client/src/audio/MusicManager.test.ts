@@ -1,5 +1,9 @@
 // client/src/audio/MusicManager.test.ts
 // Unit tests for MusicManager - play/stop/toggle, mute state, looping behavior
+//
+// NOTE: Tests share the MusicManager singleton because it mirrors production
+// usage — there's only ever one instance. Each test saves and restores state
+// (e.g., wasMuted) to avoid cross-test pollution.
 
 import { describe, test, expect } from 'bun:test'
 

@@ -80,6 +80,9 @@ const RIPPLE_SPEED = 1.0       // cells per tick
 const RIPPLE_RING_WIDTH = 1.5  // how thick the ring appears
 const RIPPLE_FADE = 0.85       // intensity multiplier per tick
 
+/** Terminal cells are ~2:1 aspect ratio (taller than wide). */
+export const ASPECT_RATIO = 0.5
+
 const BORDER_COLOR = '#5555ff'
 const RIPPLE_COLOR = '#00ffff'
 
@@ -186,10 +189,15 @@ export class WaveBorderAnimation {
       ripple.intensity *= RIPPLE_FADE
     }
 
-    // Cull expired ripples
-    this.ripples = this.ripples.filter(
-      r => r.radius < this.maxRippleRadius && r.intensity > 0.05,
-    )
+    // Cull expired ripples (in-place swap to avoid allocation)
+    let writeIdx = 0
+    for (let i = 0; i < this.ripples.length; i++) {
+      const r = this.ripples[i]
+      if (r.radius < this.maxRippleRadius && r.intensity > 0.05) {
+        this.ripples[writeIdx++] = r
+      }
+    }
+    this.ripples.length = writeIdx
   }
 
   /** Get all cells to render for the current frame. */
@@ -227,7 +235,7 @@ export class WaveBorderAnimation {
     for (const ripple of this.ripples) {
       for (let i = 0; i < this.perimeter.length; i++) {
         const cell = this.perimeter[i]
-        const dx = (cell.x - this.centerX) * 0.5 // aspect ratio correction
+        const dx = (cell.x - this.centerX) * ASPECT_RATIO // aspect ratio correction
         const dy = cell.y - this.centerY
         const dist = Math.sqrt(dx * dx + dy * dy)
         const ringDist = Math.abs(dist - ripple.radius)
@@ -264,7 +272,7 @@ export class WaveBorderAnimation {
           ) {
             continue
           }
-          const dx = (x - this.centerX) * 0.5 // aspect ratio
+          const dx = (x - this.centerX) * ASPECT_RATIO // aspect ratio
           const dy = y - this.centerY
           const dist = Math.sqrt(dx * dx + dy * dy)
           const ringDist = Math.abs(dist - ripple.radius)

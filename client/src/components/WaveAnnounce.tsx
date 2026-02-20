@@ -65,6 +65,11 @@ export function WaveAnnounce({ waveNumber, terminalWidth, terminalHeight }: Wave
       contentHeight: digitHeight + 2, // include "WAVE" label
       innerPadding: padding,
     })
+
+    // Render first frame immediately to avoid a blank-border flash
+    anim.update()
+    setBorderCells(anim.getCells())
+
     const id = setInterval(() => {
       anim.update()
       setBorderCells(anim.getCells())
