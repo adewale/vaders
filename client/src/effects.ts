@@ -3,7 +3,6 @@
 //
 // For advanced visual effects, see the animation module:
 // - Confetti: import { ConfettiSystem } from './animation'
-// - Wave wipes: import { WipeTransition } from './animation'
 // - Entrance animations: import { EntranceAnimation } from './animation'
 // - Border system: import { renderBorder } from './animation'
 // - Interpolation: import { InterpolationManager } from './animation'

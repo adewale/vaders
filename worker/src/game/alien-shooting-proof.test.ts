@@ -35,7 +35,7 @@ describe('PROOF: Alien shooting works end-to-end', () => {
     const { state: s2 } = gameReducer(state, { type: 'START_SOLO' })
     state = s2
     expect(state.status).toBe('wipe_hold')
-    expect(state.wipeTicksRemaining).toBe(90)
+    expect(state.wipeTicksRemaining).toBe(60)
 
     // 4. Tick through wipe_hold until we transition to wipe_reveal
     let tickCount = 0

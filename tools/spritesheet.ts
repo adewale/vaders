@@ -28,7 +28,6 @@ import { GRADIENT_PRESETS, interpolateGradient } from '../client/src/gradient'
 import { BRAILLE_DENSITY, MAX_DENSITY, WaveBorderAnimation } from '../client/src/animation/waveBorder'
 import { DISSOLVE_ASCII_CHARS, DISSOLVE_BRAILLE } from '../client/src/animation/dissolve'
 import { CONFETTI_CHARS, CONFETTI_COLORS } from '../client/src/animation/confetti'
-import { WIPE_BLOCKS } from '../client/src/animation/wipe'
 import { HALF_BLOCKS } from '../client/src/animation/interpolation'
 
 // ─── ANSI Utilities ─────────────────────────────────────────────────────────────
@@ -559,23 +558,6 @@ function renderEffects(): void {
     confettiLine += `${fg(color)}${CONFETTI_CHARS[i]}${RST}  `
   }
   console.log(confettiLine)
-
-  console.log()
-
-  // Wipe blocks
-  label('Wipe blocks (WIPE_BLOCKS)')
-  const wipeEntries: [string, string][] = [
-    ['full', WIPE_BLOCKS.full],
-    ['top', WIPE_BLOCKS.top],
-    ['bottom', WIPE_BLOCKS.bottom],
-    ['left', WIPE_BLOCKS.left],
-    ['right', WIPE_BLOCKS.right],
-  ]
-  let wipeLine = '  '
-  for (const [name, ch] of wipeEntries) {
-    wipeLine += `${fg('#ffffff')}${ch}${RST} ${DIM}${fg('#888888')}${name}${RST}   `
-  }
-  console.log(wipeLine)
 
   console.log()
 

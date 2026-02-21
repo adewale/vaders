@@ -4,7 +4,6 @@
 // This module provides visual enhancements for the game including:
 // - Easing functions for smooth animations
 // - Confetti particle system for victory celebrations
-// - Wave transition wipes (iris effect)
 // - Alien entrance animations
 // - Box-drawing border system
 // - Smooth movement interpolation
@@ -13,28 +12,15 @@
 
 export {
   // Basic easing
-  linear,
-  easeInQuad,
   easeOutQuad,
-  easeInOutQuad,
-  easeInCubic,
-  easeOutCubic,
-  easeInOutCubic,
-  easeInSine,
-  easeOutSine,
   // Special easing
   easeOutBounce,
-  easeInBounce,
   easeOutElastic,
-  easeOutBack,
   // Utilities
   lerp,
   clamp,
-  inverseLerp,
-  remap,
   // Types
   type EasingFunction,
-  EASING_FUNCTIONS,
 } from './easing'
 
 // ─── Confetti Particle System ────────────────────────────────────────────────
@@ -56,33 +42,6 @@ export {
   type ConfettiConfig,
   type ConfettiParticleRenderProps,
 } from './confetti'
-
-// ─── Wave Transition Wipes ───────────────────────────────────────────────────
-
-export {
-  // Main class
-  WipeTransition,
-  // Block characters
-  WIPE_BLOCKS,
-  WIPE_BLOCKS_ASCII,
-  // Mask functions
-  createIrisMask,
-  createIrisOpenMask,
-  createHorizontalMask,
-  createVerticalMask,
-  createDiagonalMask,
-  createDissolveMask,
-  // Configuration
-  DEFAULT_WIPE_CONFIG,
-  // Factory functions
-  createWaveWipe,
-  // Types
-  type WipeState,
-  type WipePattern,
-  type MaskFunction,
-  type WipeConfig,
-  type WipeCell,
-} from './wipe'
 
 // ─── Alien Entrance Animations ───────────────────────────────────────────────
 

@@ -27,7 +27,6 @@ import {
 } from '../../../shared/types'
 import {
   ConfettiSystem,
-  WipeTransition,
   EntranceAnimation,
   InterpolationManager,
 } from '../animation'
@@ -108,17 +107,6 @@ function createWaveCompleteEvent(wave: number): ServerEvent {
     type: 'event',
     name: 'wave_complete',
     data: { wave },
-  }
-}
-
-/**
- * Create a mock game_start event.
- */
-function createGameStartEvent(): ServerEvent {
-  return {
-    type: 'event',
-    name: 'game_start',
-    data: undefined,
   }
 }
 
@@ -236,123 +224,6 @@ describe('Confetti triggers on wave complete', () => {
     confetti.start()
     expect(confetti.isRunning()).toBe(true)
     expect(confetti.getTick()).toBe(0) // Should reset
-  })
-})
-
-// ─── Wave Wipe Integration Tests ──────────────────────────────────────────────
-
-describe('Wave wipe triggers on wave transition', () => {
-  let wipe: WipeTransition
-
-  beforeEach(() => {
-    wipe = new WipeTransition({ width: STANDARD_WIDTH, height: STANDARD_HEIGHT })
-  })
-
-  test('wipe transition starts when wave changes', () => {
-    const prevState = createMockGameState({ wave: 1 })
-    const newState = createMockGameState({ wave: 2 })
-
-    // Detect wave change
-    const waveChanged = newState.wave > prevState.wave
-    expect(waveChanged).toBe(true)
-
-    // Start wipe in response to wave change
-    wipe.start(newState.wave)
-
-    expect(wipe.isActive()).toBe(true)
-    expect(wipe.getWaveNumber()).toBe(2)
-  })
-
-  test('wipe transitions through exiting, hold, and entering phases', () => {
-    const shortWipe = new WipeTransition({
-      width: STANDARD_WIDTH,
-      height: STANDARD_HEIGHT,
-      exitDuration: 3,
-      holdDuration: 3,
-      enterDuration: 3,
-    })
-
-    shortWipe.start(2)
-
-    // Exit phase
-    expect(shortWipe.getState()).toBe('exiting')
-    for (let i = 0; i < 3; i++) shortWipe.update()
-    expect(shortWipe.getState()).toBe('hold')
-
-    // Hold phase
-    expect(shortWipe.isInHold()).toBe(true)
-    for (let i = 0; i < 3; i++) shortWipe.update()
-    expect(shortWipe.getState()).toBe('entering')
-
-    // Enter phase
-    expect(shortWipe.isInHold()).toBe(false)
-    for (let i = 0; i < 3; i++) shortWipe.update()
-    expect(shortWipe.getState()).toBe('idle')
-  })
-
-  test('wipe completes and returns to idle', () => {
-    const shortWipe = new WipeTransition({
-      width: STANDARD_WIDTH,
-      height: STANDARD_HEIGHT,
-      exitDuration: 2,
-      holdDuration: 2,
-      enterDuration: 2,
-    })
-
-    shortWipe.start(1)
-
-    // Run full transition
-    for (let i = 0; i < 10; i++) {
-      shortWipe.update()
-    }
-
-    expect(shortWipe.isActive()).toBe(false)
-    expect(shortWipe.getState()).toBe('idle')
-  })
-
-  test('mask cells are generated during wipe', () => {
-    wipe.start(1)
-
-    // Run partway through exit phase
-    for (let i = 0; i < 15; i++) {
-      wipe.update()
-    }
-
-    const maskCells = wipe.getMaskCells()
-    // Should have some masked cells during transition
-    expect(maskCells.length).toBeGreaterThanOrEqual(0)
-  })
-
-  test('cell visibility changes during wipe phases', () => {
-    wipe.start(1)
-
-    // At start, center should be visible (iris pattern)
-    const centerX = Math.floor(STANDARD_WIDTH / 2)
-    const centerY = Math.floor(STANDARD_HEIGHT / 2)
-    expect(wipe.isCellVisible(centerX, centerY)).toBe(true)
-
-    // After many updates, during hold phase all should be masked
-    for (let i = 0; i < 35; i++) {
-      wipe.update()
-    }
-
-    // Check if we're in hold phase where all is masked
-    if (wipe.isInHold()) {
-      expect(wipe.isCellVisible(centerX, centerY)).toBe(false)
-    }
-  })
-
-  test('wipe can be cancelled mid-transition', () => {
-    wipe.start(1)
-    wipe.update()
-    wipe.update()
-
-    expect(wipe.isActive()).toBe(true)
-
-    wipe.cancel()
-
-    expect(wipe.isActive()).toBe(false)
-    expect(wipe.getState()).toBe('idle')
   })
 })
 
@@ -663,88 +534,6 @@ describe('Interpolation smooths entity movement', () => {
 // ─── Combined Integration Scenarios ───────────────────────────────────────────
 
 describe('Combined animation integration scenarios', () => {
-  test('wave complete triggers both confetti and wipe', () => {
-    const confetti = new ConfettiSystem({ width: STANDARD_WIDTH, height: STANDARD_HEIGHT })
-    const wipe = new WipeTransition({
-      width: STANDARD_WIDTH,
-      height: STANDARD_HEIGHT,
-      exitDuration: 5,
-      holdDuration: 5,
-      enterDuration: 5,
-    })
-
-    // Simulate wave complete event
-    const event = createWaveCompleteEvent(1)
-    expect(event.name).toBe('wave_complete')
-
-    // Both systems activate
-    confetti.start()
-    wipe.start(2) // Transition to wave 2
-
-    expect(confetti.isRunning()).toBe(true)
-    expect(wipe.isActive()).toBe(true)
-
-    // Both can run simultaneously
-    for (let i = 0; i < 10; i++) {
-      confetti.update()
-      wipe.update()
-    }
-
-    // Confetti should have progressed
-    expect(confetti.getTick()).toBe(10)
-    // Wipe tick resets on each phase transition (exit->hold->entering)
-    // After 10 updates with 5 tick durations:
-    // Updates 1-5: exiting (tick goes 1,2,3,4,5 -> transition to hold, tick=0)
-    // Updates 6-10: hold (tick goes 1,2,3,4,5 -> transition to entering, tick=0)
-    // So after exactly 10 updates, we just entered 'entering' phase at tick=0
-    expect(wipe.isActive()).toBe(true)
-    expect(wipe.getState()).toBe('entering')
-    expect(wipe.getTick()).toBe(0)
-  })
-
-  test('entrance animation follows wipe transition', () => {
-    const wipe = new WipeTransition({
-      width: STANDARD_WIDTH,
-      height: STANDARD_HEIGHT,
-      exitDuration: 3,
-      holdDuration: 3,
-      enterDuration: 3,
-    })
-    const entrance = new EntranceAnimation({
-      baseDuration: 5,
-      staggerDelay: 0,
-    })
-
-    // Start wipe
-    wipe.start(2)
-
-    // Run through entire wipe transition (9 updates to complete)
-    // Updates 1-3: exiting -> tick 3 transitions to hold
-    // Updates 4-6: hold -> tick 3 transitions to entering
-    // Updates 7-9: entering -> tick 3 transitions to idle
-    for (let i = 0; i < 9; i++) {
-      wipe.update()
-    }
-
-    // After 9 updates with 3-tick phases, wipe should be idle (complete)
-    expect(wipe.isActive()).toBe(false)
-    expect(wipe.getState()).toBe('idle')
-
-    // Now start entrance (would happen after wipe completes in real game)
-    const aliens = createAlienGrid(2, 2)
-    entrance.start(
-      aliens.map((a) => ({
-        id: a.id,
-        row: a.row,
-        col: a.col,
-        targetX: a.x,
-        targetY: a.y,
-      }))
-    )
-
-    expect(entrance.isRunning()).toBe(true)
-  })
-
   test('interpolation works during active gameplay', () => {
     const interpolator = new InterpolationManager()
     const entrance = new EntranceAnimation({
@@ -784,7 +573,6 @@ describe('Combined animation integration scenarios', () => {
 
   test('game state changes trigger appropriate animations', () => {
     const confetti = new ConfettiSystem({ width: STANDARD_WIDTH, height: STANDARD_HEIGHT })
-    const wipe = new WipeTransition({ width: STANDARD_WIDTH, height: STANDARD_HEIGHT })
     const entrance = new EntranceAnimation()
     const interpolator = new InterpolationManager()
 
@@ -811,16 +599,14 @@ describe('Combined animation integration scenarios', () => {
     }
     expect(entrance.isRunning()).toBe(true)
 
-    // 2. Wave complete - confetti + wipe
+    // 2. Wave complete - confetti
     const wave1State = createMockGameState({ wave: 1 })
     const wave2State = createMockGameState({ wave: 2 })
 
     if (wave2State.wave > wave1State.wave) {
       confetti.start()
-      wipe.start(wave2State.wave)
     }
     expect(confetti.isRunning()).toBe(true)
-    expect(wipe.isActive()).toBe(true)
 
     // 3. Continuous movement - interpolation
     interpolator.startTick(1)
@@ -840,19 +626,6 @@ describe('Animation integration edge cases', () => {
 
     expect(entrance.isRunning()).toBe(false)
     expect(entrance.isComplete()).toBe(true)
-  })
-
-  test('handles rapid state changes', () => {
-    const wipe = new WipeTransition({ width: STANDARD_WIDTH, height: STANDARD_HEIGHT })
-
-    // Rapid wave changes
-    wipe.start(1)
-    wipe.start(2)
-    wipe.start(3)
-
-    // Should only track latest
-    expect(wipe.getWaveNumber()).toBe(3)
-    expect(wipe.isActive()).toBe(true)
   })
 
   test('interpolation handles entity appearing mid-game', () => {
@@ -882,29 +655,6 @@ describe('Animation integration edge cases', () => {
     expect(confetti2.isRunning()).toBe(true)
   })
 
-  test('wipe pattern correctly masks during transition', () => {
-    const wipe = new WipeTransition({
-      width: 20,
-      height: 10,
-      pattern: 'iris',
-      exitDuration: 10,
-    })
-
-    wipe.start(1)
-
-    // Run halfway through exit
-    for (let i = 0; i < 5; i++) {
-      wipe.update()
-    }
-
-    // Center should still be visible (iris closes from outside)
-    const centerX = 10
-    const centerY = 5
-    expect(wipe.isCellVisible(centerX, centerY)).toBe(true)
-
-    // Corners might be masked
-    // (exact behavior depends on iris radius calculation)
-  })
 })
 
 // ─── GameScreen State Derivation Tests ───────────────────────────────────────
