@@ -94,6 +94,7 @@ function createMockGameState(overrides: Partial<GameState> = {}): GameState {
     wipeTicksRemaining: null,
     wipeWaveNumber: null,
     alienShootingDisabled: false,
+    maxLives: 3,
     config: DEFAULT_CONFIG,
     ...overrides,
   }
