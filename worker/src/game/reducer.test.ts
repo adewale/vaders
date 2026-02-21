@@ -1842,7 +1842,7 @@ describe('multiple players shooting simultaneously', () => {
 // ============================================================================
 
 describe('player respawn position', () => {
-  it('player respawns at center of screen (not death position)', () => {
+  it('player respawns at death position (not center)', () => {
     const { state, players } = createTestPlayingState(1)
     const player = players[0]
     player.x = 90 // Player moved far right before death
@@ -1854,12 +1854,12 @@ describe('player respawn position', () => {
 
     const result = gameReducer(state, { type: 'TICK' })
 
-    // Player respawns at center of screen
+    // Player respawns at death position
     expect(result.state.players[player.id].alive).toBe(true)
-    expect(result.state.players[player.id].x).toBe(Math.floor(DEFAULT_CONFIG.width / 2))
+    expect(result.state.players[player.id].x).toBe(90)
   })
 
-  it('player x resets to center through death-respawn cycle', () => {
+  it('player x stays at death position through death-respawn cycle', () => {
     const { state, players } = createTestPlayingState(1)
     const player = players[0]
     const deathPosition = 45
@@ -1881,7 +1881,7 @@ describe('player respawn position', () => {
 
     const respawnResult = gameReducer(respawnState, { type: 'TICK' })
     expect(respawnResult.state.players[player.id].alive).toBe(true)
-    expect(respawnResult.state.players[player.id].x).toBe(Math.floor(DEFAULT_CONFIG.width / 2)) // Reset to center
+    expect(respawnResult.state.players[player.id].x).toBe(deathPosition) // Stays at death position
   })
 })
 

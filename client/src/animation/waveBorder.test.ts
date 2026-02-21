@@ -6,6 +6,7 @@ import {
   BRAILLE_DENSITY,
   MAX_DENSITY,
   ASPECT_RATIO,
+  WAVE_COLORS,
   type WaveBorderConfig,
 } from './waveBorder'
 
@@ -288,8 +289,9 @@ describe('animation over time', () => {
     for (let i = 0; i < period * 2; i++) {
       anim.update()
       const cells = anim.getCells()
-      // Interior ripple cells use #00ffff
-      const rippleCells = cells.filter(c => c.color === '#00ffff')
+      // Interior ripple cells use wave-specific ripple color
+      const [, rippleColor] = WAVE_COLORS[0] // Wave 1
+      const rippleCells = cells.filter(c => c.color === rippleColor)
       if (rippleCells.some(c => c.y <= 2)) reachedTop = true
       if (rippleCells.some(c => c.y >= config.boxHeight - 3)) reachedBottom = true
       if (rippleCells.some(c => c.x <= 2)) reachedLeft = true

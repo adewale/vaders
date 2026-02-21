@@ -24,8 +24,8 @@ import {
   composeDigits,
 } from '../client/src/digitFont'
 
-import { GRADIENT_PRESETS, interpolateGradient } from '../client/src/gradient'
-import { BRAILLE_DENSITY, MAX_DENSITY, WaveBorderAnimation } from '../client/src/animation/waveBorder'
+import { GRADIENT_PRESETS, interpolateGradient, getWaveGradient } from '../client/src/gradient'
+import { BRAILLE_DENSITY, MAX_DENSITY, WaveBorderAnimation, WAVE_COLORS } from '../client/src/animation/waveBorder'
 import { DISSOLVE_ASCII_CHARS, DISSOLVE_BRAILLE } from '../client/src/animation/dissolve'
 import { CONFETTI_CHARS, CONFETTI_COLORS } from '../client/src/animation/confetti'
 import { HALF_BLOCKS } from '../client/src/animation/interpolation'
@@ -324,47 +324,146 @@ function renderBarriers(): void {
 function renderWaveAnnounce(): void {
   section('WAVE ANNOUNCE SCREEN')
 
-  const boxWidth = 46
-  const boxHeight = 18
-  const waveNumber = 3
+  // ── Part 1: 4×2 compact grid showing all 8 wave colors ──
+  label('Wave 1-8 color progression (4×2 grid, tick 8)')
+  console.log()
 
-  // Compose digit art
-  const { text: digitText, width: digitWidth, height: digitHeight } = composeDigits(waveNumber)
-  const digitLines = digitText.split('\n')
+  const miniWidth = 22
+  const miniHeight = 12
+  const miniGap = 2
+  const wavesPerRow = 4
+  const totalRows = 2
+  const targetTick = 8
 
-  // Content placement
-  const contentTop = Math.floor((boxHeight - digitHeight - 2) / 2)
-  const labelTop = contentTop
-  const digitTop = contentTop + 2
-  const digitLeft = Math.floor((boxWidth - digitWidth) / 2)
-  const labelLeft = Math.floor((boxWidth - 4) / 2)
+  // Build all 8 mini grids
+  const miniGrids: { chars: string[][]; colors: string[][] }[] = []
+  for (let w = 1; w <= 8; w++) {
+    const { text: digitText, width: digitWidth, height: digitHeight } = composeDigits(w)
+    const digitLines = digitText.split('\n')
 
-  // Gradient for digits
-  const waveGradient = interpolateGradient(GRADIENT_PRESETS.vaders, digitWidth)
-
-  // Render two frames side by side
-  const frames = [1, 12]
-  const grids: { chars: string[][]; colors: string[][] }[] = []
-
-  for (const targetTick of frames) {
-    // Build animation
     const anim = new WaveBorderAnimation({
-      boxWidth,
-      boxHeight,
-      waveNumber,
-      contentWidth: digitWidth,
-      contentHeight: digitHeight + 2,
-      innerPadding: Math.floor((boxWidth - digitWidth) / 2) - 1,
+      boxWidth: miniWidth,
+      boxHeight: miniHeight,
+      waveNumber: w,
+      contentWidth: Math.min(digitWidth, miniWidth - 4),
+      contentHeight: Math.min(digitHeight + 2, miniHeight - 4),
+      innerPadding: Math.max(1, Math.floor((miniWidth - Math.min(digitWidth, miniWidth - 4)) / 2) - 1),
     })
 
     for (let t = 0; t < targetTick; t++) anim.update()
     const cells = anim.getCells()
 
-    // Build 2D grid
+    const chars: string[][] = Array.from({ length: miniHeight }, () => Array(miniWidth).fill(' '))
+    const colors: string[][] = Array.from({ length: miniHeight }, () => Array(miniWidth).fill(''))
+
+    // Paint border/ripple cells
+    for (const cell of cells) {
+      if (cell.y >= 0 && cell.y < miniHeight && cell.x >= 0 && cell.x < miniWidth) {
+        chars[cell.y][cell.x] = cell.char
+        colors[cell.y][cell.x] = cell.color
+      }
+    }
+
+    // Gradient for this wave's digits
+    const waveGradient = interpolateGradient(getWaveGradient(w), digitWidth)
+
+    // Paint "WAVE" label centered
+    const waveLabel = 'WAVE'
+    const contentTop = Math.floor((miniHeight - (digitHeight + 2)) / 2)
+    const labelTop = contentTop
+    const labelLeft = Math.floor((miniWidth - waveLabel.length) / 2)
+
+    for (let i = 0; i < waveLabel.length; i++) {
+      const x = labelLeft + i
+      if (labelTop >= 0 && labelTop < miniHeight && x >= 0 && x < miniWidth) {
+        chars[labelTop][x] = waveLabel[i]
+        colors[labelTop][x] = waveGradient[0] ?? '#ffff00'
+      }
+    }
+
+    // Paint digit centered with gradient
+    const digitTop = contentTop + 2
+    const digitLeft = Math.floor((miniWidth - digitWidth) / 2)
+    for (let row = 0; row < digitLines.length; row++) {
+      const line = digitLines[row]
+      for (let col = 0; col < line.length; col++) {
+        const ch = line[col]
+        if (ch !== ' ') {
+          const y = digitTop + row
+          const x = digitLeft + col
+          if (y >= 0 && y < miniHeight && x >= 0 && x < miniWidth) {
+            chars[y][x] = ch
+            colors[y][x] = waveGradient[col % waveGradient.length]
+          }
+        }
+      }
+    }
+
+    miniGrids.push({ chars, colors })
+  }
+
+  // Print the 4×2 grid
+  for (let gridRow = 0; gridRow < totalRows; gridRow++) {
+    for (let row = 0; row < miniHeight; row++) {
+      let line = '  '
+      for (let gridCol = 0; gridCol < wavesPerRow; gridCol++) {
+        const gridIdx = gridRow * wavesPerRow + gridCol
+        if (gridIdx >= miniGrids.length) break
+        const grid = miniGrids[gridIdx]
+        for (let col = 0; col < miniWidth; col++) {
+          const ch = grid.chars[row][col]
+          const color = grid.colors[row][col]
+          if (ch === ' ' || !color) {
+            line += ' '
+          } else {
+            line += `${fg(color)}${ch}${RST}`
+          }
+        }
+        if (gridCol < wavesPerRow - 1) line += ' '.repeat(miniGap)
+      }
+      console.log(line)
+    }
+    if (gridRow < totalRows - 1) console.log() // Gap between rows
+  }
+
+  console.log()
+
+  // ── Part 2: Detailed view of Wave 5 with two animation frames ──
+  const boxWidth = 46
+  const boxHeight = 18
+  const detailWave = 5
+
+  const { text: detailDigitText, width: detailDigitWidth, height: detailDigitHeight } = composeDigits(detailWave)
+  const detailDigitLines = detailDigitText.split('\n')
+
+  const contentTop = Math.floor((boxHeight - detailDigitHeight - 2) / 2)
+  const labelTop = contentTop
+  const digitTop = contentTop + 2
+  const digitLeft = Math.floor((boxWidth - detailDigitWidth) / 2)
+  const labelLeft = Math.floor((boxWidth - 4) / 2)
+
+  const [detailBorderColor] = WAVE_COLORS[(detailWave - 1) % WAVE_COLORS.length]
+  const detailGradient = interpolateGradient(GRADIENT_PRESETS.vaders, detailDigitWidth)
+
+  const frames = [1, 12]
+  const grids: { chars: string[][]; colors: string[][] }[] = []
+
+  for (const targetTickVal of frames) {
+    const anim = new WaveBorderAnimation({
+      boxWidth,
+      boxHeight,
+      waveNumber: detailWave,
+      contentWidth: detailDigitWidth,
+      contentHeight: detailDigitHeight + 2,
+      innerPadding: Math.floor((boxWidth - detailDigitWidth) / 2) - 1,
+    })
+
+    for (let t = 0; t < targetTickVal; t++) anim.update()
+    const cells = anim.getCells()
+
     const chars: string[][] = Array.from({ length: boxHeight }, () => Array(boxWidth).fill(' '))
     const colors: string[][] = Array.from({ length: boxHeight }, () => Array(boxWidth).fill(''))
 
-    // Paint border cells
     for (const cell of cells) {
       if (cell.y >= 0 && cell.y < boxHeight && cell.x >= 0 && cell.x < boxWidth) {
         chars[cell.y][cell.x] = cell.char
@@ -377,13 +476,13 @@ function renderWaveAnnounce(): void {
     for (let i = 0; i < waveLabel.length; i++) {
       if (labelTop >= 0 && labelTop < boxHeight && labelLeft + i >= 0 && labelLeft + i < boxWidth) {
         chars[labelTop][labelLeft + i] = waveLabel[i]
-        colors[labelTop][labelLeft + i] = waveGradient[0] ?? '#ffff00'
+        colors[labelTop][labelLeft + i] = detailGradient[0] ?? detailBorderColor
       }
     }
 
-    // Paint digit art
-    for (let row = 0; row < digitLines.length; row++) {
-      const line = digitLines[row]
+    // Paint digit art with gradient
+    for (let row = 0; row < detailDigitLines.length; row++) {
+      const line = detailDigitLines[row]
       for (let col = 0; col < line.length; col++) {
         const ch = line[col]
         if (ch !== ' ') {
@@ -391,7 +490,7 @@ function renderWaveAnnounce(): void {
           const x = digitLeft + col
           if (y >= 0 && y < boxHeight && x >= 0 && x < boxWidth) {
             chars[y][x] = ch
-            colors[y][x] = waveGradient[col % waveGradient.length]
+            colors[y][x] = detailGradient[col % detailGradient.length]
           }
         }
       }
@@ -400,8 +499,7 @@ function renderWaveAnnounce(): void {
     grids.push({ chars, colors })
   }
 
-  // Print frames side by side
-  label(`Wave ${waveNumber} announcement  (tick ${frames[0]} vs tick ${frames[1]})  ${boxWidth}x${boxHeight}`)
+  label(`Wave ${detailWave} detail  (tick ${frames[0]} vs tick ${frames[1]})  ${boxWidth}x${boxHeight}`)
   const gap = '    '
   for (let row = 0; row < boxHeight; row++) {
     let line = '  '
@@ -422,7 +520,7 @@ function renderWaveAnnounce(): void {
 
   console.log()
   label('Border: snake trails + heartbeat pulse + radial ripple (always-visible baseline)')
-  label(`Snakes: ${Math.min(Math.max(waveNumber, 1), 6)}  Box: ${boxWidth}x${boxHeight}`)
+  label(`Colors cycle through ${WAVE_COLORS.length} rainbow hues per wave`)
 }
 
 // ─── Section 9: Wave Announce Digits ────────────────────────────────────────────

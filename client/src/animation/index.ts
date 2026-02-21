@@ -97,6 +97,7 @@ export {
   BRAILLE_DENSITY,
   MAX_DENSITY,
   ASPECT_RATIO,
+  WAVE_COLORS,
   // Types
   type WaveBorderConfig,
   type BorderCell,

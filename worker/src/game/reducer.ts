@@ -451,11 +451,10 @@ function tickReducer(state: GameState): ReducerResult {
   // 1. Apply player movement from held input
   for (const player of Object.values(next.players)) {
     if (!player.alive) {
-      // Check respawn - player respawns at center of screen
+      // Check respawn - player respawns at death position
       if (player.respawnAtTick !== null && next.tick >= player.respawnAtTick) {
         player.alive = true
         player.respawnAtTick = null
-        player.x = Math.floor(next.config.width / 2)  // Reset to center of screen
         player.invulnerableUntilTick = next.tick + next.config.invulnerabilityTicks
         // Clear input state on respawn - player must press keys again to move
         player.inputState = { left: false, right: false }

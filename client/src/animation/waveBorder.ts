@@ -83,8 +83,17 @@ const RIPPLE_MIN_INTENSITY = 0.15 // minimum intensity when ripple reaches borde
 /** Terminal cells are ~2:1 aspect ratio (taller than wide). */
 export const ASPECT_RATIO = 0.5
 
-const BORDER_COLOR = '#5555ff'
-const RIPPLE_COLOR = '#00ffff'
+/** Per-wave rainbow color palette. Each entry is [borderColor, rippleColor]. */
+export const WAVE_COLORS: readonly [string, string][] = [
+  ['#ff0000', '#ff6666'], // Wave 1: Red
+  ['#ff8800', '#ffbb44'], // Wave 2: Orange
+  ['#ffff00', '#ffff88'], // Wave 3: Yellow
+  ['#00ff00', '#66ff66'], // Wave 4: Green
+  ['#00ffff', '#88ffff'], // Wave 5: Cyan
+  ['#5555ff', '#8888ff'], // Wave 6: Blue
+  ['#8800ff', '#bb66ff'], // Wave 7: Indigo
+  ['#ff00ff', '#ff88ff'], // Wave 8: Magenta
+]
 
 // ─── WaveBorderAnimation ────────────────────────────────────────────────────
 
@@ -111,6 +120,10 @@ export class WaveBorderAnimation {
   private maxRippleRadius: number
   private rippleFade: number
 
+  // Per-wave colors
+  private borderColor: string
+  private rippleColor: string
+
   // Content bounding box (to avoid rendering ripples over digits)
   private contentLeft: number
   private contentTop: number
@@ -119,6 +132,13 @@ export class WaveBorderAnimation {
 
   constructor(config: WaveBorderConfig) {
     this.config = config
+
+    // Select wave colors from rainbow palette
+    const colorIndex = ((config.waveNumber - 1) % WAVE_COLORS.length + WAVE_COLORS.length) % WAVE_COLORS.length
+    const [waveBorder, waveRipple] = WAVE_COLORS[colorIndex]
+    this.borderColor = waveBorder
+    this.rippleColor = waveRipple
+
     this.buildPerimeter()
 
     // Snakes
@@ -269,7 +289,7 @@ export class WaveBorderAnimation {
         x,
         y,
         char: BRAILLE_DENSITY[clamp(density, 0, MAX_DENSITY)],
-        color: BORDER_COLOR,
+        color: this.borderColor,
       })
     }
 
@@ -299,7 +319,7 @@ export class WaveBorderAnimation {
                 x,
                 y,
                 char: BRAILLE_DENSITY[clamp(density, 0, MAX_DENSITY)],
-                color: RIPPLE_COLOR,
+                color: this.rippleColor,
               })
             }
           }
