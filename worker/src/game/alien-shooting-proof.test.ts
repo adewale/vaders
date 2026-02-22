@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'vitest'
 import { gameReducer } from './reducer'
 import { createDefaultGameState } from '../../../shared/state-defaults'
-import { DEFAULT_CONFIG, getAliens, getBullets, createAlienFormation } from '../../../shared/types'
+import { DEFAULT_CONFIG, WIPE_TIMING, getAliens, getBullets, createAlienFormation } from '../../../shared/types'
 import { getScaledConfig } from './scaling'
 
 describe('PROOF: Alien shooting works end-to-end', () => {
@@ -35,7 +35,7 @@ describe('PROOF: Alien shooting works end-to-end', () => {
     const { state: s2 } = gameReducer(state, { type: 'START_SOLO' })
     state = s2
     expect(state.status).toBe('wipe_hold')
-    expect(state.wipeTicksRemaining).toBe(60)
+    expect(state.wipeTicksRemaining).toBe(WIPE_TIMING.HOLD_TICKS)
 
     // 4. Tick through wipe_hold until we transition to wipe_reveal
     let tickCount = 0

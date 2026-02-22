@@ -1227,7 +1227,7 @@ describe('Protocol Completeness', () => {
     expect(typeof config.baseAlienShootRate).toBe('number')
     expect(config.playerCooldownTicks).toBe(6)
     expect(config.playerMoveSpeed).toBe(1)
-    expect(config.respawnDelayTicks).toBe(90)
+    expect(config.respawnDelayTicks).toBe(30)
   })
 
   test('PlayerSlot and PlayerColor mappings are consistent', () => {

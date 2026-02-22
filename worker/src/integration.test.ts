@@ -4,6 +4,7 @@
 import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest'
 import { GameRoom, type Env } from './GameRoom'
 import { Matchmaker } from './Matchmaker'
+import { COUNTDOWN_SECONDS, WIPE_TIMING } from '../../shared/types'
 import type { GameState, ServerMessage } from '../../shared/types'
 import worker from './index'
 
@@ -141,17 +142,15 @@ function getErrorMessages(ws: MockWebSocket) {
 /**
  * Helper to run through wipe phases to get to 'playing' status.
  * After startGame(), the game goes through:
- * - wipe_hold (90 ticks)
- * - wipe_reveal (120 ticks)
+ * - wipe_hold (HOLD_TICKS)
+ * - wipe_reveal (REVEAL_TICKS)
  * - playing
  */
 async function completeWipePhases(gameRoom: GameRoom) {
-  // wipe_hold: 90 ticks
-  for (let i = 0; i < 90; i++) {
+  for (let i = 0; i < WIPE_TIMING.HOLD_TICKS; i++) {
     await gameRoom.alarm()
   }
-  // wipe_reveal: 120 ticks
-  for (let i = 0; i < 120; i++) {
+  for (let i = 0; i < WIPE_TIMING.REVEAL_TICKS; i++) {
     await gameRoom.alarm()
   }
 }
@@ -283,13 +282,13 @@ describe('Integration: Player Creates Room, Another Player Joins', () => {
     // Player 2 readies up - this should start countdown
     await gameRoom.webSocketMessage(ws2 as any, JSON.stringify({ type: 'ready' }))
 
-    // Both players should receive countdown_tick event with count: 3
+    // Both players should receive countdown_tick event with COUNTDOWN_SECONDS
     const ws1CountdownEvents = getEventMessages(ws1).filter(e => e.name === 'countdown_tick')
     const ws2CountdownEvents = getEventMessages(ws2).filter(e => e.name === 'countdown_tick')
 
     expect(ws1CountdownEvents.length).toBeGreaterThan(0)
     expect(ws2CountdownEvents.length).toBeGreaterThan(0)
-    expect((ws1CountdownEvents[0].data as any).count).toBe(3)
+    expect((ws1CountdownEvents[0].data as any).count).toBe(COUNTDOWN_SECONDS)
 
     // Verify state shows countdown status
     const state = JSON.parse(gameRoomCtx._sqlData['game_state'].data) as GameState
@@ -759,9 +758,7 @@ describe('Integration: Complete 4-Player Game Flow', () => {
     expect(gameState.status).toBe('countdown')
 
     // Complete countdown
-    await gameRoom.alarm() // 2
-    await gameRoom.alarm() // 1
-    await gameRoom.alarm() // wipe_hold starts
+    for (let i = 0; i < COUNTDOWN_SECONDS; i++) await gameRoom.alarm()
 
     // Complete wipe phases
     await completeWipePhases(gameRoom)
@@ -862,9 +859,7 @@ describe('Integration: Edge Cases', () => {
     await gameRoom.webSocketMessage(ws2 as any, JSON.stringify({ type: 'ready' }))
 
     // Complete countdown
-    await gameRoom.alarm() // 2
-    await gameRoom.alarm() // 1
-    await gameRoom.alarm() // wipe_hold starts
+    for (let i = 0; i < COUNTDOWN_SECONDS; i++) await gameRoom.alarm()
 
     // Complete wipe phases
     await completeWipePhases(gameRoom)

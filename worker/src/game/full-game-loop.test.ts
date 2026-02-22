@@ -4,7 +4,7 @@
 import { describe, it, expect } from 'vitest'
 import { gameReducer, type GameAction } from './reducer'
 import type { GameState, AlienEntity, BulletEntity } from '../../../shared/types'
-import { LAYOUT, DEFAULT_CONFIG, WIPE_TIMING, getAliens, getBullets, getBarriers } from '../../../shared/types'
+import { LAYOUT, DEFAULT_CONFIG, WIPE_TIMING, COUNTDOWN_SECONDS, getAliens, getBullets, getBarriers } from '../../../shared/types'
 import {
   createTestGameState,
   createTestPlayer,
@@ -268,20 +268,20 @@ describe('Full Game Loop: Co-op Game', () => {
     // Start countdown
     const countdownResult = gameReducer(current, { type: 'START_COUNTDOWN' })
     expect(countdownResult.state.status).toBe('countdown')
-    expect(countdownResult.state.countdownRemaining).toBe(3)
+    expect(countdownResult.state.countdownRemaining).toBe(COUNTDOWN_SECONDS)
 
-    // Countdown ticks: 3 -> 2 -> 1 -> wipe_hold
+    // Tick countdown to zero → wipe_hold
     let cdState = countdownResult.state
-    const cdR1 = gameReducer(cdState, { type: 'COUNTDOWN_TICK' })
-    expect(cdR1.state.countdownRemaining).toBe(2)
+    for (let i = COUNTDOWN_SECONDS; i > 1; i--) {
+      const r = gameReducer(cdState, { type: 'COUNTDOWN_TICK' })
+      expect(r.state.countdownRemaining).toBe(i - 1)
+      cdState = r.state
+    }
 
-    const cdR2 = gameReducer(cdR1.state, { type: 'COUNTDOWN_TICK' })
-    expect(cdR2.state.countdownRemaining).toBe(1)
-
-    const cdR3 = gameReducer(cdR2.state, { type: 'COUNTDOWN_TICK' })
-    expect(cdR3.state.status).toBe('wipe_hold')
-    expect(cdR3.state.countdownRemaining).toBeNull()
-    expect(hasEvent(cdR3.events, 'game_start')).toBe(true)
+    const finalTick = gameReducer(cdState, { type: 'COUNTDOWN_TICK' })
+    expect(finalTick.state.status).toBe('wipe_hold')
+    expect(finalTick.state.countdownRemaining).toBeNull()
+    expect(hasEvent(finalTick.events, 'game_start')).toBe(true)
   })
 
   it('player leave during waiting removes player and stays in waiting', () => {

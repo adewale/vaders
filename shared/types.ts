@@ -293,7 +293,7 @@ export const BARRIER_PLAYER_OFFSET = 2
 export const BARRIER_SHAPE_COLS = 5
 
 /** Countdown duration in seconds before coop game starts */
-export const COUNTDOWN_SECONDS = 3
+export const COUNTDOWN_SECONDS = 1
 
 // ─── Game Config ──────────────────────────────────────────────────────────────
 
@@ -309,8 +309,8 @@ export interface GameConfig {
   baseAlienShootRate: number           // Probability per tick (use getScaledConfig)
   playerCooldownTicks: number          // Ticks between shots
   playerMoveSpeed: number              // Cells per tick when holding move key
-  respawnDelayTicks: number            // Ticks until respawn (90 = 3s at 30Hz)
-  invulnerabilityTicks: number         // Ticks of invulnerability after respawn (60 = 2s at 30Hz)
+  respawnDelayTicks: number            // Ticks until respawn (30 = 1s at 30Hz)
+  invulnerabilityTicks: number         // Ticks of invulnerability after respawn (15 = 0.5s at 30Hz)
 }
 
 export const DEFAULT_CONFIG: GameConfig = {
@@ -325,8 +325,8 @@ export const DEFAULT_CONFIG: GameConfig = {
   baseAlienShootRate: 0.016,           // 20% slower shooting (was 0.02)
   playerCooldownTicks: 6,              // ~200ms between shots
   playerMoveSpeed: 1,                  // 1 cell per tick when holding key (Space Invaders style)
-  respawnDelayTicks: 90,               // 3 seconds at 30Hz
-  invulnerabilityTicks: 60,            // 2 seconds at 30Hz
+  respawnDelayTicks: 30,               // 1 second at 30Hz
+  invulnerabilityTicks: 15,            // 0.5 seconds at 30Hz
 }
 
 /** Return type of getScaledConfig() - player-count-scaled game parameters */
@@ -404,12 +404,12 @@ export interface GameState {
 // These are the canonical values - client should derive from these
 
 export const WIPE_TIMING = {
-  /** Ticks for iris closing (2 seconds at 30Hz) */
-  EXIT_TICKS: 60,
-  /** Ticks for black screen with wave title (2 seconds at 30Hz) */
-  HOLD_TICKS: 60,
-  /** Ticks for iris opening + aliens entering (2 seconds at 30Hz) */
-  REVEAL_TICKS: 60,
+  /** Ticks for iris closing (1 second at 30Hz) */
+  EXIT_TICKS: 30,
+  /** Ticks for black screen with wave title (1 second at 30Hz) */
+  HOLD_TICKS: 30,
+  /** Ticks for iris opening + aliens entering (1 second at 30Hz) */
+  REVEAL_TICKS: 30,
 } as const
 
 // ─── Barrier Factory ──────────────────────────────────────────────────────────

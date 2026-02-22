@@ -3,6 +3,7 @@
 
 import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest'
 import { GameRoom, type Env } from './GameRoom'
+import { COUNTDOWN_SECONDS, WIPE_TIMING } from '../../shared/types'
 import type { ClientMessage, ServerMessage, GameState } from '../../shared/types'
 
 // Response type helpers
@@ -154,17 +155,15 @@ async function joinPlayer(
 /**
  * Helper to run through wipe phases to get to 'playing' status.
  * After startGame(), the game goes through:
- * - wipe_hold (90 ticks)
- * - wipe_reveal (120 ticks)
+ * - wipe_hold (HOLD_TICKS)
+ * - wipe_reveal (REVEAL_TICKS)
  * - playing
  */
 async function completeWipePhases(gameRoom: GameRoom) {
-  // wipe_hold: 90 ticks
-  for (let i = 0; i < 90; i++) {
+  for (let i = 0; i < WIPE_TIMING.HOLD_TICKS; i++) {
     await gameRoom.alarm()
   }
-  // wipe_reveal: 120 ticks
-  for (let i = 0; i < 120; i++) {
+  for (let i = 0; i < WIPE_TIMING.REVEAL_TICKS; i++) {
     await gameRoom.alarm()
   }
 }
@@ -172,22 +171,19 @@ async function completeWipePhases(gameRoom: GameRoom) {
 /**
  * Helper to run through wave transition wipe phases (from wipe_exit).
  * Wave transitions go through:
- * - wipe_exit (60 ticks)
- * - wipe_hold (90 ticks)
- * - wipe_reveal (120 ticks)
+ * - wipe_exit (EXIT_TICKS)
+ * - wipe_hold (HOLD_TICKS)
+ * - wipe_reveal (REVEAL_TICKS)
  * - playing
  */
 async function completeWaveTransitionPhases(gameRoom: GameRoom) {
-  // wipe_exit: 60 ticks
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < WIPE_TIMING.EXIT_TICKS; i++) {
     await gameRoom.alarm()
   }
-  // wipe_hold: 90 ticks
-  for (let i = 0; i < 90; i++) {
+  for (let i = 0; i < WIPE_TIMING.HOLD_TICKS; i++) {
     await gameRoom.alarm()
   }
-  // wipe_reveal: 120 ticks
-  for (let i = 0; i < 120; i++) {
+  for (let i = 0; i < WIPE_TIMING.REVEAL_TICKS; i++) {
     await gameRoom.alarm()
   }
 }
@@ -524,7 +520,7 @@ describe('WebSocket Message Handling', () => {
       expect(countdownCall).toBeDefined()
 
       const countdownMsg = JSON.parse(countdownCall![0])
-      expect(countdownMsg.data.count).toBe(3)
+      expect(countdownMsg.data.count).toBe(COUNTDOWN_SECONDS)
 
       // Alarm should be set
       expect(ctx.storage.setAlarm).toHaveBeenCalled()
@@ -722,7 +718,7 @@ describe('WebSocket Close Handling', () => {
 
 describe('Alarm Handling', () => {
   describe('countdown ticks', () => {
-    it('ticks 3 -> 2 -> 1 -> game start', async () => {
+    it('counts down from COUNTDOWN_SECONDS to game start', async () => {
       const { gameRoom, ctx } = await createInitializedGameRoom()
       const ws1 = createMockWebSocket()
       const ws2 = createMockWebSocket()
@@ -734,37 +730,28 @@ describe('Alarm Handling', () => {
       await gameRoom.webSocketMessage(ws1 as any, JSON.stringify({ type: 'ready' }))
       await gameRoom.webSocketMessage(ws2 as any, JSON.stringify({ type: 'ready' }))
 
-      // First countdown_tick (3) should have been sent
+      // First countdown_tick should have been sent with COUNTDOWN_SECONDS
       let countdownCalls = ws1.send.mock.calls.filter((call: unknown[]) => {
         const msg = JSON.parse(call[0] as string)
         return msg.type === 'event' && msg.name === 'countdown_tick'
       })
       expect(countdownCalls.length).toBeGreaterThanOrEqual(1)
+      expect(JSON.parse(countdownCalls[0][0]).data.count).toBe(COUNTDOWN_SECONDS)
 
-      // Trigger alarm (count 2)
-      ws1.send.mockClear()
-      ws2.send.mockClear()
-      await gameRoom.alarm()
+      // Tick through remaining countdown alarms until game starts
+      for (let remaining = COUNTDOWN_SECONDS - 1; remaining >= 1; remaining--) {
+        ws1.send.mockClear()
+        await gameRoom.alarm()
 
-      countdownCalls = ws1.send.mock.calls.filter((call: unknown[]) => {
-        const msg = JSON.parse(call[0] as string)
-        return msg.type === 'event' && msg.name === 'countdown_tick'
-      })
-      expect(countdownCalls.length).toBe(1)
-      expect(JSON.parse(countdownCalls[0][0]).data.count).toBe(2)
+        countdownCalls = ws1.send.mock.calls.filter((call: unknown[]) => {
+          const msg = JSON.parse(call[0] as string)
+          return msg.type === 'event' && msg.name === 'countdown_tick'
+        })
+        expect(countdownCalls.length).toBe(1)
+        expect(JSON.parse(countdownCalls[0][0]).data.count).toBe(remaining)
+      }
 
-      // Trigger alarm (count 1)
-      ws1.send.mockClear()
-      await gameRoom.alarm()
-
-      countdownCalls = ws1.send.mock.calls.filter((call: unknown[]) => {
-        const msg = JSON.parse(call[0] as string)
-        return msg.type === 'event' && msg.name === 'countdown_tick'
-      })
-      expect(countdownCalls.length).toBe(1)
-      expect(JSON.parse(countdownCalls[0][0]).data.count).toBe(1)
-
-      // Trigger alarm (game start)
+      // Final alarm triggers game start
       ws1.send.mockClear()
       await gameRoom.alarm()
 
@@ -1149,9 +1136,7 @@ describe('Player Disconnect During Active Gameplay', () => {
     await gameRoom.webSocketMessage(ws2 as any, JSON.stringify({ type: 'ready' }))
 
     // Countdown through to wipe_hold start
-    await gameRoom.alarm() // 2
-    await gameRoom.alarm() // 1
-    await gameRoom.alarm() // wipe_hold starts
+    for (let i = 0; i < COUNTDOWN_SECONDS; i++) await gameRoom.alarm()
 
     // Complete wipe phases to reach playing status
     await completeWipePhases(gameRoom)
@@ -1273,7 +1258,7 @@ describe('4-Player Room Full Scenario', () => {
       await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'ready' }))
     }
 
-    // Complete countdown: 3 -> 2 -> 1 -> wipe_hold
+    // Complete countdown to wipe_hold
     await gameRoom.alarm() // 2
     await gameRoom.alarm() // 1
     await gameRoom.alarm() // wipe_hold start
@@ -1283,16 +1268,14 @@ describe('4-Player Room Full Scenario', () => {
     expect(state.status).toBe('wipe_hold')
     expect(state.wipeWaveNumber).toBe(1)
 
-    // Run through wipe_hold (90 ticks) and wipe_reveal (120 ticks) phases
-    // wipe_hold: 90 ticks at 30Hz
-    for (let i = 0; i < 90; i++) {
+    // Run through wipe_hold and wipe_reveal phases
+    for (let i = 0; i < WIPE_TIMING.HOLD_TICKS; i++) {
       await gameRoom.alarm()
     }
     state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
     expect(state.status).toBe('wipe_reveal')
 
-    // wipe_reveal: 120 ticks - aliens are created here
-    for (let i = 0; i < 120; i++) {
+    for (let i = 0; i < WIPE_TIMING.REVEAL_TICKS; i++) {
       await gameRoom.alarm()
     }
     state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
@@ -1326,7 +1309,7 @@ describe('Lifecycle Edge Cases', () => {
       await gameRoom.webSocketMessage(ws1 as any, JSON.stringify({ type: 'ready' }))
       await gameRoom.webSocketMessage(ws2 as any, JSON.stringify({ type: 'ready' }))
 
-      // Complete countdown: 3 -> 2 -> 1 -> game start (wipe_hold)
+      // Complete countdown to wipe_hold
       await gameRoom.alarm() // 2
       await gameRoom.alarm() // 1
       await gameRoom.alarm() // wipe_hold starts
@@ -1364,13 +1347,11 @@ describe('Lifecycle Edge Cases', () => {
       await gameRoom.webSocketMessage(ws1 as any, JSON.stringify({ type: 'ready' }))
       await gameRoom.webSocketMessage(ws2 as any, JSON.stringify({ type: 'ready' }))
 
-      // Complete countdown: 3 -> 2 -> 1 -> game start (wipe_hold)
-      await gameRoom.alarm() // 2
-      await gameRoom.alarm() // 1
-      await gameRoom.alarm() // wipe_hold starts
+      // Complete countdown to wipe_hold
+      for (let i = 0; i < COUNTDOWN_SECONDS; i++) await gameRoom.alarm()
 
-      // Run through wipe_hold (90 ticks) to reach wipe_reveal
-      for (let i = 0; i < 90; i++) {
+      // Run through wipe_hold to reach wipe_reveal
+      for (let i = 0; i < WIPE_TIMING.HOLD_TICKS; i++) {
         await gameRoom.alarm()
       }
 
@@ -1549,7 +1530,7 @@ describe('Lifecycle Edge Cases', () => {
       expect(ctx.storage.deleteAlarm).toHaveBeenCalled()
     })
 
-    it('cancels countdown mid-tick when player disconnects after first countdown alarm', async () => {
+    it('cancels countdown when player disconnects before first alarm fires', async () => {
       const { gameRoom, ctx } = await createInitializedGameRoom()
       const ws1 = createMockWebSocket()
       const ws2 = createMockWebSocket()
@@ -1561,13 +1542,11 @@ describe('Lifecycle Edge Cases', () => {
       await gameRoom.webSocketMessage(ws1 as any, JSON.stringify({ type: 'ready' }))
       await gameRoom.webSocketMessage(ws2 as any, JSON.stringify({ type: 'ready' }))
 
-      // Tick countdown once: 3 -> 2
-      await gameRoom.alarm()
-
+      // Verify we're in countdown
       let state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
       expect(state.status).toBe('countdown')
 
-      // Player 1 disconnects mid-countdown
+      // Player 1 disconnects during countdown (before alarm fires)
       await gameRoom.webSocketClose(ws1 as any, 1000, 'Closed', true)
 
       state = JSON.parse(ctx._sqlData['game_state'].data) as GameState

@@ -4,7 +4,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { gameReducer, canTransition, type GameAction } from './reducer'
 import type { GameState, Player, AlienEntity, BulletEntity, BarrierEntity } from '../../../shared/types'
-import { LAYOUT, DEFAULT_CONFIG, WIPE_TIMING, HITBOX, getBullets, getAliens, getUFOs, getBarriers, checkBarrierSegmentHit, checkAlienHit, checkPlayerHit, checkUfoHit, ALIEN_BULLET_SKIP_INTERVAL } from '../../../shared/types'
+import { LAYOUT, DEFAULT_CONFIG, WIPE_TIMING, HITBOX, COUNTDOWN_SECONDS, getBullets, getAliens, getUFOs, getBarriers, checkBarrierSegmentHit, checkAlienHit, checkPlayerHit, checkUfoHit, ALIEN_BULLET_SKIP_INTERVAL } from '../../../shared/types'
 import { getScaledConfig } from './scaling'
 import {
   createTestGameState,
@@ -789,17 +789,17 @@ describe('START_COUNTDOWN action', () => {
     expect(result.events.length).toBe(0)
   })
 
-  it('sets status to countdown, countdownRemaining to 3', () => {
+  it('sets status to countdown, countdownRemaining to COUNTDOWN_SECONDS', () => {
     const { state, players } = createTestGameStateWithPlayers(2)
     state.readyPlayerIds = [players[0].id, players[1].id]
 
     const result = gameReducer(state, { type: 'START_COUNTDOWN' })
 
     expect(result.state.status).toBe('countdown')
-    expect(result.state.countdownRemaining).toBe(3)
+    expect(result.state.countdownRemaining).toBe(COUNTDOWN_SECONDS)
   })
 
-  it('emits countdown_tick with count: 3', () => {
+  it('emits countdown_tick with count: COUNTDOWN_SECONDS', () => {
     const { state, players } = createTestGameStateWithPlayers(2)
     state.readyPlayerIds = [players[0].id, players[1].id]
 
@@ -807,7 +807,7 @@ describe('START_COUNTDOWN action', () => {
 
     expect(hasEvent(result.events, 'countdown_tick')).toBe(true)
     const data = getEventData<{ count: number }>(result.events, 'countdown_tick')
-    expect(data?.count).toBe(3)
+    expect(data?.count).toBe(COUNTDOWN_SECONDS)
   })
 
   it('returns persist: true', () => {
@@ -828,7 +828,7 @@ describe('COUNTDOWN_TICK action', () => {
   it('decrements countdownRemaining', () => {
     const { state, players } = createTestGameStateWithPlayers(2)
     state.status = 'countdown'
-    state.countdownRemaining = 3
+    state.countdownRemaining = 3 // Use value > 1 to test decrement without triggering transition
 
     const result = gameReducer(state, { type: 'COUNTDOWN_TICK' })
 
