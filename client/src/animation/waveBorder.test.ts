@@ -10,6 +10,7 @@ import {
   type WaveBorderConfig,
   type BorderCell,
 } from './waveBorder'
+import { interpolateGradient, getWaveGradient } from '../gradient'
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
 
@@ -303,6 +304,34 @@ describe('animation over time', () => {
     expect(reachedBottom).toBe(true)
     expect(reachedLeft).toBe(true)
     expect(reachedRight).toBe(true)
+  })
+
+  test('ripple colors match digit gradient (prevents spritesheet drift)', () => {
+    // The wave announce screen, the spritesheet, and any other consumer all rely
+    // on getCells() returning the correct gradient colors for ripple cells.
+    // If ripple colors ever diverge from getWaveGradient(), digits and ripples
+    // will look mismatched.
+    for (let wave = 1; wave <= 8; wave++) {
+      const boxWidth = 46
+      const config = makeConfig({ boxWidth, boxHeight: 18, waveNumber: wave, contentWidth: 10, contentHeight: 8 })
+      const anim = new WaveBorderAnimation(config)
+      const period = anim.getHeartbeatPeriodTicks()
+
+      // Run past a heartbeat to generate ripple cells
+      for (let i = 0; i < period + 5; i++) anim.update()
+      const cells = anim.getCells()
+
+      const expectedGradient = interpolateGradient(getWaveGradient(wave), boxWidth)
+      const [borderColor] = WAVE_COLORS[((wave - 1) % WAVE_COLORS.length + WAVE_COLORS.length) % WAVE_COLORS.length]
+
+      // Interior ripple cells (non-border-color) should use the digit gradient
+      const rippleCells = cells.filter(c => c.color !== borderColor)
+      expect(rippleCells.length).toBeGreaterThan(0)
+
+      for (const cell of rippleCells) {
+        expect(cell.color).toBe(expectedGradient[cell.x])
+      }
+    }
   })
 
   test('ripples spawn on heartbeat boundaries', () => {
