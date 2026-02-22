@@ -110,6 +110,11 @@ export {
   DissolveSystem,
   // Constants
   DISSOLVE_ASCII_CHARS,
+  DISSOLVE_BRAILLE,
+  DIRECTIONAL_DOTS,
+  DEBRIS_MEDIUM,
+  DEBRIS_HEAVY,
+  TUMBLE_PATTERNS,
   // Configuration
   DEFAULT_DISSOLVE_CONFIG,
   // Types

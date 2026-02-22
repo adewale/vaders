@@ -25,8 +25,12 @@ import {
 } from '../client/src/digitFont'
 
 import { GRADIENT_PRESETS, interpolateGradient, getWaveGradient } from '../client/src/gradient'
+import { getUFOColor } from '../client/src/effects'
 import { BRAILLE_DENSITY, MAX_DENSITY, WaveBorderAnimation, WAVE_COLORS } from '../client/src/animation/waveBorder'
-import { DISSOLVE_ASCII_CHARS, DISSOLVE_BRAILLE } from '../client/src/animation/dissolve'
+import {
+  DISSOLVE_ASCII_CHARS, DISSOLVE_BRAILLE, DissolveSystem,
+  DIRECTIONAL_DOTS, DEBRIS_MEDIUM, DEBRIS_HEAVY, TUMBLE_PATTERNS,
+} from '../client/src/animation/dissolve'
 import { CONFETTI_CHARS, CONFETTI_COLORS } from '../client/src/animation/confetti'
 import { HALF_BLOCKS } from '../client/src/animation/interpolation'
 
@@ -687,7 +691,180 @@ function renderEffects(): void {
   }
 }
 
-// ─── Section 11: Color Palette ──────────────────────────────────────────────────
+// ─── Section 11: Explosion Effects ──────────────────────────────────────────
+
+function renderExplosions(): void {
+  section('EXPLOSION EFFECTS (ANIMATED FRAME STRIPS)')
+
+  // Seeded RNG for deterministic output
+  let seed = 42
+  const seededRandom = () => {
+    seed = (seed * 1664525 + 1013904223) & 0x7fffffff
+    return seed / 0x7fffffff
+  }
+
+  const frameWidth = 13
+  const frameHeight = 6
+  const frameGap = 2
+  const frameTicks = [0, 3, 6, 10, 14, 18]
+
+  // ── Player Shrapnel ──
+  label('Player ship shrapnel (directional debris + gravity arcs)')
+  console.log()
+
+  // Reset seed for player shrapnel
+  seed = 42
+  const playerSystem = new DissolveSystem({
+    maxEffects: 1,
+    maxCellsPerEffect: 35,
+    screenWidth: frameWidth + 20,
+    screenHeight: frameHeight + 20,
+  }, seededRandom)
+
+  const spawnX = Math.floor(frameWidth / 2) - Math.floor(SPRITE_SIZE.player.width / 2)
+  const spawnY = Math.floor(frameHeight / 2)
+  playerSystem.spawn(spawnX, spawnY, SPRITE_SIZE.player.width, SPRITE_SIZE.player.height, '#00ffff', 'shrapnel', SPRITES.player.a)
+
+  const playerFrames: { chars: string[][]; colors: string[][] }[] = []
+  let currentTick = 0
+
+  for (const targetTick of frameTicks) {
+    while (currentTick < targetTick) {
+      playerSystem.update()
+      currentTick++
+    }
+    const cells = playerSystem.getCells()
+    const chars: string[][] = Array.from({ length: frameHeight }, () => Array(frameWidth).fill(' '))
+    const colors: string[][] = Array.from({ length: frameHeight }, () => Array(frameWidth).fill(''))
+
+    for (const cell of cells) {
+      if (cell.y >= 0 && cell.y < frameHeight && cell.x >= 0 && cell.x < frameWidth) {
+        chars[cell.y][cell.x] = cell.char
+        colors[cell.y][cell.x] = cell.color
+      }
+    }
+    playerFrames.push({ chars, colors })
+  }
+
+  // Print tick labels
+  let tickLine = '  '
+  for (let f = 0; f < frameTicks.length; f++) {
+    tickLine += `${DIM}${fg('#888888')}t=${String(frameTicks[f]).padEnd(frameWidth - 2)}${RST}`
+    if (f < frameTicks.length - 1) tickLine += ' '.repeat(frameGap)
+  }
+  console.log(tickLine)
+
+  // Print frames side by side
+  for (let row = 0; row < frameHeight; row++) {
+    let line = '  '
+    for (let f = 0; f < playerFrames.length; f++) {
+      const frame = playerFrames[f]
+      for (let col = 0; col < frameWidth; col++) {
+        const ch = frame.chars[row][col]
+        const color = frame.colors[row][col]
+        if (ch === ' ' || !color) {
+          line += ' '
+        } else {
+          line += `${fg(color)}${ch}${RST}`
+        }
+      }
+      if (f < playerFrames.length - 1) line += ' '.repeat(frameGap)
+    }
+    console.log(line)
+  }
+
+  console.log()
+
+  // ── UFO Explosion ──
+  label('UFO explosion (flash + ring + sparks + tumbling fragments)')
+  console.log()
+
+  seed = 42
+  const ufoSystem = new DissolveSystem({
+    maxEffects: 1,
+    maxCellsPerEffect: 35,
+    screenWidth: frameWidth + 20,
+    screenHeight: frameHeight + 20,
+  }, seededRandom)
+
+  const ufoSpawnX = Math.floor(frameWidth / 2) - Math.floor(SPRITE_SIZE.ufo.width / 2)
+  const ufoSpawnY = Math.floor(frameHeight / 2)
+  const ufoColor = getUFOColor(37) // Sample tick — shows orange from the cycling palette
+  ufoSystem.spawn(ufoSpawnX, ufoSpawnY, SPRITE_SIZE.ufo.width, SPRITE_SIZE.ufo.height, ufoColor, 'ufo_explosion', SPRITES.ufo.a)
+
+  const ufoFrames: { chars: string[][]; colors: string[][] }[] = []
+  currentTick = 0
+
+  for (const targetTick of frameTicks) {
+    while (currentTick < targetTick) {
+      ufoSystem.update()
+      currentTick++
+    }
+    const cells = ufoSystem.getCells()
+    const chars: string[][] = Array.from({ length: frameHeight }, () => Array(frameWidth).fill(' '))
+    const colors: string[][] = Array.from({ length: frameHeight }, () => Array(frameWidth).fill(''))
+
+    for (const cell of cells) {
+      if (cell.y >= 0 && cell.y < frameHeight && cell.x >= 0 && cell.x < frameWidth) {
+        chars[cell.y][cell.x] = cell.char
+        colors[cell.y][cell.x] = cell.color
+      }
+    }
+    ufoFrames.push({ chars, colors })
+  }
+
+  // Print tick labels
+  tickLine = '  '
+  for (let f = 0; f < frameTicks.length; f++) {
+    tickLine += `${DIM}${fg('#888888')}t=${String(frameTicks[f]).padEnd(frameWidth - 2)}${RST}`
+    if (f < frameTicks.length - 1) tickLine += ' '.repeat(frameGap)
+  }
+  console.log(tickLine)
+
+  // Print frames side by side
+  for (let row = 0; row < frameHeight; row++) {
+    let line = '  '
+    for (let f = 0; f < ufoFrames.length; f++) {
+      const frame = ufoFrames[f]
+      for (let col = 0; col < frameWidth; col++) {
+        const ch = frame.chars[row][col]
+        const color = frame.colors[row][col]
+        if (ch === ' ' || !color) {
+          line += ' '
+        } else {
+          line += `${fg(color)}${ch}${RST}`
+        }
+      }
+      if (f < ufoFrames.length - 1) line += ' '.repeat(frameGap)
+    }
+    console.log(line)
+  }
+
+  console.log()
+
+  // Braille character reference
+  label('Shrapnel braille chars:')
+  let charLine = '  '
+  charLine += `${DIM}${fg('#888888')}directional:${RST} `
+  for (const row of DIRECTIONAL_DOTS) {
+    for (const ch of row) charLine += `${fg('#00ffff')}${ch}${RST} `
+  }
+  charLine += `  ${DIM}${fg('#888888')}medium:${RST} `
+  for (const ch of DEBRIS_MEDIUM) charLine += `${fg('#ffaa00')}${ch}${RST} `
+  console.log(charLine)
+
+  charLine = '  '
+  charLine += `${DIM}${fg('#888888')}heavy:${RST} `
+  for (const ch of DEBRIS_HEAVY) charLine += `${fg('#ff5555')}${ch}${RST} `
+  charLine += `  ${DIM}${fg('#888888')}tumble:${RST} `
+  for (const pattern of TUMBLE_PATTERNS) {
+    for (const ch of pattern) charLine += `${fg('#ff55ff')}${ch}${RST} `
+    charLine += ' '
+  }
+  console.log(charLine)
+}
+
+// ─── Section 12: Color Palette ──────────────────────────────────────────────────
 
 function renderColorPalette(): void {
   section('COLOR PALETTE')
@@ -749,6 +926,7 @@ renderBarriers()
 renderWaveAnnounce()
 renderDigits()
 renderEffects()
+renderExplosions()
 renderColorPalette()
 
 console.log()

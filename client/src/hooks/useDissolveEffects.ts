@@ -7,7 +7,8 @@ import type { GameState } from '../../../shared/types'
 import { getAliens, getBarriers, getUFOs, LAYOUT } from '../../../shared/types'
 import type { ServerEvent } from '../../../shared/protocol'
 import { DissolveSystem, type DissolveCellOutput } from '../animation/dissolve'
-import { COLORS, SPRITE_SIZE, getPlayerColor } from '../sprites'
+import { COLORS, SPRITE_SIZE, SPRITES, getPlayerColor } from '../sprites'
+import { getUFOColor } from '../effects'
 import { supportsBraille, getTerminalCapabilities } from '../terminal'
 
 const ANIMATION_INTERVAL_MS = 70
@@ -79,7 +80,8 @@ export function useDissolveEffects(
           SPRITE_SIZE.player.width,
           SPRITE_SIZE.player.height,
           color,
-          'dissolve',
+          'shrapnel',
+          SPRITES.player.a,
         )
       }
     }
@@ -146,8 +148,9 @@ export function useDissolveEffects(
           prevUfo.y,
           SPRITE_SIZE.ufo.width,
           SPRITE_SIZE.ufo.height,
-          '#ff00ff', // Magenta — matches UFO's cycling color palette
-          'dissolve',
+          getUFOColor(prevState.tick), // Match UFO's current cycling color at death
+          'ufo_explosion',
+          SPRITES.ufo.a,
         )
       }
     }
