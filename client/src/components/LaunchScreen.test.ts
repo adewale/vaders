@@ -302,6 +302,53 @@ describe('Hotkey Mappings', () => {
   })
 })
 
+// ─── Menu Cursor Alignment Tests ─────────────────────────────────────────────
+// The selected indicator (▶) must occupy the same display width as the
+// unselected indicator (two spaces) so menu text stays aligned.
+// U+25B6 BLACK RIGHT-POINTING TRIANGLE is fullwidth in most terminals (2 cols).
+
+/**
+ * Approximate terminal display width of a string.
+ * Counts most characters as 1 column, but recognises common fullwidth/wide
+ * Unicode blocks (CJK, fullwidth forms, geometric shapes like ▶) as 2 columns.
+ */
+function displayWidth(s: string): number {
+  let w = 0
+  for (const ch of s) {
+    const cp = ch.codePointAt(0)!
+    // Fullwidth forms (FF01-FF60), CJK unified, geometric shapes (25A0-25FF)
+    if (
+      (cp >= 0x25A0 && cp <= 0x25FF) || // Geometric Shapes (includes ▶ U+25B6)
+      (cp >= 0xFF01 && cp <= 0xFF60) || // Fullwidth Latin
+      (cp >= 0x4E00 && cp <= 0x9FFF) || // CJK Unified Ideographs
+      (cp >= 0x2E80 && cp <= 0x303F)    // CJK Radicals, Kangxi, CJK Symbols
+    ) {
+      w += 2
+    } else {
+      w += 1
+    }
+  }
+  return w
+}
+
+describe('Menu Cursor Alignment', () => {
+  // These must match the strings used in MenuItemRow, LobbyScreen, and GameOverScreen
+  const SELECTED_INDICATOR = '▶'
+  const UNSELECTED_INDICATOR = '  '
+
+  test('selected and unselected indicators have equal display width', () => {
+    expect(displayWidth(SELECTED_INDICATOR)).toBe(displayWidth(UNSELECTED_INDICATOR))
+  })
+
+  test('selected indicator is exactly 2 display columns', () => {
+    expect(displayWidth(SELECTED_INDICATOR)).toBe(2)
+  })
+
+  test('unselected indicator is exactly 2 display columns', () => {
+    expect(displayWidth(UNSELECTED_INDICATOR)).toBe(2)
+  })
+})
+
 // ─── Menu Item Display Configuration Tests ───────────────────────────────────
 
 describe('Menu Item Display Configuration', () => {

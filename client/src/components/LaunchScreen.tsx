@@ -172,7 +172,7 @@ export function LaunchScreen({
         />
         {joinMode ? (
           <box>
-            <text fg={COLORS.ui.selected}>▶ </text>
+            <text fg={COLORS.ui.selected}>▶</text>
             <text fg={COLORS.ui.hotkey}>[3]</text>
             <box width={1} />
             <text fg={COLORS.ui.selectedText}>JOIN ROOM  </text>
@@ -239,7 +239,7 @@ function MenuItemRow({
   const labelColors = selected && richColor ? interpolateGradient(GRADIENT_PRESETS.vaders, label.length) : null
   return (
     <box>
-      <text fg={selected ? COLORS.ui.selected : COLORS.ui.unselected}>{selected ? '▶ ' : '  '}</text>
+      <text fg={selected ? COLORS.ui.selected : COLORS.ui.unselected}>{selected ? '▶' : '  '}</text>
       <text fg={COLORS.ui.hotkey}>[{hotkey}]</text>
       <box width={1} />
       <text fg={selected ? COLORS.ui.selectedText : COLORS.ui.label} width={16}>

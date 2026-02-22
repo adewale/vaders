@@ -97,7 +97,7 @@ export function LobbyScreen({
           return (
             <box key={i}>
               <text fg={selected ? COLORS.ui.selected : COLORS.ui.unselected}>
-                {selected ? '▶ ' : '  '}
+                {selected ? '▶' : '  '}
               </text>
               <text fg={selected ? COLORS.ui.selectedText : COLORS.ui.label}>
                 {labelColors

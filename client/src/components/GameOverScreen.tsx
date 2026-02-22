@@ -133,7 +133,7 @@ export function GameOverScreen({ state, currentPlayerId, selectedIndex, onPlayAg
           return (
             <box key={i}>
               <text fg={selected ? COLORS.ui.selected : COLORS.ui.unselected}>
-                {selected ? '▶ ' : '  '}
+                {selected ? '▶' : '  '}
               </text>
               <text fg={selected ? COLORS.ui.selectedText : COLORS.ui.label}>
                 <span fg={COLORS.ui.hotkey}>[{item.key}]</span>{' '}
