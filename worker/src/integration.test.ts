@@ -141,17 +141,17 @@ function getErrorMessages(ws: MockWebSocket) {
 /**
  * Helper to run through wipe phases to get to 'playing' status.
  * After startGame(), the game goes through:
- * - wipe_hold (90 ticks)
- * - wipe_reveal (120 ticks)
+ * - wipe_hold (45 ticks)
+ * - wipe_reveal (60 ticks)
  * - playing
  */
 async function completeWipePhases(gameRoom: GameRoom) {
-  // wipe_hold: 90 ticks
-  for (let i = 0; i < 90; i++) {
+  // wipe_hold: 45 ticks
+  for (let i = 0; i < 45; i++) {
     await gameRoom.alarm()
   }
-  // wipe_reveal: 120 ticks
-  for (let i = 0; i < 120; i++) {
+  // wipe_reveal: 60 ticks
+  for (let i = 0; i < 60; i++) {
     await gameRoom.alarm()
   }
 }

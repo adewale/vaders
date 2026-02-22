@@ -75,7 +75,7 @@ describe('Render sequence during solo game start', () => {
     const waitingState = createMockState({ status: 'waiting' })
     const wipeHoldState = createMockState({
       status: 'wipe_hold',
-      wipeTicksRemaining: 60,
+      wipeTicksRemaining: 30,
       wipeWaveNumber: 1,
     })
 
@@ -127,7 +127,7 @@ describe('Render sequence during wave transition', () => {
     const playingState = createMockState({ status: 'playing' })
     const wipeExitState = createMockState({
       status: 'wipe_exit',
-      wipeTicksRemaining: 60,
+      wipeTicksRemaining: 30,
       wipeWaveNumber: 2,
     })
 
@@ -143,7 +143,7 @@ describe('Render sequence during wave transition', () => {
     })
     const wipeHoldState = createMockState({
       status: 'wipe_hold',
-      wipeTicksRemaining: 60,
+      wipeTicksRemaining: 30,
       wipeWaveNumber: 2,
     })
 

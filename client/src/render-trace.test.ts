@@ -174,7 +174,7 @@ function createState(status: GameStatus, overrides: Partial<GameState> = {}): Ga
 
   // Set appropriate wipe state
   if (status === 'wipe_hold' || status === 'wipe_exit' || status === 'wipe_reveal') {
-    base.wipeTicksRemaining = status === 'wipe_hold' ? 30 : status === 'wipe_exit' ? 30 : 60
+    base.wipeTicksRemaining = 30
     base.wipeWaveNumber = overrides.wave ?? 1
   }
 

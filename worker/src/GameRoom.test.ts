@@ -154,17 +154,17 @@ async function joinPlayer(
 /**
  * Helper to run through wipe phases to get to 'playing' status.
  * After startGame(), the game goes through:
- * - wipe_hold (90 ticks)
- * - wipe_reveal (120 ticks)
+ * - wipe_hold (45 ticks)
+ * - wipe_reveal (60 ticks)
  * - playing
  */
 async function completeWipePhases(gameRoom: GameRoom) {
-  // wipe_hold: 90 ticks
-  for (let i = 0; i < 90; i++) {
+  // wipe_hold: 45 ticks
+  for (let i = 0; i < 45; i++) {
     await gameRoom.alarm()
   }
-  // wipe_reveal: 120 ticks
-  for (let i = 0; i < 120; i++) {
+  // wipe_reveal: 60 ticks
+  for (let i = 0; i < 60; i++) {
     await gameRoom.alarm()
   }
 }
@@ -172,22 +172,22 @@ async function completeWipePhases(gameRoom: GameRoom) {
 /**
  * Helper to run through wave transition wipe phases (from wipe_exit).
  * Wave transitions go through:
- * - wipe_exit (60 ticks)
- * - wipe_hold (90 ticks)
- * - wipe_reveal (120 ticks)
+ * - wipe_exit (30 ticks)
+ * - wipe_hold (45 ticks)
+ * - wipe_reveal (60 ticks)
  * - playing
  */
 async function completeWaveTransitionPhases(gameRoom: GameRoom) {
-  // wipe_exit: 60 ticks
+  // wipe_exit: 30 ticks
+  for (let i = 0; i < 30; i++) {
+    await gameRoom.alarm()
+  }
+  // wipe_hold: 45 ticks
+  for (let i = 0; i < 45; i++) {
+    await gameRoom.alarm()
+  }
+  // wipe_reveal: 60 ticks
   for (let i = 0; i < 60; i++) {
-    await gameRoom.alarm()
-  }
-  // wipe_hold: 90 ticks
-  for (let i = 0; i < 90; i++) {
-    await gameRoom.alarm()
-  }
-  // wipe_reveal: 120 ticks
-  for (let i = 0; i < 120; i++) {
     await gameRoom.alarm()
   }
 }
@@ -1283,16 +1283,16 @@ describe('4-Player Room Full Scenario', () => {
     expect(state.status).toBe('wipe_hold')
     expect(state.wipeWaveNumber).toBe(1)
 
-    // Run through wipe_hold (90 ticks) and wipe_reveal (120 ticks) phases
-    // wipe_hold: 90 ticks at 30Hz
-    for (let i = 0; i < 90; i++) {
+    // Run through wipe_hold (45 ticks) and wipe_reveal (60 ticks) phases
+    // wipe_hold: 45 ticks at 30Hz
+    for (let i = 0; i < 45; i++) {
       await gameRoom.alarm()
     }
     state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
     expect(state.status).toBe('wipe_reveal')
 
-    // wipe_reveal: 120 ticks - aliens are created here
-    for (let i = 0; i < 120; i++) {
+    // wipe_reveal: 60 ticks - aliens are created here
+    for (let i = 0; i < 60; i++) {
       await gameRoom.alarm()
     }
     state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
@@ -1369,8 +1369,8 @@ describe('Lifecycle Edge Cases', () => {
       await gameRoom.alarm() // 1
       await gameRoom.alarm() // wipe_hold starts
 
-      // Run through wipe_hold (90 ticks) to reach wipe_reveal
-      for (let i = 0; i < 90; i++) {
+      // Run through wipe_hold (45 ticks) to reach wipe_reveal
+      for (let i = 0; i < 45; i++) {
         await gameRoom.alarm()
       }
 

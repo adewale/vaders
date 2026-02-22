@@ -325,7 +325,7 @@ export const DEFAULT_CONFIG: GameConfig = {
   baseAlienShootRate: 0.016,           // 20% slower shooting (was 0.02)
   playerCooldownTicks: 6,              // ~200ms between shots
   playerMoveSpeed: 1,                  // 1 cell per tick when holding key (Space Invaders style)
-  respawnDelayTicks: 90,               // 3 seconds at 30Hz
+  respawnDelayTicks: 45,               // 1.5 seconds at 30Hz
   invulnerabilityTicks: 60,            // 2 seconds at 30Hz
 }
 
@@ -404,12 +404,12 @@ export interface GameState {
 // These are the canonical values - client should derive from these
 
 export const WIPE_TIMING = {
-  /** Ticks for iris closing (2 seconds at 30Hz) */
-  EXIT_TICKS: 60,
-  /** Ticks for black screen with wave title (2 seconds at 30Hz) */
-  HOLD_TICKS: 60,
-  /** Ticks for iris opening + aliens entering (2 seconds at 30Hz) */
-  REVEAL_TICKS: 60,
+  /** Ticks for iris closing (1 second at 30Hz) */
+  EXIT_TICKS: 30,
+  /** Ticks for black screen with wave title (1 second at 30Hz) */
+  HOLD_TICKS: 30,
+  /** Ticks for iris opening + aliens entering (1 second at 30Hz) */
+  REVEAL_TICKS: 30,
 } as const
 
 // ─── Barrier Factory ──────────────────────────────────────────────────────────
