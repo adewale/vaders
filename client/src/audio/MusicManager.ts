@@ -22,6 +22,7 @@ class MusicManager {
   private muted: boolean
   private isPlaying = false
   private shouldLoop = true
+  private stopping = false
   private lastError_: string | null = null
 
   private constructor() {
@@ -59,6 +60,7 @@ class MusicManager {
     }
 
     this.lastError_ = null
+    this.stopping = false
     this.isPlaying = true
     this.shouldLoop = true
     this.playLoop()
@@ -82,8 +84,8 @@ class MusicManager {
         // Wait for playback to complete
         const exitCode = await this.process.exited
 
-        // Non-zero exit code means playback failed
-        if (exitCode !== 0) {
+        // Non-zero exit code means playback failed (unless we intentionally stopped)
+        if (exitCode !== 0 && !this.stopping) {
           this.lastError_ = `${player} exited with code ${exitCode}`
           break
         }
@@ -104,8 +106,10 @@ class MusicManager {
    * Stop background music
    */
   stop(): void {
+    this.stopping = true
     this.shouldLoop = false
     this.isPlaying = false
+    this.lastError_ = null
     if (this.process) {
       try {
         this.process.kill()

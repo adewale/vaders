@@ -6,7 +6,8 @@ Multiplayer TUI Space Invaders clone (1-4 players) built with OpenTUI and Cloudf
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
 <p align="center">
-  <img src="docs/launch-screen.png" alt="Vaders launch screen" width="700">
+  <img src="docs/launch-screen.png" alt="Vaders launch screen" width="480">
+  <img src="docs/gameplay.png" alt="Vaders gameplay" width="480">
 </p>
 
 ## Quick Start
