@@ -404,12 +404,12 @@ export interface GameState {
 // These are the canonical values - client should derive from these
 
 export const WIPE_TIMING = {
-  /** Ticks for iris closing (1 second at 30Hz) */
-  EXIT_TICKS: 30,
-  /** Ticks for black screen with wave title (1 second at 30Hz) */
-  HOLD_TICKS: 30,
-  /** Ticks for iris opening + aliens entering (1 second at 30Hz) */
-  REVEAL_TICKS: 30,
+  /** Ticks for iris closing (1.5 seconds at 30Hz) */
+  EXIT_TICKS: 45,
+  /** Ticks for black screen with wave title (1.5 seconds at 30Hz) */
+  HOLD_TICKS: 45,
+  /** Ticks for iris opening + aliens entering (1.5 seconds at 30Hz) */
+  REVEAL_TICKS: 45,
 } as const
 
 // ─── Barrier Factory ──────────────────────────────────────────────────────────

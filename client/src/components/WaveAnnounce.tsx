@@ -13,7 +13,7 @@ import { getWaveGradient } from '../gradient'
 import { WaveBorderAnimation, type BorderCell } from '../animation/waveBorder'
 import { supportsRichColor, supportsBraille, getTerminalCapabilities, convertColorForTerminal } from '../terminal'
 
-const ANIMATION_INTERVAL_MS = 70
+const ANIMATION_INTERVAL_MS = 47
 
 interface WaveAnnounceProps {
   waveNumber: number
