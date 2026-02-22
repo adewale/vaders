@@ -7,6 +7,7 @@
 // 3. Radial ripple expanding from center toward the border
 
 import { clamp } from './easing'
+import { interpolateGradient, getWaveGradient } from '../gradient'
 
 // ─── Braille Density Table ──────────────────────────────────────────────────
 
@@ -122,7 +123,7 @@ export class WaveBorderAnimation {
 
   // Per-wave colors
   private borderColor: string
-  private rippleColor: string
+  private rippleGradient: string[]
 
   // Content bounding box (to avoid rendering ripples over digits)
   private contentLeft: number
@@ -135,9 +136,12 @@ export class WaveBorderAnimation {
 
     // Select wave colors from rainbow palette
     const colorIndex = ((config.waveNumber - 1) % WAVE_COLORS.length + WAVE_COLORS.length) % WAVE_COLORS.length
-    const [waveBorder, waveRipple] = WAVE_COLORS[colorIndex]
+    const [waveBorder] = WAVE_COLORS[colorIndex]
     this.borderColor = waveBorder
-    this.rippleColor = waveRipple
+
+    // Ripple gradient: same colors as the digit art, interpolated across box width
+    const gradientStops = getWaveGradient(config.waveNumber)
+    this.rippleGradient = interpolateGradient(gradientStops, Math.max(1, config.boxWidth))
 
     this.buildPerimeter()
 
@@ -319,7 +323,7 @@ export class WaveBorderAnimation {
                 x,
                 y,
                 char: BRAILLE_DENSITY[clamp(density, 0, MAX_DENSITY)],
-                color: this.rippleColor,
+                color: this.rippleGradient[x],
               })
             }
           }
