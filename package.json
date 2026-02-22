@@ -1,6 +1,6 @@
 {
   "name": "vaders",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Multiplayer TUI Space Invaders clone (1-4 players) using OpenTUI and Cloudflare Durable Objects",
   "type": "module",
   "bin": {
