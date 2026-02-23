@@ -26,7 +26,8 @@
     "install:all": "cd worker && bun install && cd ../client && bun install",
     "lint": "bunx @biomejs/biome lint .",
     "lint:check": "bunx @biomejs/biome check .",
-    "format": "bunx @biomejs/biome check --write ."
+    "format": "bunx @biomejs/biome check --write .",
+    "spritesheet": "bun run tools/spritesheet.ts | textimg -o docs/spritesheet.png"
   },
   "keywords": [
     "space-invaders",

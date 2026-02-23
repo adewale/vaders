@@ -10,6 +10,11 @@ Multiplayer TUI Space Invaders clone (1-4 players) built with OpenTUI and Cloudf
   <img src="docs/gameplay.png" alt="Vaders gameplay" width="480">
 </p>
 
+<details>
+<summary>Spritesheet (all game graphics)</summary>
+<img src="docs/spritesheet.png" alt="Vaders spritesheet — all sprites, colors, animations" width="720">
+</details>
+
 ## Quick Start
 
 ```bash
