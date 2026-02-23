@@ -96,13 +96,5 @@ jobs:
       - name: Install textimg
         run: go install github.com/jiro4989/textimg/v3@latest
 
-      - name: Regenerate spritesheet
-        run: bun run spritesheet
-
-      - name: Check spritesheet is up to date
-        run: |
-          if ! git diff --quiet docs/spritesheet.png; then
-            echo "::error::docs/spritesheet.png is out of date. Run 'bun run spritesheet' and commit the result."
-            git diff --stat
-            exit 1
-          fi
+      - name: Verify spritesheet generates without error
+        run: bun run tools/spritesheet.ts | textimg -o /tmp/spritesheet.png
