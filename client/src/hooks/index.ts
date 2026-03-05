@@ -14,6 +14,7 @@ export {
   type EntranceAlien,
   type AlienVisualPosition,
 } from './useEntranceAnimation'
+export { useStarfield } from './useStarfield'
 export {
   useInterpolation,
   type UseInterpolationOptions,

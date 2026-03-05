@@ -105,6 +105,23 @@ export {
 
 // ─── Dissolve Effects ──────────────────────────────────────────────────────
 
+// ─── Starfield Background ──────────────────────────────────────────────────
+
+export {
+  // Main class
+  StarfieldSystem,
+  // Constants
+  STAR_LAYERS,
+  // Configuration
+  DEFAULT_STARFIELD_CONFIG,
+  // Types
+  type StarfieldConfig,
+  type StarCell,
+  type StarLayer,
+} from './starfield'
+
+// ─── Dissolve Effects ──────────────────────────────────────────────────────
+
 export {
   // Main class
   DissolveSystem,

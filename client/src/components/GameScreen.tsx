@@ -25,6 +25,7 @@ import { useTerminalSize } from '../hooks/useTerminalSize'
 import { useEntranceAnimation } from '../hooks/useEntranceAnimation'
 import { useInterpolation } from '../hooks/useInterpolation'
 import { useDissolveEffects } from '../hooks/useDissolveEffects'
+import { useStarfield } from '../hooks/useStarfield'
 import { convertColorForTerminal, getTerminalCapabilities } from '../terminal'
 
 // Terminal-compatible color cycling effects
@@ -154,6 +155,10 @@ export function GameScreen({ state, currentPlayerId, isMuted = false, isMusicMut
     return pos ?? { x: bullet.x, y: bullet.y }
   }
 
+  // ─── Starfield Background ─────────────────────────────────────────────────
+  const getStarCells = useStarfield({ unicode: caps.supportsUnicode })
+  const starCells = getStarCells(state.tick)
+
   // ─── Dissolve Effects ──────────────────────────────────────────────────────
   const { cells: dissolveCells } = useDissolveEffects(state, prevState, lastEvent)
 
@@ -204,6 +209,19 @@ export function GameScreen({ state, currentPlayerId, isMuted = false, isMusicMut
 
         {/* Game Area */}
         <box flexGrow={1} position="relative" borderStyle="single" borderColor={COLORS.ui.border}>
+          {/* Starfield background — rendered first so everything draws on top */}
+          {starCells.map((star, i) => (
+            <text
+              key={`s-${i}`}
+              position="absolute"
+              top={star.y}
+              left={star.x}
+              fg={convertColorForTerminal(star.color, caps)}
+            >
+              {star.char}
+            </text>
+          ))}
+
           {/* UFOs - top of screen */}
           {ufos.filter(u => u.alive).map(ufo => (
             <UFOSprite key={`ufo-${ufo.id}`} ufo={ufo} tick={state.tick} />
