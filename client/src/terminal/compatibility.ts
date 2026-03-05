@@ -574,7 +574,7 @@ export function hexTo256Color(hex: string): number {
   if (Math.abs(r - g) < 8 && Math.abs(g - b) < 8) {
     const gray = Math.round((r + g + b) / 3)
     if (gray < 8) return 16 // black
-    if (gray > 248) return 231 // white
+    if (gray > 238) return 231 // white
     // 24 grayscale steps from index 232-255
     return Math.round((gray - 8) / 10) + 232
   }
