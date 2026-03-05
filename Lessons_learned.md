@@ -392,27 +392,6 @@ Resolution: Update spec to 114 (120 - 5 - 1 for 120-wide screen)
 
 **Barriers as temporary safety.** Barriers degrade from both sides. They buy time but are not permanent cover.
 
-### Enhanced Mode Features (Galaga/Galaxian Inspiration)
-
-**Commanders (Boss Galaga):** Two-hit enemies at the top of formation. Worth more points when diving.
-
-**Challenging Stages:** Bonus rounds where aliens fly through without shooting. Kill all 40 for 10,000 points.
-
-**Tractor beam:** Commanders can capture players (disabled for initial release - too complex).
-
-**Point scaling based on context:**
-
-```typescript
-// Commander scoring
-if (diving) {
-  const escorts = context.escortCount ?? 0
-  if (escorts >= 2) return 1600
-  if (escorts >= 1) return 800
-  return 400  // Solo dive
-}
-return 150  // In formation
-```
-
 ### Balancing for Multiplayer
 
 **More players = harder game.** Scale alien count, speed, and shoot rate:
@@ -881,3 +860,87 @@ if (msg.name === 'game_over') {
 13. **Use entity-specific collision functions.** Generic collision functions with offset parameters are error-prone. Named functions like `checkAlienHit()` encode coordinate conventions and are harder to misuse.
 
 14. **Visual rendering is the source of truth for hitboxes.** When collision and rendering formulas drift apart, copy the rendering formula into collision code - that's what players see and expect.
+
+---
+
+## 10. Property-Based Testing
+
+### Property Tests Find Bugs Example Tests Miss
+
+**Problem:** `hexTo256Color` had been working fine in production and passing all example-based tests. Property-based testing with `fast-check` immediately found a counterexample:
+
+```typescript
+// Counterexample: gray = 243
+Math.round((243 - 8) / 10) + 232  // = Math.round(23.5) + 232 = 24 + 232 = 256
+// 256 is OUT OF RANGE — valid indices are [16, 255]
+```
+
+Gray values 239–248 all produced index 256 due to the white threshold being too high (`> 248` instead of `> 238`). No hand-written test had exercised these specific values.
+
+**Fix:** Lower the white detection threshold from `> 248` to `> 238`.
+
+**Lesson:** Functions that map continuous inputs to bounded outputs (color conversion, coordinate snapping, index calculation) are ideal property-based testing candidates. The invariant "output is always in [16, 255]" is trivial to assert but hard to exhaustively verify with examples.
+
+### IEEE 754 Edge Cases Surface Naturally
+
+Property-based testing generators produce values like `-0`, `5e-324` (smallest subnormal), and `-5e-324` that hand-written tests never include. These revealed:
+
+- `lerp(-0, 0, 0)` returns `0`, not `-0` — because `-0 + (0 - (-0)) * 0 = -0 + 0 = 0` and `Object.is(-0, 0)` is false
+- `Math.floor(-5e-324)` returns `-1`, making the subcell offset `≈ 1.0` (violating the `[0, 1)` invariant)
+
+**Solution:** For game code operating on pixel positions, these values are meaningless. Constrain generators to realistic ranges rather than patching the code:
+
+```typescript
+// BAD: fc.double() generates subnormals and -0
+const arbPosition = fc.double({ min: -50, max: 200, noNaN: true })
+
+// GOOD: Integer-derived values avoid IEEE 754 edge cases
+const arbPosition = fc.integer({ min: -5000, max: 20000 }).map(n => n / 100)
+```
+
+**Lesson:** Constrain generators to the domain the code actually handles. Testing `lerp` with `-0` is testing JavaScript's floating-point semantics, not your game logic.
+
+### Best Candidates for Property-Based Testing
+
+Functions with **universal invariants** — properties that must hold for ANY valid input:
+
+| Pattern | Example | Invariant |
+|---------|---------|-----------|
+| Bounded output | `hexTo256Color` | Result ∈ [16, 255] |
+| Idempotence | `clamp(clamp(v, min, max), min, max)` | Same as single clamp |
+| Boundary conditions | `lerp(a, b, 0) = a`, `lerp(a, b, 1) = b` | Identity at endpoints |
+| Monotonicity | `easeOutQuad` | `a ≤ b → f(a) ≤ f(b)` |
+| Decomposition | `toRenderPosition` | `cellX + subX ≈ visualX` |
+| Determinism | `StarfieldSystem` | Same config → same output |
+| No duplicates | Star positions | Unique `(x, y)` pairs |
+| Memoization | `getCells(tick)` | Same bucket → same reference |
+
+**Not good candidates:** Stateful systems with complex setup (game reducer), UI components, anything requiring mocks.
+
+---
+
+## 11. Visual Effects in Terminals
+
+### Color Visibility on Black Backgrounds
+
+**Problem:** Initial starfield used very dark colors (`#1a1a3a` = RGB 26,26,58) that were completely invisible on black terminal backgrounds.
+
+**Fix:** Brightened palette to values like `#4444aa` (RGB 68,68,170) — clearly visible but still subdued.
+
+**Lesson:** Terminal backgrounds are pure black (RGB 0,0,0). Colors need RGB components of at least ~60-70 to be distinguishable. Test visual effects on actual terminals, not in color pickers.
+
+### Amiga Color Cycling Techniques Apply to TUI
+
+Classic Amiga palette animation techniques from the 1980s map directly to terminal color cycling:
+
+1. **Brightness ramps, not color jumps.** Cycle through `dim → bright → dim` within a single hue, not between unrelated colors. This produces a natural "twinkle" or "pulse" effect.
+
+2. **Multiple depth layers at different speeds.** Far stars cycle slowly and dimly; near stars cycle faster and brighter. Creates a sense of depth from flat rendering.
+
+3. **Desynchronized cycle periods.** Using coprime tick rates (15, 20, 28) across layers prevents the lockstep "Christmas lights" effect where everything changes simultaneously.
+
+4. **Rare bright spikes for scintillation.** One bright frame in an otherwise dim ramp (`#444466 → #555577 → #aaaaee → #555577`) creates an eye-catching flash without constant brightness.
+
+5. **Spatial phase offsets.** Hash-based phase distribution `(x * 7 + y * 13) % rampLength` ensures neighboring stars don't pulse in sync, even within the same layer.
+
+**Lesson:** Constraints breed creativity. The Amiga's 32-color palette forced artists to develop techniques that produce compelling animation from minimal state changes — exactly what terminal rendering needs.
