@@ -1,6 +1,6 @@
 # Vaders
 
-Multiplayer Space Invaders clone (1-4 players) built with OpenTUI and Cloudflare Durable Objects. Play in your terminal or your browser — one authoritative server, two frontends.
+Multiplayer Space Invaders clone (1–4 players) built with OpenTUI and Cloudflare Durable Objects. **Play in your terminal or your browser** — one authoritative server, two frontends, same game.
 
 ![Version: 1.1.0](https://img.shields.io/badge/version-1.1.0-blue)
 ![Terminal Size: 120x36](https://img.shields.io/badge/terminal-120x36-blue)
@@ -13,97 +13,112 @@ Multiplayer Space Invaders clone (1-4 players) built with OpenTUI and Cloudflare
 
 <details>
 <summary>Spritesheet (all game graphics)</summary>
-<img src="docs/spritesheet.png" alt="Vaders spritesheet — all sprites, colors, animations" width="720">
+<img src="docs/spritesheet.png" alt="Vaders spritesheet" width="720">
 </details>
 
-## Now available in browser
+## Play now
 
-Vaders now runs in the browser as well as the terminal. Play the live deploy at **<https://vaders.adewale-883.workers.dev>** — no install, just open the link. TUI and web players can share a room: the server is authoritative at 30Hz and both frontends render the same game state. Web and TUI are paired via `client-core/`, a platform-agnostic library containing animation, connection, input, audio, and sprite logic.
+### In your browser — zero install
 
-## Quick Start
+👉 **<https://vaders.adewale-883.workers.dev>**
+
+Desktop only (viewports ≥600px). Create a room, share the link, play together.
+
+### In your terminal
 
 ```bash
 bun install
 bun run vaders
 ```
 
+Requires [Bun](https://bun.sh), a terminal at least 120×36, and macOS (`afplay`) or Linux (`aplay`) for audio.
+
+### Cross-frontend coop
+
+TUI and browser players can share the same room. The server is authoritative at 30 Hz and both frontends render the same game state.
+
 ## Controls
 
-| Key | Action |
-|-----|--------|
-| Arrow Keys | Move left/right |
-| Space | Shoot |
-| Enter | Ready up / Select |
-| S | Start solo game (in lobby) |
-| Escape | Back / Cancel |
-| M | Toggle sound effects |
-| N | Toggle music |
-| ? | Show controls cheatsheet (web) |
-| Q | Quit (TUI) |
+| Key | Action | Frontend |
+|---|---|---|
+| ← → | Move | both |
+| Space | Shoot | both |
+| Enter | Ready up / Select | both |
+| Escape | Back / Cancel | both |
+| M | Toggle sound effects | both |
+| N | Toggle music | both |
+| X | Forfeit (during gameplay) | both |
+| S | Start solo game (in lobby) | TUI |
+| ? | Controls cheatsheet | Web |
+| Q | Quit | TUI |
 
-## Game Modes
+## Game modes
 
-- **Solo** - 3 lives, standard alien grid
-- **Co-op** (2-4 players) - 5 shared lives, larger grid, faster aliens
-
-## Requirements
-
-**TUI**
-- [Bun](https://bun.sh) runtime
-- Terminal with 120x36 minimum size
-- macOS (uses `afplay` for audio) or Linux (uses `aplay`)
-
-**Web**
-- Modern browser (Chrome, Firefox, Safari, Edge)
-- Desktop viewport ≥600px wide (mobile shows a gate screen; touch controls are not yet shipped)
+- **Solo** — 3 lives, standard alien grid
+- **Co-op** (2–4 players) — 5 shared lives, larger grid, faster aliens, per-player slot colours
 
 ## Architecture
 
-Five-package Bun workspace:
+Five-package Bun workspace, enforced by CI:
 
 ```
-shared/        TypeScript types, WebSocket protocol, collision, TUI-compat contract
-client-core/   Platform-agnostic client library (animation, connection, input, audio, sprites)
+shared/        Types, WebSocket protocol, collision, TUI-compat contract
+client-core/   Platform-agnostic: animation, connection, input, audio triggers, sprites
 client/        Bun + OpenTUI React TUI frontend
-web/           Browser React + HTML5 Canvas frontend (Vite, vitest, Playwright)
-worker/        Cloudflare Worker + Durable Object authoritative 30Hz game server
+web/           Browser React + HTML5 Canvas frontend (Vite, Vitest, Playwright)
+worker/        Cloudflare Worker + Durable Object authoritative 30 Hz game server
 ```
 
-`client-core/` is forbidden from importing `@opentui/*`, `bun:*`, or `node:*` — CI enforces this. Each frontend plugs in platform adapters (`InputAdapter`, `AudioAdapter`, `FrameScheduler`, `VisualConfig`).
-
-## Web Frontend
-
-- **Stack** - React + HTML5 Canvas renderer, Vite build, deployed via a single Cloudflare Worker (same-origin API + static assets)
-- **Rendering** - Pure `buildDrawCommands()` → `executeDrawCommands()`; CRT scanlines, starfield, multi-stage smooth explosions, barrier damage scars
-- **Audio** - Web Audio API with split SFX/music mute: **M** toggles sound effects, **N** toggles music; user-gesture-gated AudioContext
-- **Controls cheatsheet** - Press **?** on the launch screen to see all keybindings
-- **Multiplayer UI** - Slot-coloured ship icons in the lobby with empty-seat placeholders and a ready ticker; match scoreboard ranks all players by kills with MVP trophy on game over
-- **URL-based rooms** - Share a link like `/room/ABC123` to join directly; `/solo` starts a solo game; `/?matchmake=true` auto-matchmakes
-- **Mobile gate** - Viewports under 600px show a "Play on desktop" message (touch controls not yet shipped)
-- **Responsive scaling** - Canvas scales to viewport preserving the 5:3 aspect ratio (base 960×576 from the 120×36 grid at 8×16px/cell)
+`client-core/` may not import `@opentui/*`, `bun:*`, or `node:*` — a CI grep check enforces the rule. Each frontend plugs in platform adapters (`InputAdapter`, `AudioAdapter`, `FrameScheduler`, `VisualConfig`).
 
 ## Development
 
-```bash
-bun run vaders              # Start TUI (connects to remote server)
-bun run vaders -- --local   # Start TUI with local server
-bun run vaders -- --check   # Run system diagnostics
-bun run dev:worker          # Worker only
-bun run dev:client          # TUI client only
-cd web && npx vite          # Web dev server on localhost:5173
-```
-
-### Cross-frontend multiplayer (manual test)
-
-Start worker (`cd worker && npx wrangler dev --port 8787`), start web (`cd web && VITE_SERVER_URL=http://localhost:8787 npx vite --port 5173`), create a room in the browser, then join from the TUI with `VADERS_SERVER=http://localhost:8787 bun run vaders -- --room ABC123`.
-
-## Deploy
+### Running locally
 
 ```bash
-cd web && npx vite build
-cd worker && npx wrangler deploy   # Single Worker serves API + static assets
+bun run vaders                     # TUI, connects to the deployed server
+bun run vaders -- --local          # TUI, connects to a local worker
+bun run vaders -- --check          # System diagnostics
+bun run dev:worker                 # Worker only
+bun run dev:client                 # TUI only
+cd web && npx vite                 # Web dev server on localhost:5173
 ```
+
+### Cross-frontend multiplayer test
+
+Start a local worker, start the web dev server against it, then join from the TUI:
+
+```bash
+# Terminal 1 — worker
+cd worker && npx wrangler dev --port 8787
+
+# Terminal 2 — web
+cd web && VITE_SERVER_URL=http://localhost:8787 npx vite --port 5173
+
+# Terminal 3 — TUI joins the room created in the browser
+VADERS_SERVER=http://localhost:8787 bun run vaders -- --room ABC123
+```
+
+### Deploy
+
+```bash
+bun run deploy
+```
+
+Runs `vite build → wrangler deploy → verify-deploy-coherence`. The coherence check fails fast if the web bundle and Worker `/health` report different commit hashes (see `scripts/verify-deploy-coherence.mjs`).
+
+## Further reading
+
+- `CLAUDE.md` — architecture overview and coding conventions
+- `specs/vaders-spec.md` — full game design spec
+- `specs/web-frontend-spec.md` — multi-frontend refactor spec
+- `Lessons_learned.md` — what went right, what went wrong, and what we'd do differently
+- `CHANGELOG.md` — release notes
 
 ## Credits
 
 - Background music: [HydroGene](https://opengameart.org/content/8-bit-epic-space-shooter-music) (CC0)
+
+## License
+
+MIT (see the `license` field in `package.json`).
