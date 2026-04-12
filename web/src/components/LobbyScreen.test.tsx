@@ -165,7 +165,12 @@ describe('LobbyScreen', () => {
 
   // ─── Ready ticker ─────────────────────────────────────────────────────────
 
-  it('renders a ticker showing "N/M ready" where M is max seats', () => {
+  it('ticker denominator is current playerCount, NOT room max — prevents the "I need 4 players to play" misread', () => {
+    // Regression: the previous ticker read "2/4 ready" using the room cap
+    // as the denominator, so a player who matchmaked alone saw "1/4 ready
+    // — starting when all ready" and reasonably concluded they needed
+    // four players. The server's actual start condition is ≥2 players
+    // all ready, so the denominator must reflect the current player count.
     const state = makeState({
       players: {
         p1: { id: 'p1', name: 'Alice', slot: 1, color: 'cyan', kills: 0 } as any,
@@ -176,7 +181,8 @@ describe('LobbyScreen', () => {
     })
     render(<LobbyScreen state={state} playerId="p1" onReady={() => {}} onUnready={() => {}} onStartSolo={() => {}} />)
     const ticker = screen.getByTestId('lobby-ready-ticker')
-    expect(ticker.textContent).toMatch(/2\/4 ready/)
+    expect(ticker.textContent).toMatch(/2\/3 ready/)
+    expect(ticker.textContent).not.toMatch(/2\/4 ready/)
   })
 
   it('ticker shows "Starting in X" during countdown', () => {
@@ -191,6 +197,102 @@ describe('LobbyScreen', () => {
     render(<LobbyScreen state={state} playerId="p1" onReady={() => {}} onUnready={() => {}} onStartSolo={() => {}} />)
     const ticker = screen.getByTestId('lobby-ready-ticker')
     expect(ticker.textContent).toMatch(/Starting in 3/)
+  })
+
+  it('ticker says "Waiting for another player…" when alone in a coop room (no 1/1 display)', () => {
+    // Regression: the previous ticker read "1/4 ready — starting when
+    // all ready" when matchmaked alone. The TUI handles this by hiding
+    // the ready ticker entirely when playerCount === 1. The web variant
+    // shows an unambiguous "Waiting for another player" message instead,
+    // so the user knows exactly what blocks progress.
+    const state = makeState({
+      mode: 'coop',
+      players: {
+        p1: { id: 'p1', name: 'Alice', slot: 1, color: 'cyan', kills: 0 } as any,
+      },
+      readyPlayerIds: ['p1'],
+    })
+    render(<LobbyScreen state={state} playerId="p1" onReady={() => {}} onUnready={() => {}} onStartSolo={() => {}} />)
+    const ticker = screen.getByTestId('lobby-ready-ticker')
+    const text = ticker.textContent ?? ''
+    expect(text.toLowerCase()).toContain('waiting for another player')
+    expect(text).not.toMatch(/\d+\/\d+ ready/)
+    expect(text).not.toMatch(/\/4/)
+  })
+
+  it('Ready button has "(wait for others)" subtitle when alone — mirrors TUI', () => {
+    // TUI's lobby shows "Ready Up (wait for others)" when playerCount
+    // === 1 so the user understands what Ready does in an empty room.
+    // Web mirrors this.
+    const state = makeState({
+      mode: 'coop',
+      players: {
+        p1: { id: 'p1', name: 'Alice', slot: 1, color: 'cyan', kills: 0 } as any,
+      },
+    })
+    render(<LobbyScreen state={state} playerId="p1" onReady={() => {}} onUnready={() => {}} onStartSolo={() => {}} />)
+    const readyBtn = screen.getByRole('button', { name: /ready/i })
+    const text = readyBtn.textContent ?? ''
+    expect(text.toLowerCase()).toContain('wait for others')
+  })
+
+  it('Ready button has no "(wait for others)" subtitle when ≥2 players', () => {
+    // Negative of the above.
+    const state = makeState({
+      mode: 'coop',
+      players: {
+        p1: { id: 'p1', name: 'Alice', slot: 1, color: 'cyan', kills: 0 } as any,
+        p2: { id: 'p2', name: 'Bob', slot: 2, color: 'orange', kills: 0 } as any,
+      },
+    })
+    render(<LobbyScreen state={state} playerId="p1" onReady={() => {}} onUnready={() => {}} onStartSolo={() => {}} />)
+    const readyBtn = screen.getByRole('button', { name: /ready/i })
+    const text = readyBtn.textContent ?? ''
+    expect(text.toLowerCase()).not.toContain('wait for others')
+  })
+
+  it('Start Solo button visible when playerCount === 1 regardless of state.mode (escape hatch)', () => {
+    // Regression: previously the Start Solo button only rendered when
+    // state.mode === 'solo'. After matchmaking, mode === 'coop', so a
+    // user stuck alone had no way to bail out to solo without leaving
+    // the lobby entirely. Now: the button is the escape hatch.
+    const state = makeState({
+      mode: 'coop', // matchmaked alone
+      players: {
+        p1: { id: 'p1', name: 'Alice', slot: 1, color: 'cyan', kills: 0 } as any,
+      },
+    })
+    render(<LobbyScreen state={state} playerId="p1" onReady={() => {}} onUnready={() => {}} onStartSolo={() => {}} />)
+    const startSoloBtn = screen.queryByRole('button', { name: /start solo/i })
+    expect(startSoloBtn).not.toBeNull()
+  })
+
+  it('Start Solo button hidden when ≥2 players (coop IS an option — no escape needed)', () => {
+    // Negative: two or more players means coop is live; the Start Solo
+    // button would be misleading.
+    const state = makeState({
+      mode: 'coop',
+      players: {
+        p1: { id: 'p1', name: 'Alice', slot: 1, color: 'cyan', kills: 0 } as any,
+        p2: { id: 'p2', name: 'Bob', slot: 2, color: 'orange', kills: 0 } as any,
+      },
+    })
+    render(<LobbyScreen state={state} playerId="p1" onReady={() => {}} onUnready={() => {}} onStartSolo={() => {}} />)
+    const startSoloBtn = screen.queryByRole('button', { name: /start solo/i })
+    expect(startSoloBtn).toBeNull()
+  })
+
+  it('Start Solo click invokes onStartSolo handler', () => {
+    const onStartSolo = vi.fn()
+    const state = makeState({
+      mode: 'coop',
+      players: {
+        p1: { id: 'p1', name: 'Alice', slot: 1, color: 'cyan', kills: 0 } as any,
+      },
+    })
+    render(<LobbyScreen state={state} playerId="p1" onReady={() => {}} onUnready={() => {}} onStartSolo={onStartSolo} />)
+    fireEvent.click(screen.getByRole('button', { name: /start solo/i }))
+    expect(onStartSolo).toHaveBeenCalledTimes(1)
   })
 
   // ─── Property-based test ──────────────────────────────────────────────────
@@ -302,31 +404,47 @@ describe('LobbyScreen - hints bar', () => {
     expect(text).toContain('?')
   })
 
-  it('shows a Start Solo hint only in solo mode', () => {
+  it('shows a Start Solo hint whenever playerCount === 1 (solo OR coop-alone)', () => {
+    // Updated from "shows a Start Solo hint only in solo mode". The hint
+    // is the keyboard mirror of the Start Solo button, which is now an
+    // escape hatch for matchmaked-alone players (coop mode, 1 player).
     const soloState = makeState({
       mode: 'solo',
       players: {
         p1: { id: 'p1', name: 'Alice', slot: 1, color: 'cyan', kills: 0 } as any,
       },
     })
-    const { unmount } = render(
+    const { unmount: unmountSolo } = render(
       <LobbyScreen state={soloState} playerId="p1" onReady={() => {}} onUnready={() => {}} onStartSolo={() => {}} />,
     )
-    const barSolo = screen.getByTestId('hints-bar')
-    expect((barSolo.textContent ?? '').toLowerCase()).toContain('start solo')
-    unmount()
+    expect((screen.getByTestId('hints-bar').textContent ?? '').toLowerCase()).toContain('start solo')
+    unmountSolo()
 
-    render(
-      <LobbyScreen
-        state={makeState({ mode: 'coop' })}
-        playerId="p1"
-        onReady={() => {}}
-        onUnready={() => {}}
-        onStartSolo={() => {}}
-      />,
+    // Coop-alone: also shows the hint (the regression fix).
+    const coopAloneState = makeState({
+      mode: 'coop',
+      players: {
+        p1: { id: 'p1', name: 'Alice', slot: 1, color: 'cyan', kills: 0 } as any,
+      },
+    })
+    const { unmount: unmountCoopAlone } = render(
+      <LobbyScreen state={coopAloneState} playerId="p1" onReady={() => {}} onUnready={() => {}} onStartSolo={() => {}} />,
     )
-    const barCoop = screen.getByTestId('hints-bar')
-    expect((barCoop.textContent ?? '').toLowerCase()).not.toContain('start solo')
+    expect((screen.getByTestId('hints-bar').textContent ?? '').toLowerCase()).toContain('start solo')
+    unmountCoopAlone()
+
+    // Coop with ≥2 players: hint hidden (no escape needed).
+    const coopFullState = makeState({
+      mode: 'coop',
+      players: {
+        p1: { id: 'p1', name: 'Alice', slot: 1, color: 'cyan', kills: 0 } as any,
+        p2: { id: 'p2', name: 'Bob', slot: 2, color: 'orange', kills: 0 } as any,
+      },
+    })
+    render(
+      <LobbyScreen state={coopFullState} playerId="p1" onReady={() => {}} onUnready={() => {}} onStartSolo={() => {}} />,
+    )
+    expect((screen.getByTestId('hints-bar').textContent ?? '').toLowerCase()).not.toContain('start solo')
   })
 })
 

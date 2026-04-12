@@ -56,6 +56,12 @@ export function LobbyScreen({ state, playerId, onReady, onUnready, onStartSolo }
   const emptySlots = slots.filter((s) => !occupiedSlotSet.has(s))
 
   const readyCount = state.readyPlayerIds.length
+  // Current player count — NOT the room cap. Server starts the game at
+  // ≥2 players all-ready; `maxPlayers` is just the seat capacity. Using
+  // maxPlayers as the ticker denominator made alone-in-coop look like
+  // "need 4 players to play", which it isn't.
+  const playerCount = occupied.length
+  const isAlone = playerCount === 1
 
   const [copied, setCopied] = useState(false)
   const qrCanvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -80,10 +86,16 @@ export function LobbyScreen({ state, playerId, onReady, onUnready, onStartSolo }
     }
   }, [])
 
+  // Ticker text by situation:
+  //   countdown  → "Starting in 3…"
+  //   alone      → "Waiting for another player…"  (no "1/1 ready" — that's misleading)
+  //   ≥2 players → "N/playerCount ready — starting when all ready"
   const tickerText =
     state.status === 'countdown' && state.countdownRemaining != null
       ? `Starting in ${state.countdownRemaining}…`
-      : `${readyCount}/${maxPlayers} ready — starting when all ready`
+      : isAlone
+        ? 'Waiting for another player…'
+        : `${readyCount}/${playerCount} ready — starting when all ready`
 
   const tickerColor = state.status === 'countdown' ? COLORS.ui.warning : COLORS.ui.label
 
@@ -224,8 +236,18 @@ export function LobbyScreen({ state, playerId, onReady, onUnready, onStartSolo }
             }}
           >
             {isReady ? 'Unready' : 'Ready'}
+            {isAlone && !isReady && (
+              <span style={{ fontSize: 13, color: COLORS.ui.label, marginLeft: 8 }}>
+                (wait for others)
+              </span>
+            )}
           </button>
-          {state.mode === 'solo' && (
+          {/* Start Solo button: shown when playerCount === 1 regardless of
+              state.mode. In pure solo flow (mode === 'solo') it's the
+              primary path; after matchmaking alone (mode === 'coop' with
+              only the local player) it's an escape hatch so the user
+              isn't stuck waiting indefinitely for nobody. */}
+          {isAlone && (
             <button
               onClick={onStartSolo}
               className="vaders-menu-item"
@@ -249,7 +271,11 @@ export function LobbyScreen({ state, playerId, onReady, onUnready, onStartSolo }
           role="lobby"
           hints={[
             ['ENTER', isReady ? 'Unready' : 'Ready'],
-            ...(state.mode === 'solo' ? ([['S', 'Start Solo']] as Array<[string, string]>) : []),
+            // `[S] Start Solo` hint is the keyboard mirror of the button.
+            // Visible whenever the button is (playerCount === 1) —
+            // regardless of state.mode, so matchmaked-alone players also
+            // see the shortcut.
+            ...(isAlone ? ([['S', 'Start Solo']] as Array<[string, string]>) : []),
             ['ESC', 'Leave'],
             ['M', 'Mute SFX'],
             ['N', 'Mute Music'],
