@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { LaunchScreen, PLAYER_NAME_STORAGE_KEY } from './components/LaunchScreen'
 import { LobbyScreen } from './components/LobbyScreen'
 import { GameScreen } from './components/GameScreen'

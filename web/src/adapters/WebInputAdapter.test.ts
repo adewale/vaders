@@ -1,6 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { WebInputAdapter } from './WebInputAdapter'
-import type { VadersKey } from '../../../client-core/src/adapters'
 
 describe('WebInputAdapter', () => {
   let adapter: WebInputAdapter

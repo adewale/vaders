@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react'
+import { useRef, useEffect } from 'react'
 import type { GameState } from '../../../shared/types'
 import { buildDrawCommands, executeDrawCommands, resetEffects } from '../renderer/canvasRenderer'
 import { useCanvasScale } from '../hooks/useCanvasScale'

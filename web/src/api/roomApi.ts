@@ -35,7 +35,14 @@ export function buildWsUrl(roomId: string): string {
   return `${base}/room/${roomId}/ws`
 }
 
+/**
+ * Create a fresh room intended for solo play. The server endpoint is the
+ * same as `createRoom` — "solo-ness" lives entirely in the caller, which
+ * sends `{ type: 'start_solo' }` after the WebSocket connects (see
+ * `App.tsx`). Exists as a separate export so call sites can declare intent
+ * at a glance and so future server-side solo specialisation can be added
+ * without churning callers.
+ */
 export async function createSoloRoom(): Promise<RoomInfo> {
-  // Solo mode: create a room, then the App will send start_solo after connecting
   return createRoom()
 }

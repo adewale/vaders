@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import QRCode from 'qrcode'
 import type { GameState, Player, PlayerSlot } from '../../../shared/types'
 import { COLORS } from '../../../client-core/src/sprites/colors'

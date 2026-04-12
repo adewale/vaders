@@ -9,7 +9,7 @@
 //
 // Follows the ConfettiSystem pattern: pre-allocated pool, update() + getCells() API.
 
-import { BRAILLE_DENSITY, MAX_DENSITY } from './waveBorder'
+import { MAX_DENSITY } from './waveBorder'
 import { clamp } from './easing'
 
 // ─── Dissolve Braille Characters ──────────────────────────────────────────────

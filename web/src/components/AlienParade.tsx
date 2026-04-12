@@ -3,7 +3,7 @@
 // crab, octopus) side-by-side, gently swaying through their A/B frames.
 // Used on the LaunchScreen under the logo.
 
-import React, { useEffect, useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import { PIXEL_ART } from '../../../client-core/src/sprites/bitmaps'
 import { COLORS } from '../../../client-core/src/sprites/colors'
 

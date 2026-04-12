@@ -8,7 +8,6 @@ import {
   ASPECT_RATIO,
   WAVE_COLORS,
   type WaveBorderConfig,
-  type BorderCell,
 } from './waveBorder'
 import { interpolateGradient, getWaveGradient } from './gradient'
 

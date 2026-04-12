@@ -8,7 +8,6 @@ import {
   type DissolveConfig,
   type DissolveCellOutput,
 } from './dissolve'
-import { BRAILLE_DENSITY, MAX_DENSITY } from './waveBorder'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

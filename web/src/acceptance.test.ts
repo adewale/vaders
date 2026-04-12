@@ -22,7 +22,7 @@ import type {
 } from '../../shared/types'
 import { LAYOUT } from '../../shared/types'
 import { GRADIENT_COLORS, COLORS } from '../../client-core/src/sprites/colors'
-import { PIXEL_ART, getAnimationFrame, SPRITE_SIZE } from '../../client-core/src/sprites/bitmaps'
+import { PIXEL_ART, getAnimationFrame } from '../../client-core/src/sprites/bitmaps'
 import { getUFOColor } from '../../client-core/src/effects/colorCycling'
 
 // ─── Test Helpers ────────────────────────────────────────────────────────────
@@ -2751,6 +2751,31 @@ describe('Typography: HUD glow and transitions', () => {
     const fontSize = Number.parseInt(match![1], 10)
     // Without debounce, fontSize would still be ~39 (bumped) — prove it's back down.
     expect(fontSize).toBeLessThanOrEqual(30)
+  })
+
+  it('score bump cooldown boundary: 9 ticks after arm does NOT re-arm; 10 does', async () => {
+    // Direct test of the debounce mechanism (lastScoreBumpTick) rather
+    // than just observing the downstream font size. Exercises the
+    // cooldown boundary to catch off-by-one regressions in the gate.
+    const { resetEffects, _getScoreBumpStateForTests } = await import('./renderer/canvasRenderer')
+    resetEffects()
+
+    // First kill at tick 100 — arms the bump.
+    const s0 = stateWith([], {}, { tick: 99, score: 0 })
+    const s1 = stateWith([], {}, { tick: 100, score: 10 })
+    buildDrawCommands(s1, null, s0)
+    expect(_getScoreBumpStateForTests().lastArmedTick).toBe(100)
+
+    // Second kill at tick 109 (9 ticks later — still inside the cooldown).
+    const s9 = stateWith([], {}, { tick: 109, score: 20 })
+    buildDrawCommands(s9, null, s1)
+    expect(_getScoreBumpStateForTests().lastArmedTick).toBe(100) // NOT re-armed
+
+    // Third kill at tick 110 (exactly the cooldown boundary). Per the
+    // implementation `>= SCORE_BUMP_COOLDOWN_TICKS`, this CAN re-arm.
+    const s10 = stateWith([], {}, { tick: 110, score: 30 })
+    buildDrawCommands(s10, null, s9)
+    expect(_getScoreBumpStateForTests().lastArmedTick).toBe(110)
   })
 
   it('wave change produces a glow burst decoration', () => {

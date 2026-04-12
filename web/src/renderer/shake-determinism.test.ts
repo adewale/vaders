@@ -132,4 +132,37 @@ describe('shake jitter determinism (no Math.random per rAF)', () => {
       { numRuns: 80 },
     )
   })
+
+  it('PBT: jitter stays bounded + finite at extreme ticks (negative + very large)', () => {
+    // Regression guard for the original PBT's gap: `{ min: 0, max: 100_000 }`
+    // never exercised negative ticks or the range where sin/cos precision
+    // starts to drift. Tests that (a) dx/dy are finite and (b) still
+    // bounded by intensity everywhere the renderer can realistically be
+    // called with a tick value.
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 1, max: 20 }),
+        fc.oneof(
+          fc.integer({ min: -1_000_000, max: -1 }),        // negative
+          fc.integer({ min: 1_000_000, max: 1_000_000_000 }), // very large
+          fc.constantFrom(0, 1, -1, Number.MAX_SAFE_INTEGER),  // boundary literals
+        ),
+        (intensity, tick) => {
+          resetEffects()
+          triggerShake(intensity, 12)
+          const { ctx, translates } = makeCtxMock()
+          executeDrawCommands(ctx as unknown as CanvasRenderingContext2D, [clearCmd], tick)
+          if (translates.length === 0) return true
+          const { dx, dy } = translates[0]
+          return (
+            Number.isFinite(dx) &&
+            Number.isFinite(dy) &&
+            Math.abs(dx) <= intensity + 1e-6 &&
+            Math.abs(dy) <= intensity + 1e-6
+          )
+        },
+      ),
+      { numRuns: 60 },
+    )
+  })
 })

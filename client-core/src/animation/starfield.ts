@@ -134,6 +134,17 @@ export class StarfieldSystem {
     return this.stars.length
   }
 
+  /**
+   * Clear the per-tick memoization cache. Defensive — `getCells` is a pure
+   * function of (tick, layers) so callers would arrive at the correct
+   * result regardless, but tests or tools that swap out layer data
+   * mid-session need a way to force re-computation.
+   */
+  reset(): void {
+    this.cachedKey = ''
+    this.cachedCells = []
+  }
+
   /** Returns renderable cells, memoized by composite slow-tick key */
   getCells(tick: number): StarCell[] {
     // Build a cache key from each layer's slow-tick value

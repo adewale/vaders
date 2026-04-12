@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
 import type { GameState, Player, PlayerSlot } from '../../../shared/types'
 import { COLORS } from '../../../client-core/src/sprites/colors'
 import { MenuBackground } from './MenuBackground'

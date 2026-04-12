@@ -136,8 +136,8 @@ describe('in-place replay: state reset triggers on tick rewind', () => {
   it('PBT: after a tick rewind, seenDeadAlienIds is always empty', () => {
     fc.assert(
       fc.property(
-        fc.integer({ min: 5, max: 300 }),          // previous tick (game 1)
-        fc.integer({ min: 0, max: 3 }),             // rewind target (game 2)
+        fc.integer({ min: 5, max: 300 }), // previous tick (game 1)
+        fc.integer({ min: 0, max: 3 }), // rewind target (game 2)
         fc.array(fc.string({ minLength: 3 }), { minLength: 1, maxLength: 8 }),
         (prevTick, newTick, deadIds) => {
           resetEffects()

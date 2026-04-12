@@ -258,6 +258,16 @@ export function _getConfettiStartedForTests(): boolean {
   return confettiStarted
 }
 
+/**
+ * Inspector for the score-bump debounce mechanism. Exposes both the
+ * currently-armed bump-ticks counter and the tick the bump was last armed.
+ * Tests use this to verify the cooldown gate directly rather than only
+ * observing the downstream font-size effect.
+ */
+export function _getScoreBumpStateForTests(): { ticks: number; lastArmedTick: number } {
+  return { ticks: scoreBumpTicks, lastArmedTick: lastScoreBumpTick }
+}
+
 /** Per-layer star dot sizes (px) — creates parallax: bigger = closer. */
 const STAR_LAYER_SIZES = [1, 2, 3] as const
 // (dissolveSystem removed — ExplosionSystem owns all death particles)
@@ -315,6 +325,7 @@ export function resetEffects(): void {
   fightFlashTicks = 0
   clearedFlashTicks = 0
   prevGameStatus = null
+  starfield.reset()
   shootingStars.reset()
   confettiSystem.stop()
   // (legacy DissolveSystem removed from web renderer)

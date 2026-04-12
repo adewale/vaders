@@ -1,5 +1,3 @@
-import React from 'react'
-
 interface LoadingSpinnerProps {
   label: string
   attempt?: number

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 
 /**
  * Visual-only "paused" overlay that appears when the tab is hidden.

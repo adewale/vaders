@@ -2,7 +2,34 @@
 
 All notable changes to Vaders are documented in this file.
 
-## [1.1.0] - Unreleased
+## [1.1.0] — 2026-04-12
+
+### Added
+
+- **Web frontend** at <https://vaders.adewale-883.workers.dev> — React + HTML5 Canvas, Vite build, deployed via a single Cloudflare Worker serving both the API and static assets (same-origin)
+- **`client-core/` platform-agnostic library** — animation, connection hook, input types, audio triggers, sprite data, and adapter interfaces shared between TUI and web; CI blocks `@opentui/*`, `bun:*`, and `node:*` imports
+- **URL-based room joining** — `/room/:code` joins directly, `/solo` starts solo, `/?matchmake=true` auto-matchmakes
+- **Split audio controls** — **M** toggles sound effects, **N** toggles music (both frontends); Web Audio API with stereo pan, countdown ticks, and menu navigation beeps on the web
+- **`?` controls cheatsheet** on the web launch screen
+- **Match scoreboard** on game over — ranks all players by kills with MVP trophy, dense ranking (1,2,2,4), slot-coloured badges, and share-score button
+- **Slot-coloured multiplayer lobby** — ship icons, empty-seat placeholders, ready ticker
+- **Full-screen wave announcements** with pulsing border and alien slide-in entrance during `wipe_reveal`; HUD player legend in multiplayer; FIGHT! / WAVE CLEARED! transition flashes
+- **`/health` endpoint** and structured `worker_boot` log exposing version, commit hash, and build timestamp; launch-screen footer shows `v1.1.0 · <commit>`
+- **Responsive web rendering** with 5:3 aspect-ratio scaling and a mobile gate for viewports under 600px
+
+### Changed
+
+- **Workspace restructured to five packages** — `shared/`, `client-core/` (new), `client/` (thinned to TUI-only), `web/` (new), `worker/` (unchanged)
+- **Worker per-request `console.log` breadcrumbs** gated behind a `DEBUG_TRACE` flag (off in production)
+
+### Fixed
+
+- **Lives-heart misalignment** in the web HUD — mixed-font segments now laid out with `ctx.measureText` instead of hand-rolled `fontSize * 0.6` approximations
+- **Flickering screen-shake** — replaced `Math.random()` jitter with deterministic sine decay keyed on tick
+- **Full-screen white flash on every alien kill** removed (strobed in busy waves)
+- **UFO warp-ghost, rainbow trail, motion-blur streaks, energy glow halo, and trail particles** removed per user feedback
+- **Replay state leak** — accumulators between matches now reset on tick rewind inside `buildDrawCommands`
+- **Red-damage flash and shake intensity** softened; score-bump retriggers debounced
 
 ## [1.0.0] - 2026-02-22
 

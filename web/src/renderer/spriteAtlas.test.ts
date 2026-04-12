@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { getSpriteImage, _clearAtlasCacheForTests, _getAtlasCacheSizeForTests } from './spriteAtlas'
-import { PIXEL_ART, SPRITE_SIZE } from '../../../client-core/src/sprites/bitmaps'
+import { SPRITE_SIZE } from '../../../client-core/src/sprites/bitmaps'
 import { CELL_W, CELL_H } from './canvasRenderer'
 
 describe('sprite atlas', () => {

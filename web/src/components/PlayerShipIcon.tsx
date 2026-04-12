@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import type { PlayerSlot } from '../../../shared/types'
 import { COLORS } from '../../../client-core/src/sprites/colors'
 import { PIXEL_ART } from '../../../client-core/src/sprites/bitmaps'

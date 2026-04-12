@@ -10,7 +10,6 @@ import {
   SCATTER_ENTRANCE,
   SLIDE_ENTRANCE,
   createRainEntrance,
-  type EntrancePattern,
 } from './entrance'
 
 describe('DEFAULT_ENTRANCE_CONFIG', () => {

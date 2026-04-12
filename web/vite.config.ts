@@ -14,5 +14,9 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     include: ['src/**/*.test.{ts,tsx}'],
+    // Regenerate the gitignored buildInfo.ts files before any test loads.
+    // Without this, a fresh clone (or CI running `npx vitest run` directly,
+    // bypassing pretest hooks) would import-fail at test time.
+    globalSetup: ['./vitest.global-setup.mjs'],
   },
 })
