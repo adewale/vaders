@@ -66,7 +66,7 @@ const _typeCheckMappedStatuses: MappedStatusesMatch = true
  * Default values for all GameState fields.
  * This is the ONLY place where GameState defaults should be defined.
  */
-export const GAME_STATE_DEFAULTS: Omit<GameState, 'roomId'> = {
+export const GAME_STATE_DEFAULTS: Omit<GameState, 'roomCode'> = {
   mode: 'solo',
   status: 'waiting',
   tick: 0,
@@ -86,11 +86,11 @@ export const GAME_STATE_DEFAULTS: Omit<GameState, 'roomId'> = {
   config: DEFAULT_CONFIG,
 }
 
-// Type-level assertion: GAME_STATE_DEFAULTS must have all GameState fields except roomId
+// Type-level assertion: GAME_STATE_DEFAULTS must have all GameState fields except roomCode
 // If this line has a type error, GAME_STATE_DEFAULTS is missing fields from GameState
-type GameStateWithoutRoomId = Omit<GameState, 'roomId'>
-type DefaultsHaveAllFields = typeof GAME_STATE_DEFAULTS extends GameStateWithoutRoomId ? true : never
-type StateHasAllDefaults = GameStateWithoutRoomId extends typeof GAME_STATE_DEFAULTS ? true : never
+type GameStateWithoutRoomCode = Omit<GameState, 'roomCode'>
+type DefaultsHaveAllFields = typeof GAME_STATE_DEFAULTS extends GameStateWithoutRoomCode ? true : never
+type StateHasAllDefaults = GameStateWithoutRoomCode extends typeof GAME_STATE_DEFAULTS ? true : never
 const _typeCheckDefaults: DefaultsHaveAllFields = true
 const _typeCheckState: StateHasAllDefaults = true
 
@@ -98,10 +98,10 @@ const _typeCheckState: StateHasAllDefaults = true
  * Creates a fresh GameState with all defaults applied.
  * This is the ONLY function that should create initial state.
  */
-export function createDefaultGameState(roomId: string): GameState {
+export function createDefaultGameState(roomCode: string): GameState {
   return {
     ...GAME_STATE_DEFAULTS,
-    roomId,
+    roomCode,
     rngSeed: Date.now(),
     // Deep clone objects to avoid shared references
     players: {},
@@ -116,7 +116,7 @@ export function createDefaultGameState(roomId: string): GameState {
  * Any fields missing from persistedState will be filled from GAME_STATE_DEFAULTS.
  * Existing values in persistedState are preserved.
  */
-export function migrateGameState(persistedState: Partial<GameState> & { roomId: string }): GameState {
+export function migrateGameState(persistedState: Partial<GameState> & { roomCode: string }): GameState {
   return {
     ...GAME_STATE_DEFAULTS,
     ...persistedState,
@@ -144,7 +144,7 @@ export function validateGameState(state: unknown): string[] {
 
   // Check all required fields exist and are not undefined
   const requiredFields: (keyof GameState)[] = [
-    'roomId',
+    'roomCode',
     'mode',
     'status',
     'tick',

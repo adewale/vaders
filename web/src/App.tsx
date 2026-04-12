@@ -52,8 +52,11 @@ export function App() {
       setScreen('game')
     } else if (route.type === 'matchmake') {
       matchmake()
-        .then(({ roomId, wsUrl }) => {
-          navigateTo(`/room/${roomId}`)
+        .then(({ roomCode, wsUrl }) => {
+          // Replace `/?matchmake=true` with `/room/XYZ` — pressing back from
+          // the room should return to the launch screen, not re-trigger
+          // matchmaking.
+          navigateTo(`/room/${roomCode}`, { replace: true })
           setServerUrl(wsUrl)
           setScreen('game')
         })
@@ -121,8 +124,8 @@ export function App() {
     kickSamples()
     refreshPlayerName()
     try {
-      const { roomId, wsUrl } = await createRoom()
-      navigateTo(`/room/${roomId}`)
+      const { roomCode, wsUrl } = await createRoom()
+      navigateTo(`/room/${roomCode}`)
       setServerUrl(wsUrl)
       setScreen('game')
     } catch (err: any) {
@@ -149,8 +152,8 @@ export function App() {
     kickSamples()
     refreshPlayerName()
     try {
-      const { roomId, wsUrl } = await matchmake()
-      navigateTo(`/room/${roomId}`)
+      const { roomCode, wsUrl } = await matchmake()
+      navigateTo(`/room/${roomCode}`)
       setServerUrl(wsUrl)
       setScreen('game')
     } catch (err: any) {
@@ -167,7 +170,10 @@ export function App() {
     } catch {
       // ignore
     }
-    navigateTo('/')
+    // Use replace so error-recovery paths back to `/` don't stack entries.
+    // If the user was on `/room/XYZ` and hit an error, going back shouldn't
+    // require pressing the browser-back button twice.
+    navigateTo('/', { replace: true })
   }, [])
 
   if (screen === 'launch') {

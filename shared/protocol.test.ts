@@ -391,7 +391,7 @@ describe('ServerMessage Validation', () => {
       const msg: ServerMessage = { type: 'sync', state }
       const syncState = msg.state as GameState
 
-      expect(syncState.roomId).toBe('ABC123')
+      expect(syncState.roomCode).toBe('ABC123')
       expect(syncState.mode).toBe('solo')
       expect(syncState.status).toBe('waiting')
       expect(syncState.tick).toBe(0)
@@ -415,7 +415,7 @@ describe('ServerMessage Validation', () => {
 
       expect(parsed.type).toBe('sync')
       expect(parsed.state).toBeDefined()
-      expect(parsed.state.roomId).toBe('ABC123')
+      expect(parsed.state.roomCode).toBe('ABC123')
       expect(validateServerMessage(parsed)).toBeNull()
     })
 
@@ -1288,7 +1288,7 @@ describe('Message Serialization Patterns', () => {
     const serialized = JSON.stringify(msg)
     const parsed = JSON.parse(serialized)
 
-    expect(parsed.state.roomId).toBe('ABC123')
+    expect(parsed.state.roomCode).toBe('ABC123')
     expect(parsed.state.players.p1.id).toBe('p1')
     expect(parsed.state.config.width).toBe(120)
     expect(Array.isArray(parsed.state.entities)).toBe(true)

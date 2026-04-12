@@ -7,16 +7,33 @@ export type { Env } from './env'
 
 import type { Env } from './env'
 import { BUILD_INFO } from './buildInfo'
+import { logEvent } from './logger'
 
 // Log build identity once per isolate so the deploy can be cross-referenced
 // against /health and client footers in aggregated logs. Keeping this at
-// module-load time (not per-request) makes it a cheap one-liner.
+// module-load time (not per-request) makes it a cheap one-liner. We keep
+// this raw JSON (not via logEvent) because module-load is before any
+// request.cf context exists and we want a minimal, stable envelope here.
 console.log(JSON.stringify({
   event: 'worker_boot',
   version: BUILD_INFO.version,
   commitHash: BUILD_INFO.commitHash,
   buildTime: BUILD_INFO.buildTime,
 }))
+
+/** Header used to propagate the per-request ID from the Worker entry into
+ *  the Durable Object so every log line from the DO can be correlated with
+ *  the originating HTTP request. Matches the wide-events pattern from
+ *  logging-best-practices: one requestId threads through every service hop. */
+const REQUEST_ID_HEADER = 'x-vaders-request-id'
+
+/** Clone a Request with the requestId header added, so DO-side logs can
+ *  include it. Preserves body, method, and existing headers. */
+function withRequestId(request: Request, requestId: string): Request {
+  const headers = new Headers(request.headers)
+  headers.set(REQUEST_ID_HEADER, requestId)
+  return new Request(request, { headers })
+}
 
 const ROOM_CODE_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 const ROOM_CODE_LENGTH = 6
@@ -68,12 +85,34 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
 
+    // Generate a per-request ID. crypto.randomUUID is available in the
+    // Workers runtime. This is the correlation key that lets us stitch the
+    // Worker entry log to the matching DO-side logs.
+    const requestId = crypto.randomUUID()
+
+    // Capture the Cloudflare colo (region) from request.cf if present so
+    // subsequent logEvent() calls within this request can include it.
+    // request.cf is undefined in tests/Node; we guard for that.
+    const colo = (request as Request & { cf?: { colo?: string } }).cf?.colo
+    if (colo) {
+      ;(globalThis as { CF_REGION?: string }).CF_REGION = colo
+    }
+
     // CORS headers for all responses
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
     }
+
+    // Wide event: one log line per incoming HTTP/WS request at entry. Not
+    // per-WebSocket-message (that would flood Logpush); those go through
+    // GameRoom's DEBUG_TRACE breadcrumb path when enabled.
+    logEvent('request_received', {
+      method: request.method,
+      path: url.pathname,
+      requestId,
+    })
 
     // Handle CORS preflight
     if (request.method === 'OPTIONS') {
@@ -108,7 +147,8 @@ export default {
       const roomCode = wsMatch[1]
       const id = env.GAME_ROOM.idFromName(roomCode)
       const stub = env.GAME_ROOM.get(id)
-      return stub.fetch(request)
+      // Thread requestId to the DO so its logs correlate with this request.
+      return stub.fetch(withRequestId(request, requestId))
     }
 
     // GET /matchmake - Find or create open room

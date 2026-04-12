@@ -68,7 +68,7 @@ export function LobbyScreen({ state, playerId, onReady, onUnready, onStartSolo }
     QRCode.toCanvas(canvas, url, { width: 96, margin: 1 }, () => {
       // Ignore errors — QR is decorative; jsdom may not support canvas.
     })
-  }, [state.roomId])
+  }, [state.roomCode])
 
   const handleCopyLink = useCallback(async () => {
     try {
@@ -102,7 +102,7 @@ export function LobbyScreen({ state, playerId, onReady, onUnready, onStartSolo }
       >
         <h2 style={{ color: COLORS.ui.title, textAlign: 'center', fontSize: 28 }}>LOBBY</h2>
         <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12, marginTop: 8 }}>
-          <p style={{ color: COLORS.ui.wave, fontSize: 24, margin: 0 }}>Room: {state.roomId}</p>
+          <p style={{ color: COLORS.ui.wave, fontSize: 24, margin: 0 }}>Room: {state.roomCode}</p>
           <button
             type="button"
             onClick={handleCopyLink}

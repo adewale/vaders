@@ -21,15 +21,15 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-// ─── 1. createRoom calls POST /room and returns roomId + wsUrl ──────────────
+// ─── 1. createRoom calls POST /room and returns roomCode + wsUrl ────────────
 
 describe('createRoom', () => {
-  it('calls POST /room and returns roomId + wsUrl', async () => {
-    mockFetchResponse({ roomId: 'ABC123' })
+  it('calls POST /room and returns roomCode + wsUrl', async () => {
+    mockFetchResponse({ roomCode: 'ABC123' })
 
     const result = await createRoom()
 
-    expect(result.roomId).toBe('ABC123')
+    expect(result.roomCode).toBe('ABC123')
     expect(result.wsUrl).toContain('ABC123')
     expect(result.wsUrl).toMatch(/^wss?:\/\//)
     expect(result.wsUrl).toMatch(/\/room\/ABC123\/ws$/)
@@ -63,12 +63,12 @@ describe('createRoom', () => {
 // ─── 3. matchmake calls GET /matchmake ──────────────────────────────────────
 
 describe('matchmake', () => {
-  it('calls GET /matchmake and returns roomId + wsUrl', async () => {
-    mockFetchResponse({ roomId: 'MATCH42' })
+  it('calls GET /matchmake and returns roomCode + wsUrl', async () => {
+    mockFetchResponse({ roomCode: 'MATCH42' })
 
     const result = await matchmake()
 
-    expect(result.roomId).toBe('MATCH42')
+    expect(result.roomCode).toBe('MATCH42')
     expect(result.wsUrl).toContain('MATCH42')
     expect(result.wsUrl).toMatch(/\/room\/MATCH42\/ws$/)
 
@@ -103,7 +103,7 @@ describe('getRoomInfo', () => {
   // ─── 5. getRoomInfo returns data on 200 ───────────────────────────────────
 
   it('returns data on 200', async () => {
-    mockFetchResponse({ roomId: 'XYZ789', status: 'waiting', playerCount: 2 })
+    mockFetchResponse({ roomCode: 'XYZ789', status: 'waiting', playerCount: 2 })
 
     const result = await getRoomInfo('XYZ789')
 
@@ -168,13 +168,13 @@ describe('createSoloRoom', () => {
       'fetch',
       vi.fn().mockResolvedValue({
         ok: true,
-        json: () => Promise.resolve({ roomId: 'SOLO01' }),
+        json: () => Promise.resolve({ roomCode: 'SOLO01' }),
       }),
     )
 
     const result = await createSoloRoom()
 
-    expect(result.roomId).toBe('SOLO01')
+    expect(result.roomCode).toBe('SOLO01')
     expect(result.wsUrl).toContain('SOLO01')
     expect(result.wsUrl).toMatch(/\/room\/SOLO01\/ws$/)
   })

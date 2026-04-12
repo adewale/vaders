@@ -8,7 +8,7 @@ import { COLORS } from '../../../client-core/src/sprites/colors'
 
 function makeState(overrides: Partial<GameState> = {}): GameState {
   return {
-    roomId: 'ABC123',
+    roomCode: 'ABC123',
     status: 'waiting',
     mode: 'coop',
     wave: 1,

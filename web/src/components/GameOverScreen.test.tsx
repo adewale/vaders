@@ -32,7 +32,7 @@ function makePlayer(overrides: Partial<Player> & { id: string; slot: PlayerSlot 
 
 function makeState(overrides: Partial<GameState> = {}): GameState {
   return {
-    roomId: 'ABC123',
+    roomCode: 'ABC123',
     status: 'game_over',
     mode: 'solo',
     wave: 4,

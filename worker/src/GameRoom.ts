@@ -48,8 +48,31 @@ function debugLog(tag: string, data: Record<string, unknown>): void {
 }
 import { createDefaultGameState, migrateGameState } from '../../shared/state-defaults'
 import type { Env } from './env'
+import { logEvent } from './logger'
 
 export type { Env }
+
+/**
+ * Header used by the Worker entry to propagate a per-request ID into the DO
+ * so wide-event logs can be stitched across the Worker→DO hop. Must match
+ * the constant in index.ts.
+ */
+const REQUEST_ID_HEADER = 'x-vaders-request-id'
+
+/**
+ * Extract the requestId from the inbound request header, or generate one if
+ * absent. Generating a fresh UUID is the right fallback for WebSocket
+ * messages that arrive AFTER the initial upgrade (the DO may have hibernated
+ * and the original request is long gone); it's also the right fallback for
+ * direct internal DO fetches in tests.
+ */
+function getRequestId(request?: Request): string {
+  if (request) {
+    const fromHeader = request.headers.get(REQUEST_ID_HEADER)
+    if (fromHeader) return fromHeader
+  }
+  return crypto.randomUUID()
+}
 
 // WebSocket attachment for player session data
 interface WebSocketAttachment {
@@ -125,6 +148,24 @@ export class GameRoom extends DurableObject<Env> {
   private inputQueue: GameAction[] = []
   private countdownRemaining: number | null = null
   private rateLimits: Map<WebSocket, RateLimitState> = new Map()
+  // Current request's correlation id — set by each entry point (fetch, ws
+  // message, ws close, alarm) so logEvent() calls reached from within share
+  // a stable requestId. This is a "contextual" field rather than passing
+  // requestId through every private method signature, which would be noisy.
+  private currentRequestId: string | null = null
+
+  /**
+   * Emit a wide-event log line with the room-scoped envelope: roomCode,
+   * requestId, and whatever caller-supplied fields. All meaningful state
+   * changes inside the DO should go through this so logs are consistent.
+   */
+  private log(eventName: string, data: Record<string, unknown> = {}): void {
+    logEvent(eventName, {
+      roomCode: this.game?.roomCode,
+      requestId: this.currentRequestId ?? undefined,
+      ...data,
+    })
+  }
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
@@ -174,6 +215,9 @@ export class GameRoom extends DurableObject<Env> {
    * HTTP fetch handler for non-WebSocket requests
    */
   async fetch(request: Request): Promise<Response> {
+    // Capture the per-request id (threaded from Worker entry via header) so
+    // any logEvent() call reached during this fetch carries it.
+    this.currentRequestId = getRequestId(request)
     const url = new URL(request.url)
 
     // POST /init - Initialize room with code
@@ -233,7 +277,7 @@ export class GameRoom extends DurableObject<Env> {
         return new Response(JSON.stringify({ error: 'Room not initialized' }), { status: 404 })
       }
       return new Response(JSON.stringify({
-        roomCode: this.game.roomId,
+        roomCode: this.game.roomCode,
         playerCount: Object.keys(this.game.players).length,
         status: this.game.status
       }), { headers: { 'Content-Type': 'application/json' } })
@@ -247,6 +291,11 @@ export class GameRoom extends DurableObject<Env> {
    * Called when any connected WebSocket receives a message, waking the DO if hibernating
    */
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
+    // Each incoming WS message is effectively a fresh "request" — after
+    // hibernation the original HTTP upgrade's requestId is long gone, so we
+    // mint a new one per message to correlate this message's events.
+    this.currentRequestId = getRequestId()
+
     if (!this.game) return
 
     // --- Rate limiting ---
@@ -349,6 +398,14 @@ export class GameRoom extends DurableObject<Env> {
           this.broadcastFullState()
           this.persistState()
           await this.updateRoomRegistry()
+
+          // Wide event: a new player joined the room. One log line per join.
+          this.log('room_join', {
+            playerId: player.id,
+            playerName: player.name,
+            slot: player.slot,
+            totalPlayers: Object.keys(this.game.players).length,
+          })
           break
         }
 
@@ -384,6 +441,15 @@ export class GameRoom extends DurableObject<Env> {
             this.broadcast({ type: 'event', name: 'player_ready', data: { playerId } })
             this.broadcastFullState()
             this.persistState()
+
+            // Wide event: a player readied up. Fires once per ready, not on
+            // duplicate ready attempts (guarded by !includes above).
+            this.log('player_ready', {
+              playerId,
+              readyCount: this.game.readyPlayerIds.length,
+              totalPlayers: Object.keys(this.game.players).length,
+            })
+
             await this.checkStartConditions()
           }
           break
@@ -464,6 +530,9 @@ export class GameRoom extends DurableObject<Env> {
    * Hibernatable WebSocket close handler
    */
   async webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean) {
+    // Fresh requestId for this hibernation-wake event so its log correlates.
+    this.currentRequestId = getRequestId()
+
     // Clean up rate limit state for this connection
     this.rateLimits.delete(ws)
 
@@ -479,6 +548,14 @@ export class GameRoom extends DurableObject<Env> {
       // Remove player immediately
       await this.removePlayer(playerId)
       this.broadcastFullState()
+
+      // Wide event: a player left the room. Fires exactly once per close.
+      this.log('room_leave', {
+        playerId,
+        remainingPlayers: Object.keys(this.game?.players ?? {}).length,
+        closeCode: code,
+        wasClean,
+      })
     }
   }
 
@@ -526,6 +603,12 @@ export class GameRoom extends DurableObject<Env> {
     this.broadcast({ type: 'event', name: 'countdown_tick', data: { count: COUNTDOWN_SECONDS } })
     this.broadcastFullState()
 
+    // Wide event: countdown began. Captures who was in the room at kickoff.
+    this.log('countdown_start', {
+      players: Object.keys(this.game.players),
+      durationSeconds: COUNTDOWN_SECONDS,
+    })
+
     // Use alarm for countdown ticks (hibernation-compatible, no setInterval)
     await this.ctx.storage.setAlarm(Date.now() + 1000)
   }
@@ -547,7 +630,7 @@ export class GameRoom extends DurableObject<Env> {
     await matchmaker.fetch(new Request('https://internal/register', {
       method: 'POST',
       body: JSON.stringify({
-        roomCode: this.game.roomId,
+        roomCode: this.game.roomCode,
         playerCount: Object.keys(this.game.players).length,
         status: this.game.status,
       })
@@ -590,6 +673,13 @@ export class GameRoom extends DurableObject<Env> {
     this.persistState()
     await this.updateRoomRegistry()
 
+    // Wide event: the game actually began (post-countdown, entering wipes).
+    this.log('game_start', {
+      mode: this.game.mode,
+      playerCount,
+      wave: this.game.wave,
+    })
+
     // Use alarm for game tick (hibernation-compatible)
     // Game runs at 30Hz (33ms per tick) during wipe phases too
     await this.ctx.storage.setAlarm(Date.now() + this.game.config.tickIntervalMs)
@@ -600,6 +690,10 @@ export class GameRoom extends DurableObject<Env> {
    * Using alarms instead of setInterval allows DO to hibernate between ticks
    */
   async alarm() {
+    // Alarm-driven wakes don't carry an HTTP request, so mint a requestId
+    // for any logEvent() reached during this alarm pass.
+    this.currentRequestId = getRequestId()
+
     // Handle countdown
     if (this.countdownRemaining !== null && this.countdownRemaining > 0) {
       this.countdownRemaining--
@@ -707,6 +801,16 @@ export class GameRoom extends DurableObject<Env> {
       } catch (err) {
         failed++
         debugLog('[BROADCAST] Send failed', { error: String(err) })
+        // Wide event on send failure. Keyed per-socket via its player
+        // attachment so we can correlate repeated failures to a specific
+        // player/client. Emitting here (inside the loop) is fine: failures
+        // are rare; the common success path has zero new log lines.
+        const attachment = ws.deserializeAttachment() as WebSocketAttachment | null
+        this.log('ws_error', {
+          playerId: attachment?.playerId,
+          errorCode: 'broadcast_send_failed',
+          message: String(err),
+        })
       }
     }
     // Log only on status changes or periodically to reduce noise
@@ -717,6 +821,7 @@ export class GameRoom extends DurableObject<Env> {
 
   private nextWave() {
     if (!this.game) return
+    const completedWave = this.game.wave
     this.game.wave++
 
     // Remove bullets, keep barriers, remove old aliens (new ones created during wipe_reveal)
@@ -731,6 +836,16 @@ export class GameRoom extends DurableObject<Env> {
     this.game.wipeWaveNumber = this.game.wave
 
     this.persistState()
+
+    // Wide event: a wave was cleared and the next one is starting. Emitted
+    // once per wave completion (nextWave is called from tick() on the
+    // wave_complete reducer event).
+    const survivors = Object.values(this.game.players).filter(p => p.alive).length
+    this.log('wave_complete', {
+      wave: completedWave,
+      nextWave: this.game.wave,
+      survivors,
+    })
   }
 
   private endGame(result: 'victory' | 'defeat') {
@@ -741,6 +856,20 @@ export class GameRoom extends DurableObject<Env> {
     this.broadcastFullState()
     this.persistState()
     void this.updateRoomRegistry()
+
+    // Wide event: the game ended. Captures outcome and per-player kill
+    // distribution — the business context that matters for postmortems and
+    // analytics (not just "game ended").
+    const playerKills: Record<string, number> = {}
+    for (const [id, p] of Object.entries(this.game.players)) {
+      playerKills[id] = p.kills
+    }
+    this.log('game_over', {
+      outcome: result,
+      finalScore: this.game.score,
+      finalWave: this.game.wave,
+      playerKills,
+    })
 
     // Schedule cleanup alarm for 5 minutes
     void this.ctx.storage.setAlarm(Date.now() + 5 * 60 * 1000)
@@ -823,7 +952,7 @@ export class GameRoom extends DurableObject<Env> {
       const matchmaker = this.env.MATCHMAKER.get(this.env.MATCHMAKER.idFromName('global'))
       await matchmaker.fetch(new Request('https://internal/unregister', {
         method: 'POST',
-        body: JSON.stringify({ roomCode: this.game.roomId })
+        body: JSON.stringify({ roomCode: this.game.roomCode })
       }))
     }
     await this.ctx.storage.deleteAlarm()

@@ -361,7 +361,7 @@ export type GameEvent =
 export type GameStatus = 'waiting' | 'countdown' | 'wipe_exit' | 'wipe_hold' | 'wipe_reveal' | 'playing' | 'game_over'
 
 export interface GameState {
-  roomId: string                    // 6-char base36 (0-9, A-Z)
+  roomCode: string                  // 6-char base36 (0-9, A-Z) user-visible room code
   mode: 'solo' | 'coop'
   status: GameStatus
   tick: number

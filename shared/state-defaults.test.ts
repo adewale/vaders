@@ -17,7 +17,7 @@ describe('GAME_STATE_DEFAULTS', () => {
     }
   })
 
-  it('has all required GameState fields except roomId', () => {
+  it('has all required GameState fields except roomCode', () => {
     const expectedFields = [
       'mode',
       'status',
@@ -69,9 +69,9 @@ describe('createDefaultGameState', () => {
     expect(issues).toEqual([])
   })
 
-  it('sets roomId from parameter', () => {
+  it('sets roomCode from parameter', () => {
     const state = createDefaultGameState('MYROOM')
-    expect(state.roomId).toBe('MYROOM')
+    expect(state.roomCode).toBe('MYROOM')
   })
 
   it('sets rngSeed to current time', () => {
@@ -100,7 +100,7 @@ describe('migrateGameState', () => {
   it('fills missing fields with defaults', () => {
     // Simulate old persisted state missing alienShootingDisabled
     const oldState = {
-      roomId: 'OLD01',
+      roomCode: 'OLD01',
       mode: 'solo' as const,
       status: 'waiting' as const,
       tick: 100,
@@ -126,7 +126,7 @@ describe('migrateGameState', () => {
 
   it('preserves existing values', () => {
     const existingState = {
-      roomId: 'EXIST',
+      roomCode: 'EXIST',
       wave: 5,
       score: 1000,
       alienShootingDisabled: false, // Explicitly set different from default
@@ -134,14 +134,14 @@ describe('migrateGameState', () => {
 
     const migrated = migrateGameState(existingState as any)
 
-    expect(migrated.roomId).toBe('EXIST')
+    expect(migrated.roomCode).toBe('EXIST')
     expect(migrated.wave).toBe(5)
     expect(migrated.score).toBe(1000)
     expect(migrated.alienShootingDisabled).toBe(false) // Preserved, not overwritten
   })
 
   it('produces valid state from minimal input', () => {
-    const minimal = { roomId: 'MIN01' }
+    const minimal = { roomCode: 'MIN01' }
     const migrated = migrateGameState(minimal as any)
     const issues = validateGameState(migrated)
     expect(issues).toEqual([])
@@ -149,7 +149,7 @@ describe('migrateGameState', () => {
 
   it('merges config with defaults', () => {
     const partialConfig = {
-      roomId: 'CONF',
+      roomCode: 'CONF',
       config: {
         width: 100,
         // Other config fields missing
@@ -171,7 +171,7 @@ describe('validateGameState', () => {
   })
 
   it('detects missing fields', () => {
-    const incomplete = { roomId: 'BAD' }
+    const incomplete = { roomCode: 'BAD' }
     const issues = validateGameState(incomplete)
     expect(issues.length).toBeGreaterThan(0)
     expect(issues.some(i => i.includes('Missing field'))).toBe(true)
@@ -195,7 +195,7 @@ describe('validateGameState', () => {
 
   it('checks all 18 required fields', () => {
     const issues = validateGameState({})
-    // Should have 18 missing field errors (including roomId and maxLives)
+    // Should have 18 missing field errors (including roomCode and maxLives)
     expect(issues.filter(i => i.includes('Missing field')).length).toBe(18)
   })
 })

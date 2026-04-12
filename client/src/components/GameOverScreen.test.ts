@@ -50,7 +50,7 @@ function createMockAlien(overrides: Partial<AlienEntity> = {}): AlienEntity {
 
 function createMockGameState(overrides: Partial<GameState> = {}): GameState {
   return {
-    roomId: 'ABC123',
+    roomCode: 'ABC123',
     mode: 'solo',
     status: 'game_over',
     tick: 500,

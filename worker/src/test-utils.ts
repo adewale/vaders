@@ -45,7 +45,7 @@ export function createTestPlayer(overrides?: Partial<Player>): Player {
 export function createTestGameState(overrides?: Partial<GameState>): GameState {
   return {
     ...GAME_STATE_DEFAULTS,
-    roomId: 'TEST01',
+    roomCode: 'TEST01',
     rngSeed: 12345, // Fixed seed for test determinism
     alienShootingDisabled: false, // Tests need aliens to shoot
     ...overrides,

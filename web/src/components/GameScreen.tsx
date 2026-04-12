@@ -46,7 +46,7 @@ export function GameScreen({ state, playerId, prevState = null }: GameScreenProp
   // Limitation: this covers the quit→launch→new-game path because GameScreen
   // fully unmounts. It does NOT cover staying mounted across wave transitions
   // or room changes without unmount; those paths would need an in-place reset
-  // keyed on roomId/tick drop. Deferred for now.
+  // keyed on roomCode/tick drop. Deferred for now.
   useEffect(() => {
     return () => resetEffects()
   }, [])

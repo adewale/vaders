@@ -40,7 +40,7 @@ function createMockPlayers(count: number): Player[] {
 
 function createMockGameState(overrides: Partial<GameState> = {}): GameState {
   return {
-    roomId: 'XYZ789',
+    roomCode: 'XYZ789',
     mode: 'coop',
     status: 'waiting',
     tick: 0,
@@ -280,13 +280,13 @@ describe('Ready Status Text', () => {
 
 describe('Room Code Display', () => {
   test('room code comes from game state', () => {
-    const state = createMockGameState({ roomId: 'ABC123' })
-    expect(state.roomId).toBe('ABC123')
+    const state = createMockGameState({ roomCode: 'ABC123' })
+    expect(state.roomCode).toBe('ABC123')
   })
 
   test('room code is typically 6 characters', () => {
-    const state = createMockGameState({ roomId: 'XYZ789' })
-    expect(state.roomId.length).toBe(6)
+    const state = createMockGameState({ roomCode: 'XYZ789' })
+    expect(state.roomCode.length).toBe(6)
   })
 })
 

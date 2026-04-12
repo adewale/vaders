@@ -268,6 +268,92 @@ export function _getScoreBumpStateForTests(): { ticks: number; lastArmedTick: nu
   return { ticks: scoreBumpTicks, lastArmedTick: lastScoreBumpTick }
 }
 
+/**
+ * Comprehensive match-scoped inspector. Returns plain data (sizes, lengths,
+ * counter values) for EVERY module-level accumulator that must be reset on
+ * tick-rewind (i.e. when the server starts a new match in the same room and
+ * the GameScreen stays mounted). Does NOT leak internal Set/Map references.
+ *
+ * Paired with the replay-state-reset tests to assert exhaustively that
+ * resetEffects() — and the tick-rewind path that calls it — clears
+ * everything that could carry state from match N into match N+1.
+ */
+export function _getMatchStateForTests(): {
+  seenDeadAlienIdsSize: number
+  seenDeadUfoIdsSize: number
+  confettiStarted: boolean
+  barrierDamageScarsSize: number
+  barrierLastHealthSize: number
+  barrierShimmersLength: number
+  trackedPrevBulletIdsSize: number
+  prevGameStatus: string | null
+  lastProcessedTick: number
+  scoreBumpTicks: number
+  lastScoreBumpTick: number
+  waveBurstTicks: number
+  fightFlashTicks: number
+  clearedFlashTicks: number
+  shakeTicks: number
+  shakeIntensity: number
+  shakeDuration: number
+  flashTicks: number
+  flashDuration: number
+  flashColor: string
+} {
+  return {
+    seenDeadAlienIdsSize: seenDeadAlienIds.size,
+    seenDeadUfoIdsSize: seenDeadUfoIds.size,
+    confettiStarted,
+    barrierDamageScarsSize: barrierDamageScars.size,
+    barrierLastHealthSize: barrierLastHealth.size,
+    barrierShimmersLength: barrierShimmers.length,
+    trackedPrevBulletIdsSize: trackedPrevBulletIds.size,
+    prevGameStatus,
+    lastProcessedTick,
+    scoreBumpTicks,
+    lastScoreBumpTick,
+    waveBurstTicks,
+    fightFlashTicks,
+    clearedFlashTicks,
+    shakeTicks,
+    shakeIntensity,
+    shakeDuration,
+    flashTicks,
+    flashDuration,
+    flashColor,
+  }
+}
+
+/**
+ * The expected "clean slate" values for every field reported by
+ * _getMatchStateForTests(). Exposed as a constant so tests can do a full
+ * struct-equality assertion rather than repeating the literal values.
+ * lastScoreBumpTick starts at -SCORE_BUMP_COOLDOWN_TICKS so the very first
+ * score change can arm the bump without waiting for the cooldown window.
+ */
+export const _RESET_MATCH_STATE = {
+  seenDeadAlienIdsSize: 0,
+  seenDeadUfoIdsSize: 0,
+  confettiStarted: false,
+  barrierDamageScarsSize: 0,
+  barrierLastHealthSize: 0,
+  barrierShimmersLength: 0,
+  trackedPrevBulletIdsSize: 0,
+  prevGameStatus: null as string | null,
+  lastProcessedTick: -1,
+  scoreBumpTicks: 0,
+  lastScoreBumpTick: -SCORE_BUMP_COOLDOWN_TICKS,
+  waveBurstTicks: 0,
+  fightFlashTicks: 0,
+  clearedFlashTicks: 0,
+  shakeTicks: 0,
+  shakeIntensity: 0,
+  shakeDuration: 0,
+  flashTicks: 0,
+  flashDuration: 0,
+  flashColor: 'rgba(255, 255, 255, 1)',
+} as const
+
 /** Per-layer star dot sizes (px) — creates parallax: bigger = closer. */
 const STAR_LAYER_SIZES = [1, 2, 3] as const
 // (dissolveSystem removed — ExplosionSystem owns all death particles)

@@ -4,7 +4,7 @@ const SERVER_URL =
   import.meta.env.VITE_SERVER_URL || (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8787')
 
 export interface RoomInfo {
-  roomId: string
+  roomCode: string
   wsUrl: string
 }
 
@@ -12,16 +12,16 @@ export async function createRoom(): Promise<RoomInfo> {
   const res = await fetch(`${SERVER_URL}/room`, { method: 'POST' })
   if (!res.ok) throw new Error(`Failed to create room: ${res.status}`)
   const data = await res.json()
-  const roomId = data.roomCode ?? data.roomId
-  return { roomId, wsUrl: buildWsUrl(roomId) }
+  const roomCode = data.roomCode
+  return { roomCode, wsUrl: buildWsUrl(roomCode) }
 }
 
 export async function matchmake(): Promise<RoomInfo> {
   const res = await fetch(`${SERVER_URL}/matchmake`)
   if (!res.ok) throw new Error(`Failed to matchmake: ${res.status}`)
   const data = await res.json()
-  const roomId = data.roomCode ?? data.roomId
-  return { roomId, wsUrl: buildWsUrl(roomId) }
+  const roomCode = data.roomCode
+  return { roomCode, wsUrl: buildWsUrl(roomCode) }
 }
 
 export async function getRoomInfo(code: string): Promise<{ status: string; playerCount: number } | null> {
@@ -30,9 +30,9 @@ export async function getRoomInfo(code: string): Promise<{ status: string; playe
   return res.json()
 }
 
-export function buildWsUrl(roomId: string): string {
+export function buildWsUrl(roomCode: string): string {
   const base = SERVER_URL.replace('https://', 'wss://').replace('http://', 'ws://')
-  return `${base}/room/${roomId}/ws`
+  return `${base}/room/${roomCode}/ws`
 }
 
 /**

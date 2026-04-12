@@ -168,7 +168,7 @@ class RenderTracer {
 function createState(status: GameStatus, overrides: Partial<GameState> = {}): GameState {
   const base = {
     ...GAME_STATE_DEFAULTS,
-    roomId: 'TEST01',
+    roomCode: 'TEST01',
     status,
   }
 

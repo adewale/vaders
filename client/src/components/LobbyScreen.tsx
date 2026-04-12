@@ -69,10 +69,10 @@ export function LobbyScreen({
       <box height={1} />
       <text fg={COLORS.ui.selectedText}>Room: {richColor
         ? (() => {
-            const colors = interpolateGradient(GRADIENT_PRESETS.victory, state.roomId.length)
-            return state.roomId.split('').map((ch, i) => <span key={i} fg={colors[i]}>{ch}</span>)
+            const colors = interpolateGradient(GRADIENT_PRESETS.victory, state.roomCode.length)
+            return state.roomCode.split('').map((ch, i) => <span key={i} fg={colors[i]}>{ch}</span>)
           })()
-        : <span fg={COLORS.ui.score}>{state.roomId}</span>
+        : <span fg={COLORS.ui.score}>{state.roomCode}</span>
       }</text>
       <box height={1} />
       {richColor

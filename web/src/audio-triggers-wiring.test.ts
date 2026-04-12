@@ -16,7 +16,7 @@ import type { GameState } from '../../shared/types'
 function baseState(overrides: Partial<GameState> = {}): GameState {
   return {
     ...GAME_STATE_DEFAULTS,
-    roomId: 'ROOM01',
+    roomCode: 'ROOM01',
     ...overrides,
   }
 }

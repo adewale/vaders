@@ -16,7 +16,7 @@ import { GAME_STATE_DEFAULTS } from '../../shared/state-defaults'
 function createMockState(overrides: Partial<GameState> = {}): GameState {
   return {
     ...GAME_STATE_DEFAULTS,
-    roomId: 'TEST01',
+    roomCode: 'TEST01',
     ...overrides,
   } as GameState
 }

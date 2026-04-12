@@ -215,7 +215,7 @@ describe('HTTP Endpoints', () => {
       expect(ctx._sqlData['game_state']).toBeDefined()
 
       const savedState = JSON.parse(ctx._sqlData['game_state'].data) as GameState
-      expect(savedState.roomId).toBe('ABC123')
+      expect(savedState.roomCode).toBe('ABC123')
       expect(savedState.status).toBe('waiting')
     })
 

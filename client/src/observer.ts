@@ -454,7 +454,7 @@ class Observer {
       // Full sync output
       console.log(
         `${colors.sync}[${timestamp()}] SYNC${colors.reset} ` +
-        `roomId=${state.roomId} players=${playerCount} ` +
+        `roomCode=${state.roomCode} players=${playerCount} ` +
         formatCompactState(state)
       )
     } else {

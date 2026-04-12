@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { parseRoute } from './router'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { parseRoute, navigateTo } from './router'
 
 describe('parseRoute', () => {
   it('returns launch route for root path', () => {
@@ -71,5 +71,114 @@ describe('parseRoute', () => {
     expect(route.type).toBe('launch')
     expect(route).toEqual({ type: 'launch' })
     expect(Object.keys(route)).toHaveLength(1)
+  })
+})
+
+describe('navigateTo', () => {
+  let pushSpy: ReturnType<typeof vi.spyOn>
+  let replaceSpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    // Reset location to a known baseline before each test. jsdom allows
+    // `history.pushState` / `replaceState` to mutate location.
+    window.history.replaceState(null, '', '/')
+    pushSpy = vi.spyOn(window.history, 'pushState')
+    replaceSpy = vi.spyOn(window.history, 'replaceState')
+  })
+
+  afterEach(() => {
+    pushSpy.mockRestore()
+    replaceSpy.mockRestore()
+  })
+
+  it('calls pushState by default when navigating to a different path', () => {
+    navigateTo('/room/ABC123')
+    expect(pushSpy).toHaveBeenCalledTimes(1)
+    expect(pushSpy).toHaveBeenCalledWith(null, '', '/room/ABC123')
+    expect(replaceSpy).not.toHaveBeenCalled()
+  })
+
+  it('calls replaceState when { replace: true } is passed', () => {
+    navigateTo('/room/ABC123', { replace: true })
+    expect(replaceSpy).toHaveBeenCalledTimes(1)
+    expect(replaceSpy).toHaveBeenCalledWith(null, '', '/room/ABC123')
+    expect(pushSpy).not.toHaveBeenCalled()
+  })
+
+  it('auto-replaces when navigating to the current URL (pathname only)', () => {
+    window.history.replaceState(null, '', '/room/ABC123')
+    // Clear the spy call history from the setup above
+    pushSpy.mockClear()
+    replaceSpy.mockClear()
+
+    navigateTo('/room/ABC123')
+    expect(replaceSpy).toHaveBeenCalledTimes(1)
+    expect(replaceSpy).toHaveBeenCalledWith(null, '', '/room/ABC123')
+    expect(pushSpy).not.toHaveBeenCalled()
+  })
+
+  it('auto-replaces when navigating to the current URL (pathname + search)', () => {
+    window.history.replaceState(null, '', '/?matchmake=true')
+    pushSpy.mockClear()
+    replaceSpy.mockClear()
+
+    navigateTo('/?matchmake=true')
+    expect(replaceSpy).toHaveBeenCalledTimes(1)
+    expect(pushSpy).not.toHaveBeenCalled()
+  })
+
+  it('uses push when target path differs from current (even same pathname, different search)', () => {
+    window.history.replaceState(null, '', '/')
+    pushSpy.mockClear()
+    replaceSpy.mockClear()
+
+    navigateTo('/?matchmake=true')
+    expect(pushSpy).toHaveBeenCalledTimes(1)
+    expect(replaceSpy).not.toHaveBeenCalled()
+  })
+
+  it('dispatches popstate after pushState so useRoute subscribers update', () => {
+    const handler = vi.fn()
+    window.addEventListener('popstate', handler)
+
+    navigateTo('/room/ABC123')
+    expect(handler).toHaveBeenCalledTimes(1)
+    expect(handler.mock.calls[0][0]).toBeInstanceOf(PopStateEvent)
+
+    window.removeEventListener('popstate', handler)
+  })
+
+  it('dispatches popstate after replaceState so useRoute subscribers update', () => {
+    const handler = vi.fn()
+    window.addEventListener('popstate', handler)
+
+    navigateTo('/room/ABC123', { replace: true })
+    expect(handler).toHaveBeenCalledTimes(1)
+    expect(handler.mock.calls[0][0]).toBeInstanceOf(PopStateEvent)
+
+    window.removeEventListener('popstate', handler)
+  })
+
+  it('dispatches popstate after auto-replace when navigating to current URL', () => {
+    window.history.replaceState(null, '', '/room/ABC123')
+    const handler = vi.fn()
+    window.addEventListener('popstate', handler)
+
+    navigateTo('/room/ABC123')
+    expect(handler).toHaveBeenCalledTimes(1)
+
+    window.removeEventListener('popstate', handler)
+  })
+
+  it('explicit { replace: false } still auto-replaces when URL matches current', () => {
+    // Auto-replace triggers when currentUrl === path, regardless of the
+    // replace option — this is a deliberate guard against back-stack bloat.
+    window.history.replaceState(null, '', '/room/ABC123')
+    pushSpy.mockClear()
+    replaceSpy.mockClear()
+
+    navigateTo('/room/ABC123', { replace: false })
+    expect(replaceSpy).toHaveBeenCalledTimes(1)
+    expect(pushSpy).not.toHaveBeenCalled()
   })
 })

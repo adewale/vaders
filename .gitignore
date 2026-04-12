@@ -31,6 +31,10 @@ dist/
 web/src/buildInfo.ts
 worker/src/buildInfo.ts
 
+# Playwright test artifacts (screenshots, traces, videos on failure).
+web/test-results/
+web/playwright-report/
+
 # Per-developer agent/skill tooling state — not project code.
 .agents/
 .pi/
