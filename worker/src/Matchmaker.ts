@@ -15,9 +15,12 @@ export class Matchmaker {
       const stored = await this.state.storage.get<Record<string, RoomInfo>>('rooms')
       if (stored) {
         this.rooms = stored
-        // Rebuild openRooms set
+        // Rebuild openRooms set. Require playerCount > 0 so stranded
+        // empty rooms (creator abandoned, room never unregistered)
+        // don't become matchmaking targets and trap later joiners.
+        // PBT finding — see state-machine.pbt.test.ts FOUND BUG (LOW).
         for (const [roomCode, info] of Object.entries(stored)) {
-          if (info.status === 'waiting' && info.playerCount < 4) {
+          if (info.status === 'waiting' && info.playerCount > 0 && info.playerCount < 4) {
             this.openRooms.add(roomCode)
           }
         }
@@ -35,8 +38,13 @@ export class Matchmaker {
       }
       this.rooms[roomCode] = { playerCount, status, updatedAt: Date.now() }
 
-      // Update openRooms set
-      if (status === 'waiting' && playerCount < 4) {
+      // Update openRooms set. Require playerCount > 0 to avoid
+      // returning empty rooms from /find — a player who creates a
+      // room then abandons it before anyone joins would otherwise
+      // strand the next matchmaker alone in a dead room for the
+      // full STALE_THRESHOLD (5 min). Once someone joins,
+      // playerCount > 0 and the room becomes matchable.
+      if (status === 'waiting' && playerCount > 0 && playerCount < 4) {
         this.openRooms.add(roomCode)
       } else {
         this.openRooms.delete(roomCode)

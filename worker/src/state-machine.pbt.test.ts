@@ -1002,19 +1002,23 @@ describe('PBT: Targeted bug-hypothesis probes', () => {
     expect(['waiting', 'game_over']).toContain(state?.status)
   })
 
-  it('matchmaker does NOT return a newly-registered room with zero players', async () => {
-    // Hypothesis: /find returns any 'waiting' room with playerCount < 4. A
-    // freshly-created room with 0 players is findable — which is fine for a
-    // Match-me-in flow, but it can result in "stranded" rooms if nobody
-    // actually joins. Verify we understand the current behaviour.
+  it('REGRESSION: matchmaker does NOT return a freshly-registered room with zero players', async () => {
+    // Was the LOW-severity PBT finding. Before the fix, /find returned any
+    // 'waiting' room with playerCount < 4, which included just-created rooms
+    // with zero players. A player who matchmaked then abandoned left the
+    // empty room findable for the 5-minute stale threshold, trapping the
+    // next matchmaking player alone.
+    //
+    // Fix (Matchmaker.ts): require playerCount > 0 before adding to
+    // openRooms. Once a player joins, playerCount > 0 and the room
+    // becomes matchable normally.
     const real = new RealSystem()
     await real.createRoom('EMPTY1')
     const found = await real.matchmakeFind()
-    // Document the current behaviour: yes, empty rooms ARE findable.
-    expect(found).toBe('EMPTY1')
+    expect(found).not.toBe('EMPTY1')
+    // Usually null (no other rooms exist in this isolated harness).
+    expect(found === null || typeof found === 'string').toBe(true)
   })
-
-  it.skip('FOUND BUG (high): join-during-playing handler bypasses status guard (duplicate of "late-join attempt" below)', () => {})
 
   it('solo: start_solo with 0 players is a no-op (no state change)', async () => {
     const real = new RealSystem()
@@ -1084,15 +1088,14 @@ describe('PBT: Targeted bug-hypothesis probes', () => {
     expect(state?.readyPlayerIds).toEqual([p2])
   })
 
-  it('after game_over via forfeit, status=game_over — but start_solo can restart the game (accidental replay, not via state machine)', async () => {
-    // Document the current behaviour: start_solo in GameRoom.webSocketMessage
-    // has NO status-guard, so it transitions game_over → wipe_hold and begins
-    // a new game even though the declared reducer transitions only allow
-    // START_SOLO from 'waiting'. This is an accidental replay path that:
-    //   - bypasses the TRANSITIONS state machine in reducer.ts
-    //   - does NOT reset game.score (the prior game's score carries over)
-    //   - does NOT reset game.readyPlayerIds
-    // See FOUND BUG below.
+  it('REGRESSION: start_solo from game_over is rejected (state machine enforced)', async () => {
+    // Was the MEDIUM-severity PBT finding. Before the fix, start_solo in
+    // GameRoom.webSocketMessage had NO status guard, so it transitioned
+    // game_over → wipe_hold and began a new game even though the declared
+    // reducer transitions only allow START_SOLO from 'waiting'. That
+    // bypass also leaked score / readyPlayerIds / wave into the replay.
+    //
+    // Fix (GameRoom.ts case 'start_solo'): reject if status !== 'waiting'.
     const real = new RealSystem()
     await real.createRoom('OVER01')
     const pid = await real.joinRoom('OVER01', 'A')
@@ -1105,8 +1108,8 @@ describe('PBT: Targeted bug-hypothesis probes', () => {
 
     await real.sendAs(pid, { type: 'start_solo' })
     state = real.getState('OVER01')
-    // Characterization: the state machine is bypassed.
-    expect(state?.status).toBe('wipe_hold')
+    // Post-fix: status remains game_over, start_solo is a no-op.
+    expect(state?.status).toBe('game_over')
   })
 
   it('move message during countdown is accepted (not dropped)', async () => {
@@ -1191,60 +1194,51 @@ describe('PBT: Targeted bug-hypothesis probes', () => {
     expect(found).not.toBe('GOPLAY')
   })
 
-  it('accidental replay via start_solo does NOT reset score/readyPlayerIds (characterization)', async () => {
-    // Companion to the "start_solo bypasses state machine" FOUND BUG.
-    // Proves concrete leakage across the accidental replay path: after a game
-    // ends in game_over, calling start_solo restarts a game but carries the
-    // prior game's state fields the reducer's reset-path would have cleared.
+  it('REGRESSION: startGame() leaves per-match state at clean-slate values', async () => {
+    // Was the MEDIUM-severity PBT finding. Before the fix, startGame()
+    // reset entities / tick / lives but NOT readyPlayerIds, score, wave,
+    // alienDirection, or per-player kills. The original bug surfaced
+    // via the accidental-replay path (now closed by the start_solo
+    // status guard in fix #2), but startGame() should produce a clean
+    // match regardless of caller — defense in depth.
+    //
+    // Fix (GameRoom.ts startGame): zero every per-match field.
+    // This test pins the post-startGame invariants so any future
+    // addition of match-specific state without a corresponding reset
+    // fails here.
     const real = new RealSystem()
     await real.createRoom('RESET1')
     const pid = await real.joinRoom('RESET1', 'A')
     if (!pid) throw new Error('join failed')
 
-    // Ready up fake-style: add to readyPlayerIds (start_solo normally skips
-    // the ready list, so simulate a dirty state by forcing a ready first).
+    // Solo: one player readies, then start_solo. Start_solo is gated
+    // on status === 'waiting', so this is the allowed path.
     await real.sendAs(pid, { type: 'ready' })
-    // Readys on a solo room are allowed but don't trigger a start.
-    let state = real.getState('RESET1')!
-    expect(state.readyPlayerIds).toContain(pid)
-
     await real.sendAs(pid, { type: 'start_solo' })
-    await real.advanceTicks('RESET1', 150)
-    await real.sendAs(pid, { type: 'forfeit' })
-    state = real.getState('RESET1')!
-    expect(state.status).toBe('game_over')
+    const state = real.getState('RESET1')!
 
-    // Drive the accidental replay via a second start_solo.
-    await real.sendAs(pid, { type: 'start_solo' })
-    state = real.getState('RESET1')!
-    // Characterize: score is NOT reset back to 0 (startGame only resets tick,
-    // entities, lives — not score, wave, or readyPlayerIds).
+    // Clean-start invariants the post-fix startGame() must guarantee:
     expect(state.status).toBe('wipe_hold')
-    // Expected FAILURE MODES if the spec is "replay must be a clean start":
-    //   - state.score may be non-zero (carries previous game's score).
-    //   - state.readyPlayerIds may still contain pid.
-    //   - state.wave may not be 1.
-    // We record exact observed behaviour for the triage doc below.
-    expect(state.readyPlayerIds).toContain(pid) // NOT cleared — bug evidence
-    // (score is 0 when forfeit happens before any aliens are killed — this is
-    // a weaker characterization because the empty-score case does not prove
-    // leakage; what we WANT is wave=1, ready=[], status=wipe_hold on replay.)
-    expect(state.wave).toBeGreaterThanOrEqual(1)
+    expect(state.score).toBe(0)
+    expect(state.wave).toBe(1)
+    expect(state.readyPlayerIds).toEqual([])
+    expect(state.alienDirection).toBe(1)
+    expect(state.tick).toBe(0)
+    expect(state.players[pid]?.kills).toBe(0)
+    expect(state.players[pid]?.alive).toBe(true)
+    expect(state.players[pid]?.respawnAtTick).toBeNull()
+    expect(state.players[pid]?.invulnerableUntilTick).toBeNull()
   })
 
-  it('late-join attempt during playing IS allowed (characterization — likely a bug)', async () => {
-    // CHARACTERIZATION test (not a spec test). Asserts the current observed
-    // behaviour so a future fix will surface as a test delta.
+  it('REGRESSION: late-join attempt during playing is rejected with game_in_progress', async () => {
+    // Was the HIGH-severity PBT finding. Before the fix, `case 'join'`
+    // rejected only `countdown` / `room_full` states; `playing`,
+    // `wipe_*`, and `game_over` silently accepted new joiners. A WS
+    // that bypassed the upgrade guard (e.g. hibernation wake, reconnect
+    // with ?rejoin) could inject a brand-new player into a running match.
     //
-    // GameRoom.webSocketMessage "join" handler guards ONLY against:
-    //   - already_joined (attachment already has playerId)
-    //   - countdown_in_progress (status === 'countdown')
-    //   - room_full (players.length >= 4)
-    //
-    // It does NOT check status === 'playing', 'wipe_*', or 'game_over'.
-    // The WS upgrade in fetch() DOES reject playing status, but a WS that
-    // already got accepted (hibernation wake, or reconnect with ?rejoin) can
-    // send a fresh join and be added mid-game.
+    // Fix (GameRoom.ts case 'join'): reject with `game_in_progress`
+    // unless status === 'waiting'.
     const real = new RealSystem()
     await real.createRoom('LATEJN')
     const pid = await real.joinRoom('LATEJN', 'A')
@@ -1259,82 +1253,32 @@ describe('PBT: Targeted bug-hypothesis probes', () => {
     entry.ctx._webSockets.push(newWs)
     await entry.room.webSocketMessage(newWs as unknown as WebSocket, JSON.stringify({ type: 'join', name: 'late' }))
 
+    // Late joiner was NOT added.
     const stateAfter = real.getState('LATEJN')
     const added = Object.values(stateAfter!.players).find(p => p.name === 'late')
-    // Characterization: the late joiner IS added. This is likely a bug. See
-    // "FOUND BUG" block below for the remediation hint.
-    expect(added).toBeDefined()
+    expect(added).toBeUndefined()
+    // And the WS received an error message with the expected code.
+    const sendSpy = newWs.send as unknown as { mock: { calls: unknown[][] } }
+    const errors = sendSpy.mock.calls
+      .map((call) => { try { return JSON.parse(String(call[0])) } catch { return null } })
+      .filter((m) => m && m.type === 'error')
+    expect(errors.length).toBeGreaterThan(0)
+    expect(errors[0].code).toBe('game_in_progress')
   })
 })
 
 // ============================================================================
-// FOUND BUGS — failing-intent reproducers preserved as describe.skip blocks.
-// ============================================================================
-// Each block below is a reproducer for a bug the harness surfaced. Kept as
-// `describe.skip('FOUND BUG …')` so they don't break CI, but preserve the
-// minimal sequence and the violated invariant for triage.
+// (Former FOUND-BUG describe.skip stubs removed.)
 //
-// When one of these bugs is fixed, flip .skip → empty (so the test runs) and
-// invert the characterization assertion to the expected-correct behaviour.
+// This file's initial pass preserved four reproducers as skipped describe
+// blocks for triage. All four bugs have since been fixed:
+//
+//   HIGH    join handler rejects non-waiting statuses with `game_in_progress`
+//   MEDIUM  start_solo is gated on status === 'waiting'
+//   MEDIUM  startGame() resets per-match state (score/wave/ready/kills)
+//   LOW     matchmaker excludes zero-player rooms from /find
+//
+// The regression guards are above in the main describe block; search for
+// `REGRESSION:` to find each one. A test failure there now points directly
+// at the regression hypothesis.
 // ============================================================================
-
-describe.skip('FOUND BUG (HIGH): join handler allows mid-game joins when status=playing/wipe_*/game_over', () => {
-  // Severity: HIGH — a player who refreshes a tab during a game (reconnect
-  // path with ?rejoin param in ws upgrade) can re-send `join` and be ADDED
-  // AS A NEW PLAYER to the running game, receiving a fresh slot and full
-  // starting lives. This also leaks state in game_over rooms.
-  //
-  // Reproducer:
-  //   1. Create a room, one player joins and start_solo.
-  //   2. Advance ticks until status === 'playing'.
-  //   3. Open a second ws on the same room (any caller that reaches the
-  //      accepted-ws path — e.g. hibernation wake after upgrade succeeded).
-  //   4. Send { type: 'join', name: 'late' } on the second ws.
-  //   5. Observe: 'late' is in state.players; the WS does not receive an error.
-  //
-  // Remediation hint (worker/src/GameRoom.ts case 'join'):
-  //   Add rejection for status ∈ {'playing', 'wipe_exit', 'wipe_hold',
-  //   'wipe_reveal', 'game_over'}. Use the existing error code
-  //   'game_in_progress' for playing/wipe_*; consider a new code
-  //   'room_closed' for game_over.
-  it('reproducer kept as a characterization test (see late-join attempt above)', () => {})
-})
-
-describe.skip('FOUND BUG (MEDIUM): start_solo has no status guard — bypasses declared state machine', () => {
-  // Severity: MEDIUM — `start_solo` in GameRoom.webSocketMessage calls
-  // startGame() directly, overwriting game.status without consulting the
-  // TRANSITIONS map in reducer.ts. This lets a player with status=game_over
-  // (or mid-countdown, mid-wipe, or even mid-playing) trigger another
-  // startGame and silently reset wipe phases + alien formation + barriers.
-  //
-  // Minimal reproducer:
-  //   1. joinRoom; start_solo; advanceTicks(150) to reach playing.
-  //   2. forfeit → status becomes 'game_over'.
-  //   3. start_solo again → status becomes 'wipe_hold' (fresh game, but
-  //      score is NOT reset, readyPlayerIds is NOT reset).
-  //
-  // See the characterization test 'after game_over via forfeit, …' above.
-  //
-  // Remediation hint: in case 'start_solo', reject unless status === 'waiting',
-  // OR route through the reducer's START_SOLO action which already enforces
-  // the transition.
-  it('reproducer kept as characterization test above', () => {})
-})
-
-describe.skip('FOUND BUG (LOW): empty room (0 players) is returned by matchmaker /find', () => {
-  // Severity: LOW — see characterization test 'matchmaker does NOT return…'
-  // above: a freshly-created room with 0 players IS findable (because
-  // Matchmaker adds to openRooms when `status === 'waiting' && playerCount < 4`,
-  // which is trivially true for newly-registered rooms).
-  //
-  // In practice this is fine: two players matchmaking concurrently both get
-  // the same room and join it — the intended happy path. But it has a quirk:
-  // if a player matchmakes and abandons (never joins), the empty room stays
-  // findable for 5 minutes (STALE_THRESHOLD). Other matchmaking players
-  // arrive into an empty room and the first to leave strands the second.
-  //
-  // Remediation hint (worker/src/Matchmaker.ts /register):
-  //   Only add to openRooms when `playerCount > 0`. Alternatively, garbage-
-  //   collect empty-for-N-seconds entries with a shorter threshold.
-  it('reproducer: see "matchmaker does NOT return a newly-registered room with zero players" above', () => {})
-})

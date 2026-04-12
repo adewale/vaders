@@ -350,8 +350,19 @@ export class GameRoom extends DurableObject<Env> {
             return
           }
 
+          // Reject joins outside the `waiting` state. Previously only
+          // `countdown` was checked, so a WS that bypassed the upgrade
+          // guard (e.g. hibernation wake against a `playing` / `wipe_*`
+          // / `game_over` room) could inject a brand-new player
+          // mid-match. The PBT harness caught this as a HIGH-severity
+          // bug; see worker/src/state-machine.pbt.test.ts "late-join
+          // attempt during playing IS allowed".
           if (this.game.status === 'countdown') {
             this.sendError(ws, 'countdown_in_progress', 'Game starting, try again')
+            return
+          }
+          if (this.game.status !== 'waiting') {
+            this.sendError(ws, 'game_in_progress', 'Game already in progress')
             return
           }
           if (Object.keys(this.game.players).length >= 4) {
@@ -410,6 +421,14 @@ export class GameRoom extends DurableObject<Env> {
         }
 
         case 'start_solo': {
+          // Only start a solo game from the `waiting` state. Without this
+          // guard, `start_solo` was bypassing the reducer's TRANSITIONS
+          // table — a player could issue it from `game_over` (or any
+          // other status) and call startGame() directly, silently
+          // resetting the wipe phase + alien formation without passing
+          // through the documented state machine. MEDIUM-severity PBT
+          // finding; see state-machine.pbt.test.ts.
+          if (this.game.status !== 'waiting') return
           if (Object.keys(this.game.players).length === 1 && playerId) {
             this.game.mode = 'solo'
             this.game.maxLives = 3
@@ -654,9 +673,24 @@ export class GameRoom extends DurableObject<Env> {
     this.countdownRemaining = null
     this.game.maxLives = scaled.lives
     this.game.lives = scaled.lives
-    // Patch all existing players' lives to match scaled config
+    // Reset per-match fields that earlier versions of startGame() forgot.
+    // Defense-in-depth: even when the `start_solo` status guard (above)
+    // prevents replay from game_over, startGame() itself should always
+    // produce a clean match regardless of caller. The PBT harness caught
+    // score/readyPlayerIds/wave leaking through the accidental-replay
+    // path — see state-machine.pbt.test.ts "accidental replay via
+    // start_solo does NOT reset …" for the characterisation.
+    this.game.readyPlayerIds = []
+    this.game.score = 0
+    this.game.wave = 1
+    this.game.alienDirection = 1
+    // Patch all existing players' lives + kills to match scaled config
     for (const player of Object.values(this.game.players)) {
       player.lives = this.game.lives
+      player.kills = 0
+      player.alive = true
+      player.respawnAtTick = null
+      player.invulnerableUntilTick = null
     }
     this.game.tick = 0
     this.game.wipeTicksRemaining = WIPE_TIMING.HOLD_TICKS
