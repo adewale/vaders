@@ -192,10 +192,10 @@ export function LobbyScreen({ state, playerId, onReady, onUnready, onStartSolo }
                 opacity: 0.6,
               }}
             >
-              <span style={{ fontFamily: 'monospace' }}>[—]</span>
-              <span style={{ fontFamily: 'monospace' }}>─────</span>
+              <span>[—]</span>
+              <span>─────</span>
               <span>(open seat)</span>
-              <span style={{ marginLeft: 'auto', fontFamily: 'monospace' }}>[ ]</span>
+              <span style={{ marginLeft: 'auto' }}>[ ]</span>
             </div>
           ))}
         </div>

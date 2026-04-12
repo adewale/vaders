@@ -1,7 +1,7 @@
 // web/src/renderer/canvasRenderer.ts
 // Canvas renderer: converts GameState to draw commands, then paints to canvas 2D context.
 
-import type { GameState } from '../../../shared/types'
+import type { GameState, BulletEntity } from '../../../shared/types'
 import {
   getAliens,
   getBullets,
@@ -250,7 +250,7 @@ export function _getFlashStateForTests(): { ticks: number; duration: number; col
 /** Inspector for the set of already-seen dead alien ids. Used by tests to
  * assert that the in-place replay reset clears match-level accumulators. */
 export function _getSeenDeadIdsForTests(): { size: number } {
-  return { size: seenDeadAlienIds.size + seenDeadUfoIds.size }
+  return { size: seenDeadAlienIds.size + seenDeadUfoIds.size + seenDeadPlayerIds.size }
 }
 
 /** Inspector for the victory-confetti latch. See replay-state-reset tests. */
@@ -281,6 +281,7 @@ export function _getScoreBumpStateForTests(): { ticks: number; lastArmedTick: nu
 export function _getMatchStateForTests(): {
   seenDeadAlienIdsSize: number
   seenDeadUfoIdsSize: number
+  seenDeadPlayerIdsSize: number
   confettiStarted: boolean
   barrierDamageScarsSize: number
   barrierLastHealthSize: number
@@ -303,6 +304,7 @@ export function _getMatchStateForTests(): {
   return {
     seenDeadAlienIdsSize: seenDeadAlienIds.size,
     seenDeadUfoIdsSize: seenDeadUfoIds.size,
+    seenDeadPlayerIdsSize: seenDeadPlayerIds.size,
     confettiStarted,
     barrierDamageScarsSize: barrierDamageScars.size,
     barrierLastHealthSize: barrierLastHealth.size,
@@ -334,6 +336,7 @@ export function _getMatchStateForTests(): {
 export const _RESET_MATCH_STATE = {
   seenDeadAlienIdsSize: 0,
   seenDeadUfoIdsSize: 0,
+  seenDeadPlayerIdsSize: 0,
   confettiStarted: false,
   barrierDamageScarsSize: 0,
   barrierLastHealthSize: 0,
@@ -368,6 +371,13 @@ let lastProcessedTick = -1
 let confettiStarted = false
 const seenDeadAlienIds = new Set<string>()
 const seenDeadUfoIds = new Set<string>()
+/**
+ * Player ids we've already fired a death explosion for. Without this latch,
+ * a player staying dead across multiple ticks (before respawning) would
+ * spawn a new explosion every frame. Reset on resetEffects() / tick-rewind
+ * in step with seenDeadAlienIds / seenDeadUfoIds (bug #2).
+ */
+const seenDeadPlayerIds = new Set<string>()
 
 // ─── Barrier elevation state ────────────────────────────────────────────────
 // Per-segment cumulative damage scars. Each entry is a small offset within the
@@ -399,6 +409,7 @@ export function resetEffects(): void {
   confettiStarted = false
   seenDeadAlienIds.clear()
   seenDeadUfoIds.clear()
+  seenDeadPlayerIds.clear()
   shakeTicks = 0
   shakeIntensity = 0
   shakeDuration = 0
@@ -645,6 +656,9 @@ export function buildDrawCommands(
     const renderY = prev ? prev.y + (bullet.y - prev.y) * t : bullet.y
     const centerPxX = renderX * CELL_W
     const centerPxY = renderY * CELL_H
+    // Resolve slot hue for every player-bullet layer. null = alien bullet.
+    // See resolveBulletSlotColor for fallback semantics (orphan owner → slot 1).
+    const slotColor = resolveBulletSlotColor(state, bullet)
 
     // Primary bullet fill
     // - Player bullet: steady cyan/white
@@ -660,33 +674,39 @@ export function buildDrawCommands(
 
     // 4a. Glow halo — 3× sprite size for player bullets; smaller for alien.
     // Player bullets get a stronger halo; alien bullets get a more menacing smaller one.
-    if (isPlayerBullet) {
+    if (isPlayerBullet && slotColor) {
       const glowW = CELL_W * 3
       const glowH = CELL_H * 3
+      // Blend slot hue 65% toward white so the halo is bright (reads as glow)
+      // but still carries enough slot identity for coop players to tell shots
+      // apart. Before fix this was hard-coded '#66ffff' for every slot.
+      const glowFill = blendHex(slotColor, '#ffffff', 0.55)
       commands.push({
         type: 'rect',
         x: centerPxX - CELL_W,
         y: centerPxY - CELL_H,
         width: glowW,
         height: glowH,
-        fill: '#66ffff',
+        fill: glowFill,
         alpha: 0.25,
         kind: 'bullet-glow',
       })
       // Inner bright core overlay — smaller, higher alpha.
       // Fill deliberately differs from COLORS.bullet.player so pre-existing
       // bullet-rect finders that key on fill color still locate the primary.
+      // Near-white with a subtle slot tint preserves specular brightness.
+      const coreFill = blendHex(slotColor, '#ffffff', 0.85)
       commands.push({
         type: 'rect',
         x: centerPxX - CELL_W / 4,
         y: centerPxY - CELL_H / 4,
         width: CELL_W * 1.5,
         height: CELL_H * 1.5,
-        fill: '#eeffff',
+        fill: coreFill,
         alpha: 0.7,
         kind: 'bullet-core',
       })
-    } else {
+    } else if (!isPlayerBullet) {
       // Alien bullet glow stays smaller to keep chromatic budget for the aura
       const glowPadX = CELL_W
       const glowPadY = CELL_H / 2
@@ -703,14 +723,18 @@ export function buildDrawCommands(
     }
 
     // 4a.i. Chromatic aberration (player bullet only) — two side-offset ghost rects
-    if (isPlayerBullet) {
+    // Split symmetrically around the slot hue so the pair reads as RGB fringing
+    // on THIS player's bullet. Previously fixed as cyan/magenta regardless of
+    // slot, so all players' bullets looked identical.
+    if (isPlayerBullet && slotColor) {
+      const [cooler, warmer] = chromaticSplit(slotColor)
       commands.push({
         type: 'rect',
         x: centerPxX + 1,
         y: centerPxY,
         width: CELL_W,
         height: CELL_H,
-        fill: '#00ffff',
+        fill: cooler,
         alpha: 0.4,
         kind: 'bullet-chromatic',
       })
@@ -720,14 +744,17 @@ export function buildDrawCommands(
         y: centerPxY,
         width: CELL_W,
         height: CELL_H,
-        fill: '#ff00ff',
+        fill: warmer,
         alpha: 0.4,
         kind: 'bullet-chromatic',
       })
     }
 
     // 4a.ii. Electric fizzle particles (player bullet) — 1-2 sparkles every 3 ticks
-    if (isPlayerBullet && state.tick % 3 === 0) {
+    if (isPlayerBullet && slotColor && state.tick % 3 === 0) {
+      // Fizzle leans brightwards so sparks read as electric arcs, but still
+      // carries slot identity (e.g. orange fizzle for slot 2).
+      const fizzleFill = blendHex(slotColor, '#ffffff', 0.4)
       const count = 1 + ((state.tick / 3) % 2 === 0 ? 1 : 0)
       for (let i = 0; i < count; i++) {
         // Deterministic pseudo-random offset based on tick + bullet id char sum
@@ -740,7 +767,7 @@ export function buildDrawCommands(
           y: centerPxY + dy,
           width: 2,
           height: 2,
-          fill: '#aaffff',
+          fill: fizzleFill,
           alpha: 0.9,
           kind: 'bullet-fizzle',
         })
@@ -786,7 +813,9 @@ export function buildDrawCommands(
     // Player bullet dy=-1 (travels up), trail is BELOW (higher y).
     // Alien bullet dy=+1 (travels down), trail is ABOVE (lower y).
     const trailDir = -bullet.dy // opposite to travel
-    const trailFill = isPlayerBullet ? '#aaffff' : '#ff4444'
+    // Player trail is slot-tinted toward bright (65% slot + 35% white) so
+    // every player's tail reads as their own colour. Alien trail stays red.
+    const trailFill = isPlayerBullet && slotColor ? blendHex(slotColor, '#ffffff', 0.35) : '#ff4444'
     const trailAlphas = [0.5, 0.3, 0.15]
     for (let i = 0; i < trailAlphas.length; i++) {
       const offsetCells = i + 1 // 1, 2, 3 cells behind
@@ -826,11 +855,12 @@ export function buildDrawCommands(
     }
 
     // 4b.iii. Laser beam taper (player bullet only) — 3 stacked cells forming
-    // a tapered beam shape. Outer is widest (>CELL_W) at dim cyan; mid is 80%
-    // width in cyan; core is bright white at center. All three stay inside a
-    // 3×3 pixel-cell area around the main bullet cell.
-    if (isPlayerBullet) {
-      // Outer (widest, dim cyan) — 120% width, behind the main bullet
+    // a tapered beam shape. Outer is widest (>CELL_W) dim slot-tint; mid is 80%
+    // width in slot colour; core is near-white with a whisper of slot tint.
+    // All three stay inside a 3×3 pixel-cell area around the main bullet cell.
+    if (isPlayerBullet && slotColor) {
+      // Outer: darkened slot colour (30% brightness) — was hard-coded #004466
+      const taperOuterFill = scaleHexBrightness(slotColor, 0.3)
       const outerW = Math.round(CELL_W * 1.2)
       commands.push({
         type: 'rect',
@@ -838,11 +868,12 @@ export function buildDrawCommands(
         y: centerPxY,
         width: outerW,
         height: CELL_H,
-        fill: '#004466',
+        fill: taperOuterFill,
         alpha: 0.55,
         kind: 'bullet-taper-outer',
       })
-      // Mid (80% width, cyan)
+      // Mid: mid-bright slot colour — was hard-coded #66ffff
+      const taperMidFill = blendHex(slotColor, '#ffffff', 0.4)
       const midW = Math.round(CELL_W * 0.8)
       commands.push({
         type: 'rect',
@@ -850,13 +881,13 @@ export function buildDrawCommands(
         y: centerPxY,
         width: midW,
         height: CELL_H,
-        fill: '#66ffff',
+        fill: taperMidFill,
         alpha: 0.85,
         kind: 'bullet-taper-mid',
       })
-      // Core (bright white-yellow, tiny center). Fill is intentionally
-      // near-white (not pure #ffffff) so bullet-fill finders don't grab it
-      // instead of the primary bullet rect.
+      // Core: near-white with a subtle slot tint (not pure #ffffff so bullet-fill
+      // finders don't grab it instead of the primary bullet rect).
+      const taperCoreFill = blendHex(slotColor, '#ffffff', 0.9)
       const coreW = Math.max(1, Math.floor(CELL_W / 3))
       commands.push({
         type: 'rect',
@@ -864,7 +895,7 @@ export function buildDrawCommands(
         y: centerPxY + Math.floor(CELL_H / 4),
         width: coreW,
         height: Math.floor(CELL_H / 2),
-        fill: '#fefeff',
+        fill: taperCoreFill,
         alpha: 1,
         kind: 'bullet-taper-core',
       })
@@ -882,14 +913,17 @@ export function buildDrawCommands(
     })
 
     // 4c.i. Muzzle lightning arc — on new player bullet, draw 3-4 small zigzag
-    // cells between the nearest player cockpit and the bullet.
-    if (isPlayerBullet && prevState && !prevBulletIds.has(bullet.id)) {
+    // cells between the nearest player cockpit and the bullet. Arc is tinted
+    // toward the slot hue so it reads as this player's signature flash.
+    if (isPlayerBullet && slotColor && prevState && !prevBulletIds.has(bullet.id)) {
       const owner = bullet.ownerId ? state.players[bullet.ownerId] : null
       if (owner && owner.alive) {
         const cockpitX = owner.x * CELL_W + CELL_W / 2
         const cockpitY = LAYOUT.PLAYER_Y * CELL_H
         // Only emit when owner is nearby (within ~12 cells horizontally)
         if (Math.abs(owner.x - bullet.x) <= 12) {
+          // Bright, slot-tinted — was hard-coded '#aaffff'
+          const arcFill = blendHex(slotColor, '#ffffff', 0.4)
           const arcCount = 4
           for (let i = 0; i < arcCount; i++) {
             const t = (i + 1) / (arcCount + 1)
@@ -903,7 +937,7 @@ export function buildDrawCommands(
               y: ly - 1,
               width: 2,
               height: 2,
-              fill: '#aaffff',
+              fill: arcFill,
               alpha: 0.9,
               kind: 'bullet-arc',
             })
@@ -914,16 +948,19 @@ export function buildDrawCommands(
 
     // 4d. Muzzle flash — only when this bullet is NEW (not present in prev frame).
     // We use prevState bullet IDs as the reference for "was this bullet here last tick?".
+    // Player muzzle flash is slot-tinted (bright, not pure white) so two
+    // players spawn bullets with visually distinct muzzle flashes.
     if (prevState && !prevBulletIds.has(bullet.id)) {
       // Flash is centered on the bullet spawn position, a bit larger
       const flashSize = CELL_W * 2
+      const muzzleFill = isPlayerBullet && slotColor ? blendHex(slotColor, '#ffffff', 0.7) : '#ffcc66'
       commands.push({
         type: 'rect',
         x: bullet.x * CELL_W - flashSize / 2 + CELL_W / 2,
         y: bullet.y * CELL_H - flashSize / 2 + CELL_H / 2,
         width: flashSize,
         height: flashSize,
-        fill: isPlayerBullet ? '#ffffff' : '#ffcc66',
+        fill: muzzleFill,
         alpha: 0.7,
         kind: 'muzzle-flash',
       })
@@ -942,7 +979,12 @@ export function buildDrawCommands(
       const bx = pb.x * CELL_W + CELL_W / 2
       const by = pb.y * CELL_H + CELL_H / 2
       const fragCount = 6
-      const palette = ['#ffffff', '#aaffff', '#66ffff']
+      // Palette is slot-tinted for player bullets so you can tell whose shot
+      // hit. Before fix, always cyan-white regardless of shooter.
+      const impactSlotColor = resolveBulletSlotColor(state, pb)
+      const palette = impactSlotColor
+        ? ['#ffffff', blendHex(impactSlotColor, '#ffffff', 0.4), impactSlotColor]
+        : ['#ffdddd', '#ffaaaa', '#ff7777']
       for (let i = 0; i < fragCount; i++) {
         const ang = (i / fragCount) * Math.PI * 2
         const r = CELL_W * (0.8 + (i % 2) * 0.4)
@@ -1312,11 +1354,13 @@ export function buildDrawCommands(
     const spriteH = SPRITE_SIZE.player.height * CELL_H
     const baseColor = COLORS.player[player.slot]
 
-    // Invulnerability: pulse between base color and a brighter tint every 3 ticks.
-    // No outline ring — just a color modulation so the ship footprint is unchanged.
+    // Invulnerability: pulse between base color and a BRIGHTENED slot colour
+    // every 3 ticks. Previously the bright phase was pure '#ffffff', which
+    // collapsed the ship's slot identity during respawn (bug #7). Now we
+    // blend strongly toward white while still letting slot hue show through.
     const isInvuln = player.invulnerableUntilTick !== null && state.tick < player.invulnerableUntilTick
     const invulnBright = isInvuln && Math.floor(state.tick / 3) % 2 === 0
-    const spriteColor = invulnBright ? '#ffffff' : baseColor
+    const spriteColor = invulnBright ? blendHex(baseColor, '#ffffff', 0.75) : baseColor
 
     commands.push({
       type: 'sprite',
@@ -1357,8 +1401,11 @@ export function buildDrawCommands(
     // 6d. Wing tip highlights — 2 slightly-brighter pixels at the outer wings.
     // Bottom row of the sprite is fully filled across width, so wing tips sit at
     // x = spriteLeft (far left) and x = spriteLeft + spriteW - 2 (far right).
+    // Before bug #8 fix, the highlight was hard-coded '#aaffff' for every slot.
+    // Now derived from slot: 50% slot + 50% white so it reads as "this player's
+    // wing tip glowing". Invuln bright phase still spikes near-white.
     const wingY = spriteTop + spriteH - 2
-    const wingHighlight = invulnBright ? '#ffffff' : '#aaffff'
+    const wingHighlight = invulnBright ? blendHex(baseColor, '#ffffff', 0.85) : blendHex(baseColor, '#ffffff', 0.5)
     commands.push({
       type: 'rect',
       x: spriteLeft,
@@ -1416,6 +1463,12 @@ export function buildDrawCommands(
         kind: 'player-plume-center',
       })
     }
+    // Side plume fills derived from slot colour (bug #9). Previously the
+    // plumes were always cyan/blue (#aaffff / #4488cc) regardless of slot.
+    // Inner plume: 55% slot + 45% white (reads bright); outer: 70% slot
+    // darkened toward its 40% brightness (reads cooler / deeper).
+    const sidePlumeInner = blendHex(baseColor, '#ffffff', 0.45)
+    const sidePlumeOuter = scaleHexBrightness(baseColor, 0.55)
     const sidePlumeCells = 2
     for (let i = 0; i < sidePlumeCells; i++) {
       commands.push({
@@ -1424,7 +1477,7 @@ export function buildDrawCommands(
         y: plumeBaseY + i * 3,
         width: 4,
         height: 2,
-        fill: i === 0 ? '#aaffff' : '#4488cc',
+        fill: i === 0 ? sidePlumeInner : sidePlumeOuter,
         alpha: Math.max(0, Math.min(1, leftPhase - i * 0.2)),
         kind: 'player-plume-left',
       })
@@ -1436,7 +1489,7 @@ export function buildDrawCommands(
         y: plumeBaseY + i * 3,
         width: 4,
         height: 2,
-        fill: i === 0 ? '#aaffff' : '#4488cc',
+        fill: i === 0 ? sidePlumeInner : sidePlumeOuter,
         alpha: Math.max(0, Math.min(1, rightPhase - i * 0.2)),
         kind: 'player-plume-right',
       })
@@ -1460,15 +1513,17 @@ export function buildDrawCommands(
       }
     }
 
-    // 6h. Rim lighting — bright-cyan 1px highlights at top-left and top-right
-    // of the sprite, subtly alpha-blended. Stays strictly within sprite bounds.
+    // 6h. Rim lighting — 1px highlights at top-left and top-right of the sprite.
+    // Was hard-coded '#aaffff' — bug #9 fix: bright slot-tinted so each player
+    // reads as having their own edge-glow.
+    const rimFill = blendHex(baseColor, '#ffffff', 0.5)
     commands.push({
       type: 'rect',
       x: spriteLeft,
       y: spriteTop,
       width: 2,
       height: 1,
-      fill: '#aaffff',
+      fill: rimFill,
       alpha: 0.5,
       kind: 'player-rim',
     })
@@ -1478,12 +1533,16 @@ export function buildDrawCommands(
       y: spriteTop,
       width: 2,
       height: 1,
-      fill: '#aaffff',
+      fill: rimFill,
       alpha: 0.5,
       kind: 'player-rim',
     })
 
     // 6i. Engine trail — subtle fading vertical streak below the sprite.
+    // Previously '#66ffff' (cyan) for all slots (bug #9). Now slot-tinted
+    // toward bright (35% slot + 65% white gives a luminous streak that
+    // still carries hue).
+    const trailFillPlayer = blendHex(baseColor, '#ffffff', 0.35)
     for (let i = 0; i < 3; i++) {
       commands.push({
         type: 'rect',
@@ -1491,7 +1550,7 @@ export function buildDrawCommands(
         y: plumeBaseY + (i + 1) * (CELL_H / 2),
         width: 1,
         height: CELL_H / 2,
-        fill: '#66ffff',
+        fill: trailFillPlayer,
         alpha: Math.max(0, 0.4 - i * 0.12),
         kind: 'player-trail',
       })
@@ -1523,13 +1582,21 @@ export function buildDrawCommands(
     })
 
     // 6l. Afterburner flame — a tapered diamond plume below the sprite.
-    // Core is white-yellow; edges are orange-red. Width oscillates with
-    // sin(tick) for flicker. Widest at top, narrowing to single cell at ~row 8.
+    // Core gets slot-tinted bright fills (bug #9); edges keep warm reds.
+    // Width oscillates with sin(tick) for flicker. Widest at top, narrowing
+    // to single cell at ~row 8.
     {
       const flicker = 0.5 + 0.5 * Math.sin(state.tick * 0.5)
       const flameRows = 8
       const flameBaseY = (LAYOUT.PLAYER_Y + SPRITE_SIZE.player.height) * CELL_H
-      const coreFills = ['#ffffcc', '#ffff88', '#ffee66']
+      // Core palette: 3 decreasing-brightness slot tints. The brightest blends
+      // strongly toward white so the flame tip reads hot; the mid/tail carry
+      // progressively more slot identity. Edges stay warm (ember reds/oranges).
+      const coreFills = [
+        blendHex(baseColor, '#ffffff', 0.7),
+        blendHex(baseColor, '#ffffff', 0.45),
+        blendHex(baseColor, '#ffffff', 0.25),
+      ]
       const edgeFills = ['#ff8800', '#ff5522', '#cc2200']
       for (let row = 0; row < flameRows; row++) {
         const halfWidth = Math.max(0, Math.round((flameRows - 1 - row) / 2 + flicker * 0.8))
@@ -1616,6 +1683,11 @@ export function buildDrawCommands(
         player.invulnerableUntilTick !== null &&
         (prevPlayer == null || prevPlayer.invulnerableUntilTick !== player.invulnerableUntilTick)
       if (invulnChanged) {
+        // Bug #5: ring fill was hard-coded '#66aaff' (blue), so every slot's
+        // impact-shield burst looked identical in coop. Derive from slot
+        // colour blended toward white (50/50) — brighter than the base slot
+        // so it reads as a "shield deflecting", not a ship core.
+        const shieldFill = blendHex(baseColor, '#ffffff', 0.5)
         const ringCount = 12
         const cxI = centerPxX + CELL_W / 2
         const cyI = spriteTop + spriteH / 2
@@ -1629,7 +1701,7 @@ export function buildDrawCommands(
             y: cyI + Math.sin(ang) * rad - 2,
             width: 4,
             height: 4,
-            fill: '#66aaff',
+            fill: shieldFill,
             alpha: 0.75,
             kind: 'player-impact-shield',
           })
@@ -1667,18 +1739,30 @@ export function buildDrawCommands(
   // 7-8. Stateful effects: dissolve + confetti. `tickAdvanced` was hoisted
   // above to be usable by barrier shimmer logic — reference it here.
 
-  // Damage flash — fires only on player hit (lives decrease). A previous
-  // version also fired a white full-screen flash on score increase (every
-  // alien kill), but in busy waves that strobed the whole canvas and read
-  // as "explosions making the screen flicker". Kills now communicate via
-  // local explosion particles + the HUD score-bump animation instead.
+  // Damage flash — fires only on LOCAL player hit (lives decrease). A
+  // previous version gated on global `state.lives`, but in coop the whole
+  // team shares a life pool: a teammate dying would flash red for everyone
+  // (bug #3). Now we gate on the local player's per-player `.lives` counter.
+  //
+  // When playerId is null (spectator / pre-join), fall back to the global
+  // behaviour so single-player tests that don't pass a playerId still work.
   //
   // Flash peak alpha lowered 0.35 → 0.20 and shake intensity 4 → 2 after
   // user feedback that damage feedback felt jarring in coop. The flash
   // still fades linearly, and the shake is now deterministic (see
   // executor below).
   if (prevState && tickAdvanced) {
-    if (state.lives < prevState.lives) {
+    let tookDamage = false
+    if (playerId !== null) {
+      const prevLocal = prevState.players[playerId]
+      const currLocal = state.players[playerId]
+      if (prevLocal != null && currLocal != null && currLocal.lives < prevLocal.lives) {
+        tookDamage = true
+      }
+    } else {
+      tookDamage = state.lives < prevState.lives
+    }
+    if (tookDamage) {
       triggerShake(2, 10)
       triggerFlash('rgba(255, 0, 0, 0.20)', 3)
     }
@@ -1757,6 +1841,31 @@ export function buildDrawCommands(
           SPRITE_SIZE.ufo.width,
           SPRITE_SIZE.ufo.height,
           getUFOColor(state.tick),
+          state.tick,
+        )
+      }
+    }
+
+    // Player death detection (bug #2): players.alive=true → false transition
+    // fires a slot-coloured explosion at the player's last-known ship position.
+    // Player.x is the CENTER of the sprite; explosion origin uses the LEFT edge
+    // to match how alien/UFO explosions are positioned (top-left).
+    for (const prevPlayerId of Object.keys(prevState.players)) {
+      const prevPlayer = prevState.players[prevPlayerId]
+      const currPlayer = state.players[prevPlayerId]
+      if (
+        prevPlayer.alive &&
+        currPlayer != null &&
+        !currPlayer.alive &&
+        !seenDeadPlayerIds.has(prevPlayerId)
+      ) {
+        seenDeadPlayerIds.add(prevPlayerId)
+        explosionSystem.spawn(
+          prevPlayer.x - 3, // center → left edge (sprite is 7 wide, half=3)
+          LAYOUT.PLAYER_Y,
+          SPRITE_SIZE.player.width,
+          SPRITE_SIZE.player.height,
+          COLORS.player[prevPlayer.slot],
           state.tick,
         )
       }
@@ -1878,6 +1987,11 @@ export function buildDrawCommands(
   // 9b. HUD player legend (multi-player only) — slot badges [1][2][3][4]
   // rendered just below the wave number on the centre column. Bright when
   // alive, dim when dead/offline. Solo: no legend.
+  //
+  // Bug #4: when a local player identity is known AND that player is in the
+  // legend, emit a small underline rect below THAT badge (slot-coloured) so
+  // coop players can match their on-screen avatar to their HUD badge.
+  // Non-local badges are unchanged — the marker is an additive decoration.
   const playerEntries = Object.values(state.players)
   if (playerEntries.length >= 2) {
     const badgeFontSize = Math.max(14, Math.round(hudFontSize * 0.7))
@@ -1904,6 +2018,26 @@ export function buildDrawCommands(
         shadowBlur: isAlive ? 10 : 0,
         kind: `hud-player-legend-${p.slot}`,
       })
+
+      // Local-player marker: small underline rect below THIS badge in slot
+      // colour. Emitted only when `p` is the local player.
+      if (playerId !== null && p.id === playerId) {
+        // Underline just below the badge baseline. Width ≈ 60% of badge spacing
+        // so it reads as a line, not a full bar.
+        const markerW = Math.round(spacing * 0.6)
+        const markerX = startX + i * spacing + Math.round((spacing - markerW) / 2) - 6
+        const markerY = legendY + badgeFontSize + 2
+        commands.push({
+          type: 'rect',
+          x: markerX,
+          y: markerY,
+          width: markerW,
+          height: 2,
+          fill: baseColor,
+          alpha: 0.9,
+          kind: 'hud-player-legend-local-marker',
+        })
+      }
     }
   }
 
@@ -2341,6 +2475,72 @@ function scaleHexBrightness(hex: string, factor: number): string {
   const b = clamp(Number.parseInt(h.slice(4, 6), 16) * factor)
   const toHex = (n: number) => n.toString(16).padStart(2, '0')
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`
+}
+
+// ─── Slot-colour tinting helpers (used by bullet/player rendering) ──────────
+// Purpose: derive a family of related colours from a player's slot hue so
+// every bullet layer (glow, core, trail, taper, muzzle) reads as that
+// player's shot. Without this, every slot rendered cyan bullets and two
+// players in coop had identical-looking bullets (bug #1).
+
+/** Parse #rrggbb → [r, g, b] triple. Falls back to [0, 255, 255] (cyan). */
+function hexToRgb(hex: string): [number, number, number] {
+  const h = hex.replace('#', '')
+  if (h.length !== 6) return [0, 255, 255]
+  const r = Number.parseInt(h.slice(0, 2), 16)
+  const g = Number.parseInt(h.slice(2, 4), 16)
+  const b = Number.parseInt(h.slice(4, 6), 16)
+  if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) return [0, 255, 255]
+  return [r, g, b]
+}
+
+/** Convert [r, g, b] triple to #rrggbb, clamping to [0, 255]. */
+function rgbToHex(rgb: [number, number, number]): string {
+  const clamp = (n: number) => Math.max(0, Math.min(255, Math.round(n)))
+  const toHex = (n: number) => clamp(n).toString(16).padStart(2, '0')
+  return `#${toHex(rgb[0])}${toHex(rgb[1])}${toHex(rgb[2])}`
+}
+
+/** Blend two hex colours by a weight in 0..1. 0 → a, 1 → b. */
+function blendHex(a: string, b: string, weight: number): string {
+  const [ar, ag, ab] = hexToRgb(a)
+  const [br, bg, bb] = hexToRgb(b)
+  const w = Math.max(0, Math.min(1, weight))
+  return rgbToHex([ar + (br - ar) * w, ag + (bg - ag) * w, ab + (bb - ab) * w])
+}
+
+/**
+ * Resolve the bullet's owning player's slot colour. Returns:
+ *   - null if bullet is an alien bullet (ownerId === null)
+ *   - COLORS.player[slot] when owner exists
+ *   - COLORS.player[1] (cyan fallback) when owner is missing/dead
+ *
+ * Used by every player-bullet layer to tint cleanly per-slot.
+ */
+function resolveBulletSlotColor(state: GameState, bullet: BulletEntity): string | null {
+  if (bullet.ownerId === null) return null
+  const owner = state.players[bullet.ownerId]
+  if (!owner) return COLORS.player[1]
+  return COLORS.player[owner.slot]
+}
+
+/**
+ * Two-colour symmetric chromatic-aberration split derived from a slot hue.
+ * Returns [leftGhost, rightGhost] — each offset toward one hue-axis so the
+ * pair together reads as a classic RGB-split effect without falling back to
+ * the historical hard-coded cyan/magenta.
+ *
+ * Strategy: the slot colour dominates one channel; we shift high/low around
+ * the slot by boosting/dampening red and blue in opposite directions. Colour
+ * remains recognisable as the slot, and the two ghosts are always distinct.
+ */
+function chromaticSplit(slotColor: string): [string, string] {
+  const [r, g, b] = hexToRgb(slotColor)
+  // Push one ghost toward cooler (more blue / less red), the other toward
+  // warmer (more red / less blue). Clamped inside rgbToHex.
+  const cooler: [number, number, number] = [r * 0.6, g, Math.min(255, b + 100)]
+  const warmer: [number, number, number] = [Math.min(255, r + 100), g, b * 0.6]
+  return [rgbToHex(cooler), rgbToHex(warmer)]
 }
 
 /**

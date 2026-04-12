@@ -394,3 +394,154 @@ function hexToRgb(hex: string): string {
   const b = Number.parseInt(h.slice(4, 6), 16)
   return `rgb(${r}, ${g}, ${b})`
 }
+
+// ─── #12 Caption casing consistency (lobby) ────────────────────────────────
+//
+// "Room:" and "Players (X/Y):" share a panel. We enforce sentence-case so
+// that drift ("Room: ABC" + "Players (2/4):" side-by-side with a future
+// "Match Time:" doesn't sneak in). ALL CAPS heading "LOBBY" is excluded —
+// it's intentional emphasis at a different tier.
+
+/**
+ * Same sentence-case predicate used in GameOverScreen.test.tsx. Kept local
+ * to each test file so each suite can evolve its captions independently
+ * without cross-file test coupling.
+ *
+ * Rule:
+ *   - First word starts uppercase AND (if length ≥ 2) contains at least
+ *     one lowercase letter — this rejects ALL-CAPS single words like
+ *     "LOBBY" / "ROOM".
+ *   - No subsequent word of length ≥ 2 starts with an uppercase letter.
+ */
+function isSentenceCase(label: string): boolean {
+  const trimmed = label.trim()
+  if (trimmed.length === 0) return false
+  const words = trimmed.split(/\s+/)
+  const first = words[0]
+  if (first.length === 0) return false
+  const firstChar = first[0]
+  if (!(firstChar >= 'A' && firstChar <= 'Z')) return false
+  if (first.length >= 2) {
+    const hasLower = /[a-z]/.test(first.slice(1))
+    if (!hasLower) return false
+  }
+  for (let i = 1; i < words.length; i++) {
+    const w = words[i]
+    if (w.length < 2) continue
+    const c = w[0]
+    if (c >= 'A' && c <= 'Z') return false
+  }
+  return true
+}
+
+describe('LobbyScreen - caption casing (#12)', () => {
+  afterEach(() => cleanup())
+
+  it('Room and Players captions are sentence-case', () => {
+    const state = makeState({
+      mode: 'coop',
+      players: {
+        p1: { id: 'p1', name: 'Alice', slot: 1, color: 'cyan', kills: 0 } as any,
+        p2: { id: 'p2', name: 'Bob', slot: 2, color: 'orange', kills: 0 } as any,
+      },
+    })
+    render(<LobbyScreen state={state} playerId="p1" onReady={() => {}} onUnready={() => {}} onStartSolo={() => {}} />)
+    const body = document.body.textContent ?? ''
+    // "Room:" caption (value is the room code — dynamic)
+    expect(body).toMatch(/Room:\s/)
+    // "Players (X/Y):" caption — X and Y are dynamic but the word is fixed
+    expect(body).toMatch(/Players \(\d+\/\d+\):/)
+    // Check the fixed word parts explicitly with the shared helper.
+    for (const caption of ['Room', 'Players']) {
+      expect(isSentenceCase(caption)).toBe(true)
+    }
+  })
+
+  it('negative: ALL CAPS "LOBBY" heading is not flagged', () => {
+    expect(isSentenceCase('LOBBY')).toBe(false)
+  })
+
+  it('negative: "Room" / "Players" Title Case drift would be rejected', () => {
+    // These are the variations we want future drift to fail on. They are
+    // not in the current DOM; the negative check keeps the predicate honest.
+    expect(isSentenceCase('ROOM')).toBe(false)
+  })
+
+  it('ALL CAPS "LOBBY" heading still renders (casing rule is caption-only)', () => {
+    render(
+      <LobbyScreen state={makeState()} playerId="p1" onReady={() => {}} onUnready={() => {}} onStartSolo={() => {}} />,
+    )
+    const body = document.body.textContent ?? ''
+    expect(body).toContain('LOBBY')
+  })
+})
+
+// ─── #13 Empty-seat vs filled-row font consistency ─────────────────────────
+//
+// Filled rows inherit var(--font-body); empty seats previously hard-coded
+// `fontFamily: 'monospace'` on the [—] / ───── / [ ] spans. The mismatch
+// read as two visually different fonts in the same column. Assert that
+// spans inside `lobby-empty-seat` do NOT set their own fontFamily, so
+// both row types resolve to the same body font.
+
+describe('LobbyScreen - empty-seat font consistency (#13)', () => {
+  afterEach(() => cleanup())
+
+  it('empty-seat spans do not hard-code font-family: monospace', () => {
+    const state = makeState({
+      mode: 'coop',
+      players: {
+        p1: { id: 'p1', name: 'Alice', slot: 1, color: 'cyan', kills: 0 } as any,
+      },
+    })
+    render(<LobbyScreen state={state} playerId="p1" onReady={() => {}} onUnready={() => {}} onStartSolo={() => {}} />)
+    const empties = screen.getAllByTestId('lobby-empty-seat')
+    // 1 filled + 3 empty in a 4-seat coop lobby
+    expect(empties.length).toBeGreaterThanOrEqual(1)
+    for (const seat of empties) {
+      // The empty-seat container itself must not set a font-family.
+      expect(seat.style.fontFamily).toBe('')
+      // Any descendant span also must not explicitly set fontFamily:
+      // monospace — the whole point is that empty seats inherit the body
+      // font just like filled rows.
+      const spans = seat.querySelectorAll('span')
+      for (const span of Array.from(spans)) {
+        const fontFamily = (span as HTMLElement).style.fontFamily
+        expect(fontFamily.toLowerCase()).not.toContain('monospace')
+      }
+    }
+  })
+
+  it('filled rows do not set an explicit font-family (inherit body font)', () => {
+    const state = makeState({
+      mode: 'coop',
+      players: {
+        p1: { id: 'p1', name: 'Alice', slot: 1, color: 'cyan', kills: 0 } as any,
+      },
+    })
+    render(<LobbyScreen state={state} playerId="p1" onReady={() => {}} onUnready={() => {}} onStartSolo={() => {}} />)
+    const rows = screen.getAllByTestId('lobby-player-row')
+    expect(rows).toHaveLength(1)
+    // Filled row itself has no font-family override (inherits from the
+    // vaders-screen container which sets var(--font-body)).
+    expect(rows[0].style.fontFamily).toBe('')
+  })
+
+  it('filled rows and empty seats share the same font-family policy', () => {
+    // Positive symmetry: whatever font-family is on a filled row must also
+    // be on an empty-seat row (currently both are "" so both inherit).
+    const state = makeState({
+      mode: 'coop',
+      players: {
+        p1: { id: 'p1', name: 'Alice', slot: 1, color: 'cyan', kills: 0 } as any,
+      },
+    })
+    render(<LobbyScreen state={state} playerId="p1" onReady={() => {}} onUnready={() => {}} onStartSolo={() => {}} />)
+    const rows = screen.getAllByTestId('lobby-player-row')
+    const empties = screen.getAllByTestId('lobby-empty-seat')
+    const rowFont = rows[0].style.fontFamily
+    for (const seat of empties) {
+      expect(seat.style.fontFamily).toBe(rowFont)
+    }
+  })
+})

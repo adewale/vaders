@@ -174,6 +174,7 @@ function entityCommands(commands: DrawCommand[]): DrawCommand[] {
     'hud-player-legend-2',
     'hud-player-legend-3',
     'hud-player-legend-4',
+    'hud-player-legend-local-marker',
   ])
   return commands.filter((cmd) => {
     if (cmd.type === 'text') return false

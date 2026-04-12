@@ -197,7 +197,11 @@ export function App() {
           onMenuSound={(kind) => {
             const audio = getAudio()
             audio.resume()
-            audio.play(kind === 'navigate' ? 'menu_navigate' : 'menu_select')
+            // Literal sound names (not a ternary) so the cross-frontend
+            // audio-parity contract test's static extractor sees both
+            // branches. See web/src/audio-parity.contract.test.ts.
+            if (kind === 'navigate') audio.play('menu_navigate')
+            else audio.play('menu_select')
           }}
           error={launchError}
         />
@@ -313,6 +317,23 @@ function GameContainer({
 
         if (key === 'shoot') {
           shoot()
+          // Mirror the TUI's `playShootSound()` (client/src/hooks/useGameAudio.ts)
+          // so the local player hears their own shots. Pan stereo from the
+          // local player's x: center (x=60) = 0, left edge = -1, right edge = +1.
+          // Skip pan (and the sound) if we don't yet know which player we are
+          // — without a slot the pan would be ambiguous.
+          const curState = serverStateRef.current
+          const curPlayerId = playerIdRef.current
+          if (curPlayerId) {
+            const player = curState?.players[curPlayerId]
+            const panX = player ? Math.max(-1, Math.min(1, player.x / 60 - 1)) : 0
+            getAudio().play('shoot', { panX })
+          }
+          // NOTE: teammate shoot audio is not played here. `detectAudioTriggers`
+          // (client-core/src/audio/triggers.ts) does not derive a 'shoot'
+          // trigger from bullet-count changes, so other players' shots are
+          // currently silent on the web frontend. Follow-up: add a bullet-
+          // spawn detector keyed to the shooter's ship x for stereo pan.
           return
         }
         if (key === 'enter' || key === 'ready') {

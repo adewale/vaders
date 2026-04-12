@@ -2479,23 +2479,23 @@ describe('Player bullet visual polish (extended)', () => {
   type RectCmd = DrawCommand & { type: 'rect' }
   const isRect = (cmd: DrawCommand): cmd is RectCmd => cmd.type === 'rect'
 
-  it('player bullet has chromatic aberration ghosts (cyan and magenta)', () => {
+  it('player bullet has chromatic aberration ghosts — two distinct slot-tinted colours, offset symmetrically', () => {
+    // Bullet with a known slot-1 (cyan) player. Chromatic split produces two
+    // colours — one cooler, one warmer — both derived from the slot hue so
+    // coop players can tell their bullets apart. Before bug #1 fix, these
+    // were always pure cyan/magenta regardless of slot.
     const bullet = makeBullet({ id: 'b-ca', x: 50, y: 20, ownerId: 'p1', dy: -1 })
-    const state = stateWith([bullet], {}, { tick: 50 })
+    const player = makePlayer({ id: 'p1', slot: 1, x: 50 })
+    const state = stateWith([bullet], { p1: player }, { tick: 50 })
     const cmds = buildDrawCommands(state, null, state, 1, 1)
     const chromatic = cmds.filter((c): c is RectCmd => isRect(c) && (c as any).kind === 'bullet-chromatic')
     expect(chromatic.length).toBeGreaterThanOrEqual(2)
-    // At least one cyan-ish and one magenta-ish
-    const fills = chromatic.map((c) => c.fill.toLowerCase())
-    const hasCyan = fills.some(
-      (f) => /^#([0-9a-f]{2})ffff$/.test(f) || /cyan/.test(f) || f === '#00ffff' || f === '#66ffff',
-    )
-    const hasMagenta = fills.some(
-      (f) => /^#ff([0-9a-f]{2})ff$/.test(f) || /magenta/.test(f) || f === '#ff00ff' || f === '#ff66ff',
-    )
-    expect(hasCyan).toBe(true)
-    expect(hasMagenta).toBe(true)
-    // Both offset from the bullet
+
+    // Two distinct colours (not both identical)
+    const fills = new Set(chromatic.map((c) => c.fill.toLowerCase()))
+    expect(fills.size).toBeGreaterThanOrEqual(2)
+
+    // Both offset from the bullet — one left, one right
     const bulletPxX = 50 * CELL_W
     const offsets = chromatic.map((c) => c.x - bulletPxX)
     const hasPosOffset = offsets.some((o) => o > 0)
@@ -2851,22 +2851,35 @@ describe('Player elevation pass 2', () => {
   type RectCmd = DrawCommand & { type: 'rect' }
   const isRect = (c: DrawCommand): c is RectCmd => c.type === 'rect'
 
-  it('afterburner flame core is white-yellow', () => {
+  it('afterburner flame core is bright and slot-tinted', () => {
+    // After bug #9 fix, the core palette is no longer hard-coded white-yellow.
+    // It blends slot colour with white at decreasing strengths (70% / 45% / 25%
+    // white mix) so the flame carries this player's hue. Slot 1 (cyan) cores
+    // are white-cyan; slot 2 (orange) cores are white-orange; etc.
+    // Invariants: (a) at least one channel is bright (>200), and (b) the
+    // brightest core has some channel >= 180 (no dim fills).
     const player = makePlayer({ x: 60 })
     const state = stateWith([], { [player.id]: player }, { tick: 0 })
     const cmds = buildDrawCommands(state, null)
     const cores = cmds.filter((c): c is RectCmd => isRect(c) && (c as any).kind === 'player-afterburner-core')
     expect(cores.length).toBeGreaterThan(0)
-    // White-yellow: red ≈ 255, green ≈ 255, blue < red/green
     for (const c of cores) {
       const hex = c.fill.replace('#', '')
       const r = Number.parseInt(hex.slice(0, 2), 16)
       const g = Number.parseInt(hex.slice(2, 4), 16)
       const b = Number.parseInt(hex.slice(4, 6), 16)
-      expect(r).toBeGreaterThanOrEqual(220)
-      expect(g).toBeGreaterThanOrEqual(200)
-      expect(b).toBeLessThan(r)
+      // At least ONE channel is very bright — core must not read "dim".
+      expect(Math.max(r, g, b)).toBeGreaterThanOrEqual(200)
     }
+    // The brightest of the three core rows blends 70% white + 30% slot, so
+    // sum of channels should exceed a bright-leaning threshold (roughly
+    // 0.7 * 3 * 255 = ~535 minimum before slot contribution).
+    const brightest = cores.reduce((acc, c) => {
+      const hex = c.fill.replace('#', '')
+      const sum = Number.parseInt(hex.slice(0, 2), 16) + Number.parseInt(hex.slice(2, 4), 16) + Number.parseInt(hex.slice(4, 6), 16)
+      return sum > acc ? sum : acc
+    }, 0)
+    expect(brightest).toBeGreaterThanOrEqual(500)
   })
 
   it('afterburner flame edges are orange-red', () => {

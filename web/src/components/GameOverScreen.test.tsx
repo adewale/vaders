@@ -471,3 +471,114 @@ describe('GameOverScreen - leaderboard', () => {
     )
   })
 })
+
+// ─── #12 Caption casing consistency ────────────────────────────────────────
+//
+// The stat captions inside GameOverScreen (Score, Wave reached, Aliens
+// destroyed this run) share a panel — mixing "Wave Reached" with "Score:"
+// would look sloppy. We pick sentence-case (first letter capital, rest
+// lowercase unless a proper noun) and assert it at the caption level.
+//
+// ALL CAPS headlines like VICTORY / GAME OVER / MATCH SCOREBOARD are a
+// different tier of emphasis and must NOT be flagged by this rule.
+
+/**
+ * Return true if `label` is a sentence-case caption:
+ *   - First non-whitespace char is an uppercase letter.
+ *   - The first word has at least one lowercase letter (rejects ALL-CAPS
+ *     single words like "VICTORY" / "LOBBY").
+ *   - No word after the first starts with an uppercase letter (rejects
+ *     Title Case drift like "Wave Reached").
+ *
+ * A caption like "Score" or "Wave reached" passes. "Wave Reached" fails.
+ * "VICTORY" fails (no lowercase in first word). "GAME OVER" fails (both
+ * words all-caps).
+ */
+function isSentenceCase(label: string): boolean {
+  const trimmed = label.trim()
+  if (trimmed.length === 0) return false
+  const words = trimmed.split(/\s+/)
+  const first = words[0]
+  if (first.length === 0) return false
+  const firstChar = first[0]
+  // Must start uppercase
+  if (!(firstChar >= 'A' && firstChar <= 'Z')) return false
+  // If the first word is longer than 1 char, at least one char after the
+  // initial must be lowercase. This rejects "VICTORY" / "LOBBY" / "ROOM".
+  if (first.length >= 2) {
+    const tail = first.slice(1)
+    const hasLower = /[a-z]/.test(tail)
+    if (!hasLower) return false
+  }
+  // No subsequent word may start with an uppercase letter (length ≥ 2).
+  for (let i = 1; i < words.length; i++) {
+    const w = words[i]
+    if (w.length < 2) continue
+    const c = w[0]
+    if (c >= 'A' && c <= 'Z') return false
+  }
+  return true
+}
+
+describe('GameOverScreen - caption casing (#12)', () => {
+  afterEach(() => cleanup())
+
+  it('Score / Wave reached / Aliens destroyed this run captions are sentence-case', () => {
+    const state = makeState({
+      mode: 'solo',
+      score: 1250,
+      wave: 4,
+      players: {
+        p1: makePlayer({ id: 'p1', slot: 1, name: 'Alice', kills: 9 }),
+      },
+    })
+    render(<GameOverScreen state={state} playerId="p1" onReplay={() => {}} onQuit={() => {}} />)
+    // Grab the panel by looking for the Score paragraph's ancestor.
+    const body = document.body.textContent ?? ''
+    // Extract each "Label: value" caption. The colon is the caption terminator.
+    const captions = ['Score', 'Wave reached', 'Aliens destroyed this run']
+    for (const caption of captions) {
+      // Caption must appear verbatim followed by a colon (value is dynamic).
+      expect(body).toContain(`${caption}:`)
+      expect(isSentenceCase(caption)).toBe(true)
+    }
+  })
+
+  it('negative: ALL CAPS headings are not flagged as sentence-case', () => {
+    // Sanity check the helper itself — VICTORY / GAME OVER / MATCH SCOREBOARD
+    // must fail the sentence-case check so the positive assertions are
+    // meaningful.
+    expect(isSentenceCase('VICTORY')).toBe(false)
+    expect(isSentenceCase('GAME OVER')).toBe(false)
+    expect(isSentenceCase('MATCH SCOREBOARD')).toBe(false)
+  })
+
+  it('negative: Title Case drift ("Wave Reached") would be rejected', () => {
+    expect(isSentenceCase('Wave Reached')).toBe(false)
+    expect(isSentenceCase('Aliens Destroyed This Run')).toBe(false)
+  })
+
+  it('positive sanity: lowercase-body words are accepted', () => {
+    expect(isSentenceCase('Score')).toBe(true)
+    expect(isSentenceCase('Wave reached')).toBe(true)
+    expect(isSentenceCase('Aliens destroyed this run')).toBe(true)
+  })
+
+  it('ALL CAPS headlines survive in the DOM (not altered by the casing rule)', () => {
+    // Rule applies to captions only; VICTORY / GAME OVER / MATCH SCOREBOARD
+    // must still render ALL CAPS as intentional emphasis.
+    const state = makeState({
+      mode: 'coop',
+      lives: 1, // victory
+      players: {
+        p1: makePlayer({ id: 'p1', slot: 1, name: 'Alice', kills: 7 }),
+        p2: makePlayer({ id: 'p2', slot: 2, name: 'Bob', kills: 3 }),
+      },
+    })
+    render(<GameOverScreen state={state} playerId="p1" onReplay={() => {}} onQuit={() => {}} />)
+    const headline = screen.getByTestId('game-over-headline')
+    expect(headline.textContent).toBe('VICTORY')
+    const leaderboard = screen.getByTestId('leaderboard')
+    expect(leaderboard.textContent ?? '').toContain('MATCH SCOREBOARD')
+  })
+})

@@ -219,6 +219,7 @@ describe('in-place replay: EVERY match-scoped accumulator resets on tick rewind'
   const ACCUMULATOR_FIELDS = [
     'seenDeadAlienIdsSize',
     'seenDeadUfoIdsSize',
+    'seenDeadPlayerIdsSize',
     'confettiStarted',
     'barrierDamageScarsSize',
     'barrierShimmersLength',
