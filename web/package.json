@@ -1,0 +1,40 @@
+{
+  "name": "@vaders/web",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "predev": "node ../scripts/write-build-info.mjs",
+    "dev": "vite",
+    "prebuild": "node ../scripts/write-build-info.mjs",
+    "build": "vite build",
+    "preview": "vite preview",
+    "pretest": "node ../scripts/write-build-info.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:firefox": "playwright test --project=firefox",
+    "test:e2e:webkit": "playwright test --project=webkit",
+    "test:e2e:all-browsers": "playwright test --project=chromium --project=firefox --project=webkit",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@types/qrcode": "^1.5.6",
+    "qrcode": "^1.5.4",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.50.0",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "fast-check": "^4.5.3",
+    "jsdom": "^29.0.2",
+    "typescript": "^5.3.0",
+    "vite": "^6.0.0",
+    "vitest": "^3.0.0"
+  }
+}

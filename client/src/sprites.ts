@@ -5,6 +5,13 @@
 import { STANDARD_WIDTH, STANDARD_HEIGHT } from '../../shared/types'
 export { STANDARD_WIDTH, STANDARD_HEIGHT }
 
+// Import bitmap data and colors from client-core
+import { PIXEL_ART } from '../../client-core/src/sprites/bitmaps'
+import type { AnimatedSprite } from '../../client-core/src/sprites/bitmaps'
+export { PIXEL_ART, SPRITE_SIZE, getAnimationFrame, type AnimatedSprite } from '../../client-core/src/sprites/bitmaps'
+import { COLORS } from '../../client-core/src/sprites/colors'
+export { COLORS, GRADIENT_COLORS, getPlayerColor } from '../../client-core/src/sprites/colors'
+
 // Import terminal capabilities for sprite selection and color conversion
 import { getTerminalCapabilities, convertColorForTerminal, convertColorObject, supportsBraille } from './terminal'
 import type { TerminalCapabilities } from './terminal'
@@ -61,108 +68,8 @@ function pixelsToBraille(pixels: number[][]): string[] {
   return lines
 }
 
-// ─── Braille Pixel Art (14×8 grids → 7 braille chars × 2 lines) ────────────────
-
-const PIXEL_ART = {
-  squid: {
-    a: [
-      [0,0,0,0,0,1,1,1,1,0,0,0,0,0],
-      [0,0,0,1,1,1,1,1,1,1,1,0,0,0],
-      [0,0,1,1,1,1,1,1,1,1,1,1,0,0],
-      [0,1,1,1,0,0,1,1,0,0,1,1,1,0],
-      [0,1,1,1,1,1,1,1,1,1,1,1,1,0],
-      [0,0,0,0,1,0,0,0,0,1,0,0,0,0],
-      [0,0,0,1,0,1,0,0,1,0,1,0,0,0],
-      [0,0,1,0,0,0,1,1,0,0,0,1,0,0],
-    ],
-    b: [
-      [0,0,0,0,0,1,1,1,1,0,0,0,0,0],
-      [0,0,0,1,1,1,1,1,1,1,1,0,0,0],
-      [0,0,1,1,1,1,1,1,1,1,1,1,0,0],
-      [0,1,1,1,0,0,1,1,0,0,1,1,1,0],
-      [0,1,1,1,1,1,1,1,1,1,1,1,1,0],
-      [0,0,1,0,0,1,0,0,1,0,0,1,0,0],
-      [0,1,0,0,0,0,0,0,0,0,0,0,1,0],
-      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
-    ],
-  },
-  crab: {
-    a: [
-      [1,0,0,0,1,0,0,0,0,1,0,0,0,1],
-      [0,1,0,0,0,1,0,0,1,0,0,0,1,0],
-      [0,0,1,1,1,1,1,1,1,1,1,1,0,0],
-      [0,1,1,0,1,1,1,1,1,1,0,1,1,0],
-      [1,1,1,1,1,1,1,1,1,1,1,1,1,1],
-      [1,0,1,1,1,1,1,1,1,1,1,1,0,1],
-      [1,0,1,0,0,0,0,0,0,0,0,1,0,1],
-      [0,0,0,0,1,1,0,0,1,1,0,0,0,0],
-    ],
-    b: [
-      [0,0,0,0,1,0,0,0,0,1,0,0,0,0],
-      [0,0,0,0,0,1,0,0,1,0,0,0,0,0],
-      [0,0,1,1,1,1,1,1,1,1,1,1,0,0],
-      [0,1,1,0,1,1,1,1,1,1,0,1,1,0],
-      [1,1,1,1,1,1,1,1,1,1,1,1,1,1],
-      [1,0,1,1,1,1,1,1,1,1,1,1,0,1],
-      [1,0,0,0,1,0,0,0,0,1,0,0,0,1],
-      [0,0,0,1,0,0,0,0,0,0,1,0,0,0],
-    ],
-  },
-  octopus: {
-    a: [
-      [0,0,0,0,1,1,1,1,1,1,0,0,0,0],
-      [0,0,1,1,1,1,1,1,1,1,1,1,0,0],
-      [0,1,1,1,0,0,1,1,0,0,1,1,1,0],
-      [0,1,1,1,1,1,1,1,1,1,1,1,1,0],
-      [0,0,1,1,1,1,1,1,1,1,1,1,0,0],
-      [0,0,0,1,1,0,0,0,0,1,1,0,0,0],
-      [0,0,1,1,0,1,0,0,1,0,1,1,0,0],
-      [0,1,1,0,0,0,0,0,0,0,0,1,1,0],
-    ],
-    b: [
-      [0,0,0,0,1,1,1,1,1,1,0,0,0,0],
-      [0,0,1,1,1,1,1,1,1,1,1,1,0,0],
-      [0,1,1,1,0,0,1,1,0,0,1,1,1,0],
-      [0,1,1,1,1,1,1,1,1,1,1,1,1,0],
-      [0,0,1,1,1,1,1,1,1,1,1,1,0,0],
-      [0,0,0,1,0,0,1,1,0,0,1,0,0,0],
-      [0,0,1,0,0,1,0,0,1,0,0,1,0,0],
-      [1,1,0,0,0,0,0,0,0,0,0,0,1,1],
-    ],
-  },
-  player: [
-    [0,0,0,0,0,1,1,1,0,0,0,0,0,0],
-    [0,0,0,0,1,1,1,1,1,0,0,0,0,0],
-    [0,0,0,1,1,1,1,1,1,1,0,0,0,0],
-    [0,0,1,1,1,1,1,1,1,1,1,0,0,0],
-    [0,1,1,1,1,1,1,1,1,1,1,1,0,0],
-    [1,1,1,1,1,1,1,1,1,1,1,1,1,1],
-    [1,1,1,1,1,1,1,1,1,1,1,1,1,1],
-    [1,1,0,0,1,1,1,1,1,0,0,0,1,1],
-  ],
-  ufo: {
-    a: [
-      [0,0,0,0,0,1,1,1,1,0,0,0,0,0],
-      [0,0,0,1,1,1,1,1,1,1,1,0,0,0],
-      [0,0,1,1,0,0,1,1,0,0,1,1,0,0],
-      [0,1,1,1,1,1,1,1,1,1,1,1,1,0],
-      [1,1,1,1,1,1,1,1,1,1,1,1,1,1],
-      [0,1,1,1,1,1,1,1,1,1,1,1,1,0],
-      [0,0,1,1,0,0,0,0,0,0,1,1,0,0],
-      [0,0,0,0,1,0,0,0,0,1,0,0,0,0],
-    ],
-    b: [
-      [0,0,0,0,0,1,1,1,1,0,0,0,0,0],
-      [0,0,0,1,1,1,1,1,1,1,1,0,0,0],
-      [0,0,1,1,0,1,0,0,1,0,1,1,0,0],
-      [0,1,1,1,1,1,1,1,1,1,1,1,1,0],
-      [1,1,1,1,1,1,1,1,1,1,1,1,1,1],
-      [0,1,1,1,1,1,1,1,1,1,1,1,1,0],
-      [0,0,1,1,0,0,0,0,0,0,1,1,0,0],
-      [0,0,0,0,0,1,0,0,1,0,0,0,0,0],
-    ],
-  },
-}
+// ─── Braille Pixel Art ────────────────────────────────────────────────────────
+// PIXEL_ART is imported from client-core/src/sprites/bitmaps.ts
 
 // Pre-render braille sprites at module load
 function renderBrailleSprites() {
@@ -194,15 +101,8 @@ function renderBrailleSprites() {
 
 const _brailleSprites = renderBrailleSprites()
 
-// ─── Sprite Type ────────────────────────────────────────────────────────────────
-
-/** A sprite with two animation frames (A/B) */
-export interface AnimatedSprite {
-  a: readonly [string, string]
-  b: readonly [string, string]
-}
-
 // ─── Main Sprites ───────────────────────────────────────────────────────────────
+// AnimatedSprite is re-exported from client-core/src/sprites/bitmaps.ts
 
 export const SPRITES = {
   // Classic alien sprites (2 lines each, 7 chars wide, braille pixel art)
@@ -233,98 +133,9 @@ export const SPRITES = {
     0: ['⠀⠀⠀', '⠀⠀⠀'],  // Destroyed - empty braille
   },
 
-  // Enhanced mode sprites (2 lines each)
-  enhanced: {
-    commander: {
-      healthy: ['◄══════►', '╚══════╝'],
-      damaged: ['◄──────►', '╚──────╝'],
-    },
-    transform: {
-      scorpion: ['∿∿', '╰╯'],
-      stingray: ['◇◇', '╲╱'],
-      mini_commander: ['◄►', '╚╝'],
-    },
-    tractorBeam: ['╠╬╬╬╬╣', '║║║║║║'],
-  },
 } as const
 
-// Sprite dimensions (width x height in characters)
-export const SPRITE_SIZE = {
-  alien: { width: 7, height: 2 },
-  player: { width: 7, height: 2 },
-  ufo: { width: 7, height: 2 },
-  bullet: { width: 1, height: 1 },
-  barrier: { width: 3, height: 2 },
-} as const
-
-// ─── Gradient Colors ────────────────────────────────────────────────────────────
-// Vertical gradient: bright top row, dark bottom row
-
-export const GRADIENT_COLORS = {
-  alien: {
-    squid:   { bright: '#ff8888', dark: '#aa1111' },
-    crab:    { bright: '#ffcc44', dark: '#aa5500' },
-    octopus: { bright: '#88ff88', dark: '#11aa11' },
-  },
-  player: {
-    1: { bright: '#44ffff', dark: '#116666' },
-    2: { bright: '#ffaa44', dark: '#884400' },
-    3: { bright: '#ff88ff', dark: '#881188' },
-    4: { bright: '#aaff44', dark: '#448800' },
-  },
-  ufo: { bright: '#ff88ff', dark: '#aa11aa' },
-} as const
-
-// Retro Arcade Color Palette
-// Inspired by Galaga, Space Invaders, Pac-Man
-export const COLORS = {
-  // Aliens: threat-based colors (top rows = more dangerous)
-  alien: {
-    squid:   '#ff5555',   // Red - top row, highest threat
-    crab:    '#ffaa00',   // Orange - middle row, medium threat
-    octopus: '#55ff55',   // Green - bottom row, lowest threat
-  },
-  // Players: distinct vibrant colors for each slot
-  player: {
-    1: '#00ffff',  // Cyan - classic hero color (think Galaga ship)
-    2: '#ff8800',  // Orange - warm contrast
-    3: '#ff55ff',  // Magenta/pink - stands out
-    4: '#88ff00',  // Lime green - high visibility
-  },
-  bullet: {
-    player: '#ffffff',  // Bright white for visibility
-    alien:  '#ff3333',  // Red - danger
-  },
-  barrier: {
-    4: '#00ff00',  // Bright green - full health
-    3: '#ffff00',  // Yellow - damaged
-    2: '#ff8800',  // Orange - critical
-    1: '#ff0000',  // Red - nearly destroyed
-  },
-  enhanced: {
-    commander: '#ff0000',     // Red - boss enemy
-    transform: '#00ffff',     // Cyan - special enemy
-  },
-  // UI Colors for consistency across screens
-  ui: {
-    title: '#00ffff',         // Cyan - main titles
-    border: '#5555ff',        // Blue - borders (arcade cabinet feel)
-    borderHighlight: '#00ffff', // Cyan - highlighted borders
-    selected: '#ffff00',      // Yellow - selected items
-    selectedText: '#ffffff',  // White - selected item text
-    unselected: '#888888',    // Gray - unselected items
-    hotkey: '#ff8800',        // Orange - hotkey brackets (arcade button color)
-    label: '#aaaaaa',         // Light gray - labels
-    dim: '#666666',           // Dark gray - dimmed text
-    score: '#ffff00',         // Yellow - scores (classic arcade)
-    wave: '#00ffff',          // Cyan - wave number
-    lives: '#ff5555',         // Red - lives/hearts
-    livesEmpty: '#553333',    // Dark red - empty hearts
-    success: '#00ff00',       // Green - success/victory
-    error: '#ff0000',         // Red - errors/game over
-    warning: '#ffff00',       // Yellow - warnings
-  },
-} as const
+// SPRITE_SIZE, GRADIENT_COLORS, COLORS, getPlayerColor are re-exported from client-core
 
 // Logo ASCII art - larger for 120 width
 export const LOGO_ASCII = `
@@ -378,18 +189,6 @@ export const ASCII_SPRITES = {
     2: ['.#.', '#..'],
     1: ['...', '...'],
     0: ['   ', '   '],
-  },
-  enhanced: {
-    commander: {
-      healthy: ['<======>', '+======+'],
-      damaged: ['<------>', '+------+'],
-    },
-    transform: {
-      scorpion: ['~~', 'vv'],
-      stingray: ['<>', '\\/',],
-      mini_commander: ['<>','++'],
-    },
-    tractorBeam: ['||||||', '||||||'],
   },
 } as const
 
@@ -457,14 +256,6 @@ export function getLogo() {
 
 import type { PlayerSlot } from '../../shared/types'
 
-/**
- * Get the display color for a player based on their slot.
- * This centralizes the repeated pattern: COLORS.player[slot as 1|2|3|4] || fallback
- */
-export function getPlayerColor(slot: PlayerSlot, fallbackColor?: string): string {
-  return COLORS.player[slot] ?? fallbackColor ?? COLORS.player[1]
-}
-
 // Color conversion is now handled by the terminal compatibility layer
 // via convertColorForTerminal() and convertColorObject() imports
 
@@ -494,12 +285,4 @@ export function getColors(): typeof COLORS {
 export function getTerminalPlayerColor(slot: PlayerSlot, fallbackColor?: string): string {
   const colors = getColors()
   return colors.player[slot] ?? fallbackColor ?? colors.player[1]
-}
-
-/**
- * Select animation frame based on game tick.
- * Aliens alternate between frames A and B every 15 ticks (~0.5s at 30Hz).
- */
-export function getAnimationFrame(sprite: AnimatedSprite, tick: number): readonly [string, string] {
-  return Math.floor(tick / 15) % 2 === 0 ? sprite.a : sprite.b
 }

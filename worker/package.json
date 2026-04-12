@@ -4,9 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "node ../scripts/write-build-info.mjs",
     "dev": "wrangler dev",
+    "predeploy": "node ../scripts/write-build-info.mjs",
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
+    "pretest": "node ../scripts/write-build-info.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },

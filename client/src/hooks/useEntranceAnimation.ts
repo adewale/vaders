@@ -7,6 +7,7 @@ import {
   type EntranceConfig,
   type AlienAnimState,
 } from '../animation'
+import type { FrameScheduler } from '../../../client-core/src/adapters'
 
 /**
  * Alien data for entrance animation
@@ -19,12 +20,20 @@ export interface EntranceAlien {
   targetY: number
 }
 
+/** Default frame scheduler using native browser/runtime APIs */
+const DEFAULT_FRAME_SCHEDULER: FrameScheduler = {
+  requestFrame: (cb) => requestAnimationFrame(cb),
+  cancelFrame: (handle) => cancelAnimationFrame(handle),
+}
+
 /**
  * Options for the entrance animation hook
  */
 export interface UseEntranceAnimationOptions {
   /** Entrance animation configuration */
   config?: Partial<EntranceConfig>
+  /** Frame scheduler for render loops (defaults to requestAnimationFrame/cancelAnimationFrame) */
+  frameScheduler?: FrameScheduler
 }
 
 /**
@@ -101,6 +110,7 @@ export function useEntranceAnimation(
 ): UseEntranceAnimationReturn {
   // Use stable reference for empty config
   const config = options.config ?? EMPTY_CONFIG
+  const scheduler = options.frameScheduler ?? DEFAULT_FRAME_SCHEDULER
 
   const [isRunning, setIsRunning] = useState(false)
   const [isComplete, setIsComplete] = useState(true)
@@ -116,7 +126,7 @@ export function useEntranceAnimation(
   useEffect(() => {
     return () => {
       if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current)
+        scheduler.cancelFrame(animationFrameRef.current)
       }
     }
   }, [])
@@ -134,7 +144,7 @@ export function useEntranceAnimation(
     setPositions(new Map(entranceRef.current.getVisualPositions()))
 
     if (running) {
-      animationFrameRef.current = requestAnimationFrame(updateLoop)
+      animationFrameRef.current = scheduler.requestFrame(updateLoop)
     }
   }, [])
 
@@ -146,9 +156,9 @@ export function useEntranceAnimation(
 
     // Start animation loop
     if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current)
+      scheduler.cancelFrame(animationFrameRef.current)
     }
-    animationFrameRef.current = requestAnimationFrame(updateLoop)
+    animationFrameRef.current = scheduler.requestFrame(updateLoop)
   }, [updateLoop])
 
   // Stop and snap to formation
@@ -159,7 +169,7 @@ export function useEntranceAnimation(
     setPositions(new Map(entranceRef.current.getVisualPositions()))
 
     if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current)
+      scheduler.cancelFrame(animationFrameRef.current)
       animationFrameRef.current = null
     }
   }, [])

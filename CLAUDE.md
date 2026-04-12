@@ -8,11 +8,19 @@ Multiplayer TUI Space Invaders clone (1-4 players) using OpenTUI for terminal re
 
 ## Architecture
 
-The project has three main parts:
+The project has five packages in a Bun workspace:
 
-1. **Worker** (`worker/`) - Cloudflare Worker with Durable Object (`GameRoom`) that manages game state, runs the 30Hz game loop, and broadcasts full state via WebSocket
-2. **Client** (`client/`) - Bun + OpenTUI React app that renders the TUI, handles keyboard input, and maintains WebSocket connection
-3. **Shared** (`shared/`) - TypeScript types (`GameState`, `Player`, `Alien`, etc.) and WebSocket protocol definitions
+1. **Shared** (`shared/`) - TypeScript types (`GameState`, `Player`, `Alien`, etc.) and WebSocket protocol definitions
+2. **Client Core** (`client-core/`) - Platform-agnostic client library shared between TUI and web frontends. Contains animation math, connection hooks, input types, audio triggers, sprite data, and adapter interfaces
+3. **Client** (`client/`) - Bun + OpenTUI React app that renders the TUI, handles keyboard input, and maintains WebSocket connection
+4. **Web** (`web/`) - Browser-based React DOM + Canvas frontend. Uses Vite, vitest, and Playwright
+5. **Worker** (`worker/`) - Cloudflare Worker with Durable Object (`GameRoom`) that manages game state, runs the 30Hz game loop, and broadcasts full state via WebSocket
+
+### Multi-Frontend Architecture
+
+Both frontends share `client-core/` for platform-agnostic logic. Each frontend implements platform adapters (`InputAdapter`, `AudioAdapter`, `FrameScheduler`, `VisualConfig`) defined in `client-core/src/adapters.ts`.
+
+Key constraint: `client-core/` must NOT import from `@opentui/*`, `bun:*`, or `node:*`. CI enforces this.
 
 ## Quick Start
 
@@ -43,18 +51,69 @@ bun run vaders -- --no-audio-check # Skip audio verification
 ## Development Commands
 
 ```bash
-# Run game (connects to deployed remote server by default)
+# Run TUI game (connects to deployed remote server by default)
 bun run vaders
 
 # Run with local server for development
 bun run vaders -- --local
 
 # Run components separately
-bun run dev:client             # Client only (needs worker running)
+bun run dev:client             # TUI client only (needs worker running)
 bun run dev:worker             # Worker only
 
-# Deploy to Cloudflare
-cd worker && bunx wrangler deploy
+# Web frontend development
+cd web && npx vite             # Start Vite dev server at localhost:5173
+
+# Deploy (single Worker serves both API and static assets)
+cd web && npx vite build               # Build web frontend → web/dist
+cd worker && npx wrangler deploy       # Deploy unified Worker (API + static assets)
+```
+
+## Cross-frontend multiplayer test (manual)
+
+Verify TUI and web players can play together in the same room:
+
+1. **Start the local worker** (one terminal):
+   ```bash
+   cd worker && npx wrangler dev --port 8787
+   ```
+2. **Start the web dev server** (second terminal):
+   ```bash
+   cd web && VITE_SERVER_URL=http://localhost:8787 npx vite --port 5173
+   ```
+3. **Create a room in the web client**: open `http://localhost:5173`, press `2` (CREATE ROOM). Note the 6-char room code from the URL (`/room/ABC123`).
+4. **Join from the TUI** (third terminal):
+   ```bash
+   VADERS_SERVER=http://localhost:8787 bun run vaders -- --room ABC123 --name "TUI"
+   ```
+5. **Verify both see 2 players in the lobby** — web shows "Players (2/4)", TUI shows both names.
+6. **Both players press ENTER to ready up** — game starts after countdown.
+7. **Verify gameplay**:
+   - Same aliens, same positions, same HP on both clients (server is authoritative).
+   - Shooting an alien on one client makes it disappear on the other.
+   - Player colors are distinct: cyan (slot 1), orange (slot 2).
+
+This is the acceptance test for the "one game, two frontends" design goal.
+
+## Testing Commands
+
+```bash
+# Run all tests
+bun run test                   # shared + client-core + client + worker
+
+# Per-package
+bun test shared/               # Shared types, protocol, collision
+bun test client-core/          # Animation, connection, input, sprites
+bun test client/               # TUI components, hooks, terminal
+cd web && npx vitest run       # Web adapters, renderer, contracts, routing
+cd worker && bun run test      # Worker, GameRoom, reducer, matchmaker
+
+# Web E2E (requires local servers running)
+cd web && npx playwright test
+
+# CI checks
+grep -r 'opentui' client-core/src/   # Should find nothing
+grep -r 'opentui' web/src/           # Should find nothing
 ```
 
 ## Key Technical Details
@@ -87,6 +146,19 @@ cd worker && bunx wrangler deploy
 - `<box>` with flexbox layout (Yoga)
 - `position="absolute"` for game entity positioning
 - `<text color="...">` for styled output
+
+### Web Frontend
+
+- **Rendering**: HTML Canvas (120×36 grid → 960×576px at 8×16px per cell)
+- **Responsive scaling**: Canvas scales to viewport preserving 5:3 aspect ratio
+- **Mobile**: Viewports <600px show "Play on desktop" message (touch controls Phase 3)
+- **URL routing**: `/` (launch), `/room/:code` (join), `/solo` (solo), `/?matchmake=true`
+- **Input**: Browser KeyboardEvent → WebInputAdapter → heldKeys tracker → server
+- **Audio**: Web Audio API (user-gesture-gated AudioContext)
+- **Canvas renderer**: Pure `buildDrawCommands()` function → `executeDrawCommands()` side effect
+- **Tab handling**: `visibilitychange` and `blur` release all held keys
+- **Testing**: vitest (unit/property/contract), Playwright (E2E)
+- **Deploy**: Single Cloudflare Worker with Static Assets binding (same-origin API + frontend)
 
 ### Observability
 

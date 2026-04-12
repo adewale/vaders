@@ -945,17 +945,28 @@ describe('Worker: HTTP Endpoints', () => {
   }
 
   describe('Health endpoint', () => {
-    it('returns game identifier for server discovery', async () => {
+    it('returns game identifier and deployment metadata for server discovery', async () => {
       const env = createMockEnv()
       const request = new Request('http://localhost/health')
 
       const response = await worker.fetch(request, env)
 
       expect(response.status).toBe(200)
-      const data = await response.json() as { status: string; game: string; version: string }
+      const data = await response.json() as {
+        status: string
+        game: string
+        version: string
+        commitHash: string
+        buildTime: string
+      }
       expect(data.status).toBe('ok')
       expect(data.game).toBe('vaders')
-      expect(data.version).toBe('1.0.0')
+      // Version is read from the generated buildInfo (root package.json at build time).
+      expect(data.version).toMatch(/^\d+\.\d+\.\d+$/)
+      // commitHash: 12-char git short SHA, "dev", or either suffixed with "-dirty".
+      expect(data.commitHash).toMatch(/^([0-9a-f]{7,40}|dev)(-dirty)?$/)
+      // buildTime: ISO-8601 UTC timestamp.
+      expect(data.buildTime).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/)
     })
 
     it('includes CORS headers', async () => {

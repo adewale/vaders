@@ -5,11 +5,13 @@
 import type { KeyEvent } from '@opentui/core'
 import { getKeyReleaseTimeoutMs } from './terminal'
 
-// ─── Internal Key Type (stable, not tied to OpenTUI) ──────────────────────────
+// Re-export platform-agnostic types and tracker from client-core
+export type { VadersKey } from '../../client-core/src/input/types'
+export type { HeldKeys } from '../../client-core/src/input/heldKeys'
+export { createHeldKeysTracker as _createHeldKeysTracker } from '../../client-core/src/input/heldKeys'
 
-export type VadersKey =
-  | { type: 'key'; key: 'left' | 'right' | 'up' | 'down' | 'space' | 'enter' | 'escape' | 'q' | 'm' | 'n' | 's' | 'r' | 'x' }
-  | { type: 'char'; char: string }  // For text input (room codes, names)
+import type { VadersKey } from '../../client-core/src/input/types'
+import { createHeldKeysTracker as _createHeldKeysTracker } from '../../client-core/src/input/heldKeys'
 
 // ─── Normalize OpenTUI KeyEvent → VadersKey ───────────────────────────────────
 
@@ -38,90 +40,13 @@ export function normalizeKey(event: KeyEvent): VadersKey | null {
   return null  // Ignore unrecognized keys
 }
 
-// ─── Key State Tracking ───────────────────────────────────────────────────────
+// ─── TUI-specific held keys tracker ──────────────────────────────────────────
+// Injects the terminal-detected key release timeout into the platform-agnostic tracker
 
-export interface HeldKeys {
-  left: boolean
-  right: boolean
-}
-
-// Get key release timeout from terminal compatibility layer
-// Returns 0 for terminals with native key release support (Kitty protocol)
-// Returns timeout in ms for terminals that need timeout-based detection
-const KEY_RELEASE_TIMEOUT_MS = getKeyReleaseTimeoutMs()
-const useTimeoutFallback = KEY_RELEASE_TIMEOUT_MS > 0
-
-export function createHeldKeysTracker(): {
-  held: HeldKeys
-  onPress: (key: VadersKey) => boolean  // Returns true if held state changed
-  onRelease: (key: VadersKey) => boolean
-  cleanup: () => void  // Call to clear timeouts
-  usesTimeoutFallback: boolean  // Whether timeout-based release is used
-} {
-  const held: HeldKeys = { left: false, right: false }
-  const timeouts: { left: ReturnType<typeof setTimeout> | null; right: ReturnType<typeof setTimeout> | null } = {
-    left: null,
-    right: null,
-  }
-
-  function clearKeyTimeout(key: 'left' | 'right') {
-    if (timeouts[key]) {
-      clearTimeout(timeouts[key]!)
-      timeouts[key] = null
-    }
-  }
-
-  function setKeyTimeout(key: 'left' | 'right') {
-    // Only use timeout fallback for terminals without Kitty keyboard protocol
-    // (e.g., Apple Terminal, iTerm2)
-    if (!useTimeoutFallback) return
-
-    clearKeyTimeout(key)
-    timeouts[key] = setTimeout(() => {
-      // Auto-release if no new press or release event received
-      held[key] = false
-      timeouts[key] = null
-    }, KEY_RELEASE_TIMEOUT_MS)
-  }
-
-  function onPress(key: VadersKey): boolean {
-    if (key.type !== 'key') return false
-
-    let changed = false
-    if (key.key === 'left') {
-      if (!held.left) changed = true
-      held.left = true
-      setKeyTimeout('left')  // Reset timeout on each press (if fallback enabled)
-    }
-    if (key.key === 'right') {
-      if (!held.right) changed = true
-      held.right = true
-      setKeyTimeout('right')  // Reset timeout on each press (if fallback enabled)
-    }
-    return changed
-  }
-
-  function onRelease(key: VadersKey): boolean {
-    if (key.type !== 'key') return false
-
-    let changed = false
-    if (key.key === 'left' && held.left) {
-      held.left = false
-      clearKeyTimeout('left')
-      changed = true
-    }
-    if (key.key === 'right' && held.right) {
-      held.right = false
-      clearKeyTimeout('right')
-      changed = true
-    }
-    return changed
-  }
-
-  function cleanup() {
-    clearKeyTimeout('left')
-    clearKeyTimeout('right')
-  }
-
-  return { held, onPress, onRelease, cleanup, usesTimeoutFallback: useTimeoutFallback }
+/**
+ * Create a held-keys tracker with TUI-specific key release timeout.
+ * Reads the timeout from the terminal compatibility layer at call time.
+ */
+export function createHeldKeysTracker() {
+  return _createHeldKeysTracker(getKeyReleaseTimeoutMs())
 }

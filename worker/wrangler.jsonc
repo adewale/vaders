@@ -2,6 +2,19 @@
   "name": "vaders",
   "main": "src/index.ts",
   "compatibility_date": "2026-01-24",
+  // Regenerate worker/src/buildInfo.ts (and the parallel web copy) with the
+  // current git commit, package version, and UTC build time before every
+  // deploy — fires even when invoked as `npx wrangler deploy`, not just
+  // `bun run deploy`. Surfaces in /health, the launch-screen footer, and
+  // the `worker_boot` startup log.
+  "build": {
+    "command": "node ../scripts/write-build-info.mjs"
+  },
+  "assets": {
+    "directory": "../web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
   "durable_objects": {
     "bindings": [
       { "name": "GAME_ROOM", "class_name": "GameRoom" },

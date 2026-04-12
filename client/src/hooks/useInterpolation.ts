@@ -8,6 +8,7 @@ import {
   type RenderPosition,
   toRenderPosition,
 } from '../animation'
+import type { FrameScheduler } from '../../../client-core/src/adapters'
 
 /**
  * Entity update data
@@ -18,12 +19,20 @@ export interface EntityUpdate {
   y: number
 }
 
+/** Default frame scheduler using native browser/runtime APIs */
+const DEFAULT_FRAME_SCHEDULER: FrameScheduler = {
+  requestFrame: (cb) => requestAnimationFrame(cb),
+  cancelFrame: (handle) => cancelAnimationFrame(handle),
+}
+
 /**
  * Options for the interpolation hook
  */
 export interface UseInterpolationOptions {
   /** Interpolation configuration */
   config?: Partial<InterpolationConfig>
+  /** Frame scheduler for render loops (defaults to requestAnimationFrame/cancelAnimationFrame) */
+  frameScheduler?: FrameScheduler
 }
 
 /**
@@ -94,6 +103,7 @@ export function useInterpolation(
 ): UseInterpolationReturn {
   // Use stable reference for empty config
   const config = options.config ?? EMPTY_CONFIG
+  const scheduler = options.frameScheduler ?? DEFAULT_FRAME_SCHEDULER
 
   const [positions, setPositions] = useState<Map<string, { x: number; y: number }>>(new Map())
   const [factor, setFactor] = useState(0)
@@ -111,15 +121,15 @@ export function useInterpolation(
       managerRef.current.interpolate()
       setPositions(new Map(managerRef.current.getAllVisualPositions()))
       setFactor(managerRef.current.getInterpolationFactor())
-      animationFrameRef.current = requestAnimationFrame(renderLoop)
+      animationFrameRef.current = scheduler.requestFrame(renderLoop)
     }
 
-    animationFrameRef.current = requestAnimationFrame(renderLoop)
+    animationFrameRef.current = scheduler.requestFrame(renderLoop)
 
     return () => {
       isActive = false
       if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current)
+        scheduler.cancelFrame(animationFrameRef.current)
       }
     }
   }, [])

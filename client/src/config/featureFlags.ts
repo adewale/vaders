@@ -1,4 +1,2 @@
-// client/src/config/featureFlags.ts
-// Feature flags for enabling/disabling optional features
-
-export const ENABLE_STARFIELD = true
+// Re-export from client-core (extracted in Phase 1 refactoring)
+export * from '../../../client-core/src/config/featureFlags'

@@ -37,7 +37,7 @@ export type ServerEvent =
   | { type: 'event'; name: 'countdown_cancelled'; data: { reason: string } }
   | { type: 'event'; name: 'game_start'; data?: undefined }
   | { type: 'event'; name: 'alien_killed'; data: { alienId: string; playerId: string | null } }
-  | { type: 'event'; name: 'score_awarded'; data: { playerId: string | null; points: number; source: 'alien' | 'ufo' | 'commander' | 'wave_bonus' } }
+  | { type: 'event'; name: 'score_awarded'; data: { playerId: string | null; points: number; source: 'alien' | 'ufo' | 'wave_bonus' } }
   | { type: 'event'; name: 'wave_complete'; data: { wave: number } }
   | { type: 'event'; name: 'game_over'; data: { result: 'victory' | 'defeat' } }
   | { type: 'event'; name: 'invasion'; data?: undefined }

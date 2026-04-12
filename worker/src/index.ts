@@ -6,6 +6,17 @@ export { Matchmaker } from './Matchmaker'
 export type { Env } from './env'
 
 import type { Env } from './env'
+import { BUILD_INFO } from './buildInfo'
+
+// Log build identity once per isolate so the deploy can be cross-referenced
+// against /health and client footers in aggregated logs. Keeping this at
+// module-load time (not per-request) makes it a cheap one-liner.
+console.log(JSON.stringify({
+  event: 'worker_boot',
+  version: BUILD_INFO.version,
+  commitHash: BUILD_INFO.commitHash,
+  buildTime: BUILD_INFO.buildTime,
+}))
 
 const ROOM_CODE_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 const ROOM_CODE_LENGTH = 6
@@ -152,11 +163,25 @@ export default {
       })
     }
 
-    // Health check with game identifier
+    // Health check with game identifier + deploy metadata. The commitHash
+    // and buildTime are regenerated into ./buildInfo.ts on every deploy so
+    // each running instance self-identifies which build it's serving.
     if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ status: 'ok', game: 'vaders', version: '1.0.0' }), {
+      return new Response(JSON.stringify({
+        status: 'ok',
+        game: 'vaders',
+        version: BUILD_INFO.version,
+        commitHash: BUILD_INFO.commitHash,
+        buildTime: BUILD_INFO.buildTime,
+      }), {
         headers: { 'Content-Type': 'application/json', ...corsHeaders }
       })
+    }
+
+    // Fall through to static assets (SPA frontend).
+    // Routes matched above are API/WS endpoints; everything else serves the web UI.
+    if (env.ASSETS) {
+      return env.ASSETS.fetch(request)
     }
 
     return new Response('Not Found', {

@@ -87,23 +87,6 @@ describe('Sprite Line Width Consistency', () => {
       }
     })
 
-    test('commander healthy sprite has consistent line widths', () => {
-      verifySpriteLineWidths(SPRITES.enhanced.commander.healthy, 'commander_healthy')
-    })
-
-    test('commander damaged sprite has consistent line widths', () => {
-      verifySpriteLineWidths(SPRITES.enhanced.commander.damaged, 'commander_damaged')
-    })
-
-    test('transform sprites have consistent line widths', () => {
-      verifySpriteLineWidths(SPRITES.enhanced.transform.scorpion, 'transform_scorpion')
-      verifySpriteLineWidths(SPRITES.enhanced.transform.stingray, 'transform_stingray')
-      verifySpriteLineWidths(SPRITES.enhanced.transform.mini_commander, 'transform_mini_commander')
-    })
-
-    test('tractor beam sprite has consistent line widths', () => {
-      verifySpriteLineWidths(SPRITES.enhanced.tractorBeam, 'tractorBeam')
-    })
   })
 
   describe('ASCII sprites', () => {
@@ -133,23 +116,6 @@ describe('Sprite Line Width Consistency', () => {
       }
     })
 
-    test('commander healthy sprite has consistent line widths', () => {
-      verifySpriteLineWidths(ASCII_SPRITES.enhanced.commander.healthy, 'ascii_commander_healthy')
-    })
-
-    test('commander damaged sprite has consistent line widths', () => {
-      verifySpriteLineWidths(ASCII_SPRITES.enhanced.commander.damaged, 'ascii_commander_damaged')
-    })
-
-    test('transform sprites have consistent line widths', () => {
-      verifySpriteLineWidths(ASCII_SPRITES.enhanced.transform.scorpion, 'ascii_transform_scorpion')
-      verifySpriteLineWidths(ASCII_SPRITES.enhanced.transform.stingray, 'ascii_transform_stingray')
-      verifySpriteLineWidths(ASCII_SPRITES.enhanced.transform.mini_commander, 'ascii_transform_mini_commander')
-    })
-
-    test('tractor beam sprite has consistent line widths', () => {
-      verifySpriteLineWidths(ASCII_SPRITES.enhanced.tractorBeam, 'ascii_tractorBeam')
-    })
   })
 })
 
@@ -252,42 +218,6 @@ describe('ASCII and Unicode Sprite Dimension Parity', () => {
     }
   })
 
-  test('commander healthy sprites have same dimensions', () => {
-    expect(ASCII_SPRITES.enhanced.commander.healthy.length).toBe(SPRITES.enhanced.commander.healthy.length)
-    // Note: ASCII commander may have different width, but each variant should be internally consistent
-  })
-
-  test('commander damaged sprites have same dimensions', () => {
-    expect(ASCII_SPRITES.enhanced.commander.damaged.length).toBe(SPRITES.enhanced.commander.damaged.length)
-  })
-
-  test('transform scorpion sprites have same dimensions', () => {
-    expect(ASCII_SPRITES.enhanced.transform.scorpion.length).toBe(SPRITES.enhanced.transform.scorpion.length)
-    expect(getDisplayWidth(ASCII_SPRITES.enhanced.transform.scorpion[0])).toBe(
-      getDisplayWidth(SPRITES.enhanced.transform.scorpion[0])
-    )
-  })
-
-  test('transform stingray sprites have same dimensions', () => {
-    expect(ASCII_SPRITES.enhanced.transform.stingray.length).toBe(SPRITES.enhanced.transform.stingray.length)
-    expect(getDisplayWidth(ASCII_SPRITES.enhanced.transform.stingray[0])).toBe(
-      getDisplayWidth(SPRITES.enhanced.transform.stingray[0])
-    )
-  })
-
-  test('transform mini_commander sprites have same dimensions', () => {
-    expect(ASCII_SPRITES.enhanced.transform.mini_commander.length).toBe(SPRITES.enhanced.transform.mini_commander.length)
-    expect(getDisplayWidth(ASCII_SPRITES.enhanced.transform.mini_commander[0])).toBe(
-      getDisplayWidth(SPRITES.enhanced.transform.mini_commander[0])
-    )
-  })
-
-  test('tractor beam sprites have same dimensions', () => {
-    expect(ASCII_SPRITES.enhanced.tractorBeam.length).toBe(SPRITES.enhanced.tractorBeam.length)
-    expect(getDisplayWidth(ASCII_SPRITES.enhanced.tractorBeam[0])).toBe(
-      getDisplayWidth(SPRITES.enhanced.tractorBeam[0])
-    )
-  })
 })
 
 // ─── Bullet Spawn Position Tests ──────────────────────────────────────────────

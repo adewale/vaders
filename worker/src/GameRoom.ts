@@ -28,6 +28,24 @@ import {
 } from '../../shared/types'
 import { getScaledConfig, getPlayerSpawnX } from './game/scaling'
 import { gameReducer, type GameAction } from './game/reducer'
+
+/**
+ * Per-request debug tracing for the WebSocket hot path.
+ *
+ * Off by default — previously every ws message / join / broadcast wrote a
+ * `console.log(...)` line, so production Logpush was flooded with per-message
+ * breadcrumbs that weren't structured wide events and carried no useful
+ * signal once the feature they debugged was stable. Flip this to `true`
+ * locally to turn the breadcrumbs back on. Kept deliberately simple (no env
+ * plumbing) so enabling it is a one-line diff, and tree-shaking drops the
+ * callsites entirely when false.
+ */
+const DEBUG_TRACE = false
+
+function debugLog(tag: string, data: Record<string, unknown>): void {
+  if (!DEBUG_TRACE) return
+  console.log(tag, data)
+}
 import { createDefaultGameState, migrateGameState } from '../../shared/state-defaults'
 import type { Env } from './env'
 
@@ -266,7 +284,7 @@ export class GameRoom extends DurableObject<Env> {
       const playerId = attachment?.playerId
 
       // Diagnostic logging for multiplayer debugging
-      console.log('[WS] Message', {
+      debugLog('[WS] Message', {
         type: msg.type,
         hasAttachment: !!attachment,
         playerId: playerId ?? 'NULL',
@@ -318,7 +336,7 @@ export class GameRoom extends DurableObject<Env> {
 
           // Store playerId in WebSocket attachment (survives hibernation)
           ws.serializeAttachment({ playerId: player.id } satisfies WebSocketAttachment)
-          console.log('[JOIN] Attachment set', {
+          debugLog('[JOIN] Attachment set', {
             playerId: player.id,
             name: player.name,
             slot: player.slot,
@@ -358,7 +376,7 @@ export class GameRoom extends DurableObject<Env> {
         case 'ready': {
           if (playerId && this.game.players[playerId] && !this.game.readyPlayerIds.includes(playerId)) {
             this.game.readyPlayerIds.push(playerId)
-            console.log('[READY]', {
+            debugLog('[READY]', {
               playerId,
               readyCount: this.game.readyPlayerIds.length,
               totalPlayers: Object.keys(this.game.players).length,
@@ -391,7 +409,7 @@ export class GameRoom extends DurableObject<Env> {
           if (!isValidInputState(msg.held)) break
           const inputAccepted = !!(playerId && this.game.players[playerId])
           if (!inputAccepted) {
-            console.log('[INPUT] DROPPED', { playerId: playerId ?? 'NULL', reason: !playerId ? 'no playerId' : 'player not found' })
+            debugLog('[INPUT] DROPPED', { playerId: playerId ?? 'NULL', reason: !playerId ? 'no playerId' : 'player not found' })
           }
           if (inputAccepted) {
             this.inputQueue.push({ type: 'PLAYER_INPUT', playerId, input: msg.held })
@@ -404,7 +422,7 @@ export class GameRoom extends DurableObject<Env> {
           if (!isValidMoveDirection(msg.direction)) break
           const moveAccepted = !!(playerId && this.game.players[playerId] && (this.game.status === 'playing' || this.game.status === 'countdown'))
           if (!moveAccepted) {
-            console.log('[MOVE] DROPPED', {
+            debugLog('[MOVE] DROPPED', {
               playerId: playerId ?? 'NULL',
               playerExists: playerId ? !!this.game.players[playerId] : false,
               status: this.game.status,
@@ -420,7 +438,7 @@ export class GameRoom extends DurableObject<Env> {
         case 'shoot': {
           const shootAccepted = !!(playerId && this.game.players[playerId] && this.game.status === 'playing')
           if (!shootAccepted) {
-            console.log('[SHOOT] DROPPED', {
+            debugLog('[SHOOT] DROPPED', {
               playerId: playerId ?? 'NULL',
               playerExists: playerId ? !!this.game.players[playerId] : false,
               status: this.game.status,
@@ -485,7 +503,7 @@ export class GameRoom extends DurableObject<Env> {
     const playerCount = Object.keys(this.game.players).length
     const readyCount = this.game.readyPlayerIds.length
 
-    console.log('[CHECK_START]', { playerCount, readyCount, willStart: playerCount >= 2 && readyCount === playerCount })
+    debugLog('[CHECK_START]', { playerCount, readyCount, willStart: playerCount >= 2 && readyCount === playerCount })
 
     if (playerCount >= 2 && readyCount === playerCount) {
       await this.startCountdown()
@@ -494,7 +512,7 @@ export class GameRoom extends DurableObject<Env> {
 
   private async startCountdown() {
     if (!this.game) return
-    console.log('[COUNTDOWN_START]', {
+    debugLog('[COUNTDOWN_START]', {
       players: Object.keys(this.game.players),
       readyPlayerIds: this.game.readyPlayerIds,
       wsCount: this.ctx.getWebSockets().length,
@@ -541,7 +559,7 @@ export class GameRoom extends DurableObject<Env> {
     const playerCount = Object.keys(this.game.players).length
     const scaled = getScaledConfig(playerCount, this.game.config)
 
-    console.log('[GAME_START]', {
+    debugLog('[GAME_START]', {
       players: Object.entries(this.game.players).map(([id, p]) => ({ id, name: p.name, slot: p.slot })),
       wsCount: this.ctx.getWebSockets().length,
       mode: playerCount === 1 ? 'solo' : 'coop',
@@ -688,12 +706,12 @@ export class GameRoom extends DurableObject<Env> {
         sent++
       } catch (err) {
         failed++
-        console.log('[BROADCAST] Send failed', { error: String(err) })
+        debugLog('[BROADCAST] Send failed', { error: String(err) })
       }
     }
     // Log only on status changes or periodically to reduce noise
     if (this.game.status !== 'playing' || this.game.tick % 300 === 0) {
-      console.log('[BROADCAST]', { status: this.game.status, wsCount: webSockets.length, sent, failed })
+      debugLog('[BROADCAST]', { status: this.game.status, wsCount: webSockets.length, sent, failed })
     }
   }
 

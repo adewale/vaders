@@ -23,3 +23,16 @@ dist/
 # Environment
 .env
 .env.local
+
+# Auto-generated deploy metadata — rewritten by scripts/write-build-info.mjs
+# on every `vite build` and `wrangler deploy`. Committing would churn on
+# every deploy. The generator tolerates a missing file (produces commit=dev)
+# so fresh clones still work.
+web/src/buildInfo.ts
+worker/src/buildInfo.ts
+
+# Per-developer agent/skill tooling state — not project code.
+.agents/
+.pi/
+.claude/skills/
+skills-lock.json

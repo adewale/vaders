@@ -20,6 +20,11 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Setup Node (for vitest/vite)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Install dependencies
         run: bun install
 
@@ -27,15 +32,30 @@ jobs:
         run: |
           cd client && bun install
           cd ../worker && bun install
+          cd ../web && bun install
+
+      # buildInfo.ts is gitignored (it's regenerated per deploy with the
+      # current commit hash and buildTime). Generate it once up front so
+      # downstream typecheck / vitest / vite build steps all see it.
+      - name: Generate deploy metadata
+        run: node scripts/write-build-info.mjs
 
       - name: Lint & format check
         run: bun run lint
 
+      # ── Type checks ───────────────────────────────────────────────
       - name: Type check (client)
         run: cd client && bun run typecheck
 
       - name: Type check (worker)
         run: cd worker && bun run typecheck
+
+      # ── Fast path tests (every commit) ─────────────────────────────
+      - name: Run shared tests
+        run: cd shared && bun test
+
+      - name: Run client-core tests
+        run: cd client-core && bun test
 
       - name: Run client tests
         run: cd client && bun test
@@ -43,8 +63,30 @@ jobs:
       - name: Run worker tests
         run: cd worker && bun run test
 
-      - name: Run shared tests
-        run: cd shared && bun test
+      - name: Run web unit tests
+        run: cd web && npx vitest run
+
+      # ── Isolation checks ───────────────────────────────────────────
+      - name: No OpenTUI in client-core
+        run: |
+          if grep -r 'opentui' client-core/src/; then
+            echo "ERROR: OpenTUI imports found in client-core/"
+            exit 1
+          fi
+
+      - name: No platform imports in client-core
+        run: |
+          if grep -rE "from ['\"]bun:|from ['\"]node:" client-core/src/ --include='*.ts' --exclude='*.test.ts' --exclude='*.property.test.ts'; then
+            echo "ERROR: Platform imports found in client-core/ production code"
+            exit 1
+          fi
+
+      - name: No OpenTUI in web
+        run: |
+          if grep -r 'opentui' web/src/; then
+            echo "ERROR: OpenTUI imports found in web/"
+            exit 1
+          fi
 
   build:
     name: Build
@@ -60,14 +102,54 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Install dependencies
-        run: bun install
+        run: bun install && cd client && bun install && cd ../web && bun install
 
-      - name: Install client dependencies
-        run: cd client && bun install
+      - name: Generate deploy metadata
+        run: node scripts/write-build-info.mjs
 
-      - name: Build client
+      - name: Build TUI client
         run: cd client && bun run build
+
+      - name: Build web client
+        run: cd web && npx vite build
+
+  # ── Slow path (merge to main only) ──────────────────────────────
+  e2e-web:
+    name: E2E Tests (Web)
+    runs-on: ubuntu-latest
+    needs: [lint-and-test, build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: bun install && cd client && bun install && cd ../web && bun install && cd ../worker && bun install
+
+      - name: Install Playwright browsers
+        run: cd web && npx playwright install --with-deps chromium
+
+      - name: Run E2E tests
+        run: cd web && npx playwright test
+        env:
+          CI: true
 
   spritesheet:
     name: Spritesheet freshness

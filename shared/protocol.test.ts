@@ -776,7 +776,7 @@ describe('ServerEvent Types', () => {
     })
 
     test('score_awarded carries playerId, points, and source', () => {
-      const sources = ['alien', 'ufo', 'commander', 'wave_bonus'] as const
+      const sources = ['alien', 'ufo', 'wave_bonus'] as const
       for (const source of sources) {
         const event: ServerEvent = {
           type: 'event',

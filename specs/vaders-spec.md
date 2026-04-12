@@ -5,7 +5,7 @@
 
 ## Overview
 
-**Vaders** is a TUI Space Invaders clone (with elements of Galaga, Galaxian and Amiga aesthetics) supporting solo play or 2-4 player co-op, synchronized via Cloudflare Durable Objects. Single player can start immediately; multiplayer requires a ready-up lobby.
+**Vaders** is a TUI Space Invaders clone supporting solo play or 2-4 player co-op, synchronized via Cloudflare Durable Objects. Single player can start immediately; multiplayer requires a ready-up lobby.
 
 ---
 
@@ -92,14 +92,6 @@ OpenTUI is pre-1.0:
 - Isolate OpenTUI-specific quirks behind adapters (`input.ts`, `capabilities.ts`)
 - Don't leak OpenTUI event shapes into the rest of the codebase
 
-### 12. Keep Enhanced Mode as a Plugin, Not a Fork
-
-Enhanced behaviors are additive via:
-- Mode strategy object (`GameMode` interface)
-- Additional logic phases registered by mode
-
-Do NOT scatter `if (enhancedMode)` checks throughout the tick loop.
-
 ---
 
 ## Quick Start: Launch & Play
@@ -174,7 +166,6 @@ On startup, players see a full-screen launch experience with logo, mode selectio
 │  │  [2] CREATE ROOM            Get room code to share with friends        │ │
 │  │  [3] JOIN ROOM              Enter a room code                          │ │
 │  │  [4] MATCHMAKING            Auto-join an open game                     │ │
-│  │  [E] ENHANCED MODE   OFF    Galaga/Galaxian enemies + Amiga visuals    │ │
 │  └─────────────────────────────────────────────────────────────────────────┘ │
 │                                                                              │
 │     CONTROLS   ←/→ Move   SPACE Shoot   M Mute   Q Quit                    │
@@ -224,16 +215,15 @@ import { useState, useCallback } from 'react'
 import { Logo } from './Logo'
 
 interface LaunchScreenProps {
-  onStartSolo: (enhanced: boolean) => void
-  onCreateRoom: (enhanced: boolean) => void
-  onJoinRoom: (code: string, enhanced: boolean) => void
-  onMatchmake: (enhanced: boolean) => void
+  onStartSolo: () => void
+  onCreateRoom: () => void
+  onJoinRoom: (code: string) => void
+  onMatchmake: () => void
   version: string
 }
 
 export function LaunchScreen({ onStartSolo, onCreateRoom, onJoinRoom, onMatchmake, version }: LaunchScreenProps) {
   const renderer = useRenderer()
-  const [enhanced, setEnhanced] = useState(false)
   const [joinMode, setJoinMode] = useState(false)
   const [roomCode, setRoomCode] = useState('')
 
@@ -247,7 +237,7 @@ export function LaunchScreen({ onStartSolo, onCreateRoom, onJoinRoom, onMatchmak
         return
       }
       if (event.name === 'return' && roomCode.length === 6) {
-        onJoinRoom(roomCode, enhanced)
+        onJoinRoom(roomCode)
         return
       }
       if (event.name === 'backspace') {
@@ -266,20 +256,16 @@ export function LaunchScreen({ onStartSolo, onCreateRoom, onJoinRoom, onMatchmak
     const key = event.sequence || event.name
     switch (key) {
       case '1':
-        onStartSolo(enhanced)
+        onStartSolo()
         break
       case '2':
-        onCreateRoom(enhanced)
+        onCreateRoom()
         break
       case '3':
         setJoinMode(true)
         break
       case '4':
-        onMatchmake(enhanced)
-        break
-      case 'e':
-      case 'E':
-        setEnhanced(e => !e)
+        onMatchmake()
         break
       case 'q':
       case 'Q':
@@ -291,7 +277,7 @@ export function LaunchScreen({ onStartSolo, onCreateRoom, onJoinRoom, onMatchmak
         audio.toggleMute()
         break
     }
-  }, [joinMode, roomCode, enhanced, onStartSolo, onCreateRoom, onJoinRoom, onMatchmake, renderer])
+  }, [joinMode, roomCode, onStartSolo, onCreateRoom, onJoinRoom, onMatchmake, renderer])
 
   useKeyboard(handleKeyInput)
 
@@ -316,14 +302,6 @@ export function LaunchScreen({ onStartSolo, onCreateRoom, onJoinRoom, onMatchmak
           <MenuItem hotkey="3" label="JOIN ROOM" desc="Enter a room code" />
         )}
         <MenuItem hotkey="4" label="MATCHMAKING" desc="Auto-join an open game" />
-        <box height={1} />
-        <box>
-          <text fg="#ffff00">[E] ENHANCED MODE</text>
-          <box width={3} />
-          <text fg={enhanced ? '#00ff00' : '#666'}>{enhanced ? 'ON ' : 'OFF'}</text>
-          <box width={3} />
-          <text fg="#666">Galaga/Galaxian enemies + Amiga visuals</text>
-        </box>
       </box>
 
       <box height={1} />
@@ -441,307 +419,6 @@ When player presses `[3]`, show inline room code input:
 | **Co-op** | 2-4 | All players ready | 5 shared | Scaled to player count |
 
 ---
-
-## Enhanced Mode
-
-> **NOTE: Enhanced Mode is NOT IMPLEMENTED.** The following section documents a planned feature that has not been built. Commander, DiveBomber, and Transform entity types exist in `shared/types.ts` but are never instantiated or processed by the game reducer. The game currently only supports classic Space Invaders gameplay with squid/crab/octopus aliens and UFO bonus enemies.
-
-Enhanced Mode adds two additional rows of enemies above the classic formation, featuring attack patterns inspired by Galaga and Galaxian. Enable with `--enhanced` flag.
-
-```bash
-vaders --enhanced
-vaders --room ABC123 --enhanced
-```
-
-### Formation Layout (Enhanced)
-
-```
-Row 0:  ◄══►  ◄══►              # Commanders (2) - Galaga Boss behavior
-Row 1:  ♦ ♦ ♦ ♦ ♦ ♦             # Dive Bombers (6) - Galaxian purple dive
-Row 2:  ╔═╗ ╔═╗ ╔═╗ ...         # Squids (11) - Classic Space Invaders
-Row 3:  /°\ /°\ /°\ ...         # Crabs (11)
-Row 4:  {ö} {ö} {ö} ...         # Octopuses (11)
-Row 5:  {ö} {ö} {ö} ...         # Octopuses (11)
-```
-
-### Enhanced Enemy Types
-
-| Type | Sprite | Points | Behavior |
-|------|--------|--------|----------|
-| **Commander** | `◄══►` | 150/400† | Tractor beam capture, takes escorts when diving |
-| **Dive Bomber** | `♦` | 80/160 | Wide-angle Galaxian dive, reverses mid-path |
-| **Squid** | `╔═╗` | 30/60 | Classic side-to-side, drops when edge hit |
-| **Crab** | `/°\` | 20/40 | Classic movement |
-| **Octopus** | `{ö}` | 10/20 | Classic movement |
-
-† Commander: 150 in formation, 400 solo dive, 800 with one escort, 1600 with two escorts
-
-### Commander Behavior (Galaga Boss)
-
-```typescript
-interface Commander extends Alien {
-  type: 'commander'
-  health: 2 | 1                   // 2 hits to kill (green → purple → dead)
-  tractorBeamActive: boolean      // Currently firing tractor beam
-  tractorBeamCooldown: number     // Ticks until beam can fire again
-  capturedPlayerId: string | null // Player currently captured
-  escorts: string[]               // IDs of escorting aliens in V-formation
-}
-```
-
-**Tractor Beam Attack:**
-1. Commander dives solo in straight line
-2. Stops ~4 rows above player area
-3. Deploys tractor beam (3-char wide capture zone)
-4. If player caught: ship disabled for 5 seconds, Commander gains shield
-5. Other players can free captured player by destroying Commander
-
-**Escort Dive:**
-- When diving normally, Commander recruits up to 2 adjacent Dive Bombers
-- Escorts follow in V-formation behind Commander
-- Bonus points for destroying escorts before Commander
-
-### Dive Bomber Behavior (Galaxian Purple)
-
-```typescript
-interface DiveBomber extends Alien {
-  type: 'dive_bomber'  // Use underscore consistently
-  diveState: 'formation' | 'diving' | 'returning'
-  divePathProgress: number
-  diveDirection: 1 | -1
-}
-```
-
-**Dive Pattern:**
-1. Breaks from formation, moves toward screen edge
-2. Sweeps across screen in wide arc
-3. **Reverses direction** at midpoint (signature Galaxian purple move)
-4. Fires 4 shots during dive (2 before turn, 2 after)
-5. Returns to formation from bottom if survives
-
-### Wave Progression (Enhanced)
-
-| Wave | Commanders | Dive Bombers | Classic Rows | Special |
-|------|------------|--------------|--------------|---------|
-| 1-3 | 1 | 4 | 4 rows | — |
-| 4-6 | 2 | 6 | 5 rows | Dive Bombers transform on death |
-| 7-9 | 2 | 6 | 5 rows | Commanders use tractor beam |
-| 10+ | 2 | 8 | 6 rows | All abilities active |
-
-### Challenging Stages (Enhanced Mode)
-
-Bonus rounds occur at **Wave 3, 7, 11, 15...** (every 4th wave starting from 3).
-
-**Characteristics:**
-- **40 enemies** fly in preset formations
-- Enemies **do not fire** at players
-- Enemies **do not stop** - they fly through and exit
-- Destroy all 40 for **10,000 point bonus**
-- Partial completion: 100 points per kill
-
-**Visual Treatment:**
-- **Plasma background** replaces gradient sky (see Visual Effects section)
-- Formation flies in synchronized patterns
-- No barriers on screen
-
-**Music:**
-- Special upbeat "bonus round" track
-- Tempo matches formation speed
-
-```typescript
-/** Path and timing for formation fly-through patterns */
-interface FormationPattern {
-  path: Position[]     // Waypoints for the formation to follow
-  timing: number[]     // Tick delays between waypoints
-}
-
-interface ChallengingStage {
-  wave: number
-  enemyCount: 40
-  formations: FormationPattern[]
-  timeLimit: number  // Ticks before stage ends
-  bonusPoints: 10000
-}
-
-function isChallengingStage(wave: number): boolean {
-  return wave >= 3 && (wave - 3) % 4 === 0
-}
-```
-
-### Transform Enemies (Wave 4+)
-
-When a Dive Bomber is destroyed, it has a 20% chance to split into 3 smaller enemies:
-
-| Wave | Transform Into | Points (×3) |
-|------|----------------|-------------|
-| 4-6 | Scorpions `∿` | 1000 |
-| 7-9 | Stingrays `◇` | 2000 |
-| 10+ | Mini-Commanders `◄►` | 3000 |
-
-Transform enemies dive rapidly and exit screen (don't rejoin formation).
-
-### Enhanced Mode Scoring
-
-| Action | Points |
-|--------|--------|
-| Commander in formation | 150 |
-| Commander solo dive | 400 |
-| Commander + 1 escort | 800 |
-| Commander + 2 escorts | 1600 |
-| Free captured player | 500 |
-| Dive Bomber in formation | 80 |
-| Dive Bomber while diving | 160 |
-| Transform group (all 3) | 1000-3000 |
-
-### Enhanced Sprites
-
-```typescript
-export const ENHANCED_SPRITES = {
-  commander: {
-    healthy: '◄══►',
-    damaged: '◄──►',  // After first hit
-  },
-  dive_bomber: '♦',
-  transform: {
-    scorpion: '∿',
-    stingray: '◇',
-    mini_commander: '◄►',
-  },
-  tractorBeam: '╠╬╣',  // 3-char beam effect
-} as const
-```
-
-### Visual Effects (Amiga Copper-Inspired)
-
-Enhanced Mode uses true-color ANSI sequences to recreate classic Amiga demoscene aesthetics. These effects run client-side only and don't affect game state.
-
-#### Gradient Sky Background
-
-Per-row background color changes, inspired by Shadow of the Beast's copper-driven sky:
-
-```typescript
-// client/src/effects/gradient.ts
-
-interface GradientStop {
-  row: number
-  color: [number, number, number]  // RGB
-}
-
-const SKY_GRADIENT: GradientStop[] = [
-  { row: 0,  color: [15, 10, 40] },    // Deep purple
-  { row: 6,  color: [40, 20, 80] },    // Purple
-  { row: 12, color: [80, 40, 100] },   // Magenta
-  { row: 18, color: [20, 10, 30] },    // Dark purple
-  { row: 23, color: [0, 0, 0] },       // Black
-]
-
-function interpolateGradient(row: number): string {
-  // Find surrounding stops and lerp between them
-  // Return ANSI: \x1b[48;2;r;g;bm
-}
-```
-
-#### Raster Bars
-
-Horizontal color bands that animate behind the alien formation:
-
-```typescript
-// client/src/effects/rasterBars.ts
-
-interface RasterBar {
-  y: number           // Current vertical position
-  velocity: number    // Pixels per frame
-  colors: string[]    // 5-row gradient (bright center, fading edges)
-  amplitude: number   // Sine wave motion range
-}
-
-const RASTER_BARS: RasterBar[] = [
-  { y: 4, velocity: 0.5, colors: ['#001', '#113', '#33f', '#113', '#001'], amplitude: 3 },
-  { y: 8, velocity: -0.3, colors: ['#100', '#311', '#f33', '#311', '#100'], amplitude: 4 },
-]
-
-function updateRasterBars(tick: number) {
-  for (const bar of RASTER_BARS) {
-    bar.y += bar.velocity
-    bar.y += Math.sin(tick * 0.05) * 0.1 * bar.amplitude
-    // Wrap around screen
-    if (bar.y > 24) bar.y = -5
-    if (bar.y < -5) bar.y = 24
-  }
-}
-```
-
-#### Color Cycling Effects
-
-Palette rotation for animated elements without redrawing:
-
-| Element | Cycle Speed | Colors |
-|---------|-------------|--------|
-| Tractor beam | 6 fps | Blue → cyan → white → cyan → blue |
-| Commander shield | 4 fps | Purple → magenta → pink → magenta |
-| Transform enemies | 8 fps | Rainbow cycle |
-| Player respawn | 10 fps | White flash → player color |
-
-```typescript
-// client/src/effects/colorCycle.ts
-
-const TRACTOR_BEAM_PALETTE = [
-  '#0033ff', '#0066ff', '#0099ff', '#00ccff',
-  '#00ffff', '#66ffff', '#ffffff',
-  '#66ffff', '#00ffff', '#00ccff', '#0099ff', '#0066ff',
-]
-
-function getTractorBeamColor(tick: number): string {
-  const index = Math.floor(tick / 10) % TRACTOR_BEAM_PALETTE.length
-  return TRACTOR_BEAM_PALETTE[index]
-}
-```
-
-#### Challenging Stage Plasma Background
-
-Sinusoidal plasma effect for Challenging Stages (bonus rounds at waves 3, 7, 11, 15...). See "Challenging Stages" section above for gameplay details.
-
-```typescript
-// client/src/effects/plasma.ts
-
-function plasmaValue(x: number, y: number, time: number): number {
-  return (
-    Math.sin(x * 0.1 + time) +
-    Math.sin(y * 0.1 + time * 0.5) +
-    Math.sin((x + y) * 0.1 + time * 0.3) +
-    Math.sin(Math.sqrt(x * x + y * y) * 0.1)
-  ) / 4  // Normalize to -1..1
-}
-
-function plasmaColor(value: number): [number, number, number] {
-  // Map -1..1 to purple-blue-cyan-green palette
-  const t = (value + 1) / 2  // 0..1
-  return [
-    Math.floor(128 + 127 * Math.sin(t * Math.PI * 2)),
-    Math.floor(64 + 64 * Math.sin(t * Math.PI * 2 + 2)),
-    Math.floor(196 + 59 * Math.sin(t * Math.PI * 2 + 4)),
-  ]
-}
-```
-
-#### Effect Layering Order
-
-```
-1. Gradient sky background (lowest)
-2. Raster bars (additive blend simulation)
-3. Plasma (Challenging Stages only, replaces sky)
-4. Game elements (aliens, bullets, barriers)
-5. Color-cycled effects (tractor beam, shields)
-6. UI overlay (score, lives)
-```
-
-#### Performance Considerations
-
-- Pre-calculate gradient lookup tables at startup
-- Only update raster bar rows that changed
-- Use double-buffering to prevent flicker
-- Limit plasma resolution (calculate every 2nd column, interpolate)
-- Disable effects on terminals without true-color support
 
 ---
 
@@ -913,7 +590,6 @@ SERVER (Cloudflare) - Functional Core / Imperative Shell
 ├── Functional Core (Pure Functions - no I/O)
 │   ├── gameReducer() ───── (state, action) → {state, events, persist}
 │   ├── stateMachine ────── Guards status transitions
-│   ├── GameMode ────────── Strategy: classic vs enhanced behaviors
 │   └── Tick Phases ─────── Movement → Physics → Collision → Spawning
 │
 └── Durable Object: Matchmaker
@@ -1308,113 +984,6 @@ export class GameRoom extends DurableObject<Env> {
     // 3. Broadcast full state
     this.broadcastFullState()
   }
-}
-```
-
-### Strategy Pattern for Game Modes
-
-Instead of `if (enhancedMode)` checks scattered throughout, behaviors are injected via strategy objects.
-
-```typescript
-// worker/src/game/modes.ts
-
-interface GameMode {
-  name: 'classic' | 'enhanced'
-
-  // Formation creation
-  createAlienFormation(config: ScaledConfig): Entity[]
-
-  // Entity spawning
-  spawnSpecialEntities(state: GameState, tick: number): Entity[]
-
-  // AI behaviors (returns systems to run)
-  getAISystems(): System[]
-
-  // Scoring rules
-  getPoints(entityType: string): number
-
-  // Wave progression
-  getWaveConfig(wave: number): WaveConfig
-}
-
-const classicMode: GameMode = {
-  name: 'classic',
-
-  createAlienFormation(config) {
-    // Standard 11x5 grid of squid/crab/octopus
-    return createStandardFormation(config.alienCols, config.alienRows)
-  },
-
-  spawnSpecialEntities(state, tick) {
-    // Classic mode: no special entities
-    return []
-  },
-
-  getAISystems() {
-    // Just basic alien movement
-    return [alienMarchSystem]
-  },
-
-  getPoints(entityType) {
-    const points: Record<string, number> = { squid: 30, crab: 20, octopus: 10 }
-    return points[entityType] ?? 0
-  },
-
-  getWaveConfig(wave) {
-    return { speedMultiplier: 1 + (wave - 1) * 0.1 }
-  },
-}
-
-const enhancedMode: GameMode = {
-  name: 'enhanced',
-
-  createAlienFormation(config) {
-    // Enhanced mode: add commanders to top row
-    const formation = createStandardFormation(config.alienCols, config.alienRows)
-    const commanders = createCommanderRow(config.alienCols)
-    return [...commanders, ...formation]
-  },
-
-  spawnSpecialEntities(state, tick) {
-    const entities: Entity[] = []
-    // Spawn dive bombers periodically
-    if (tick % 300 === 0 && state.wave >= 2) {
-      entities.push(createDiveBomber(state))
-    }
-    // Spawn UFO randomly (uses seeded RNG for determinism)
-    if (seededRandom(state) < 0.001) {
-      entities.push(createUFO())
-    }
-    return entities
-  },
-
-  getAISystems() {
-    // Enhanced mode: additional AI systems
-    return [alienMarchSystem, commanderDiveSystem, diveBomberArcSystem]
-  },
-
-  getPoints(entityType) {
-    // Base points match scoring table: Commander=150, DiveBomber=80
-    // These are in-formation values; diving/escort bonuses handled separately
-    const points: Record<string, number> = {
-      squid: 30, crab: 20, octopus: 10,
-      commander: 150, dive_bomber: 80, ufo: 300,
-    }
-    return points[entityType] ?? 0
-  },
-
-  getWaveConfig(wave) {
-    // Challenging stages on waves 3, 7, 11, 15... (every 4 waves starting at 3)
-    if (wave >= 3 && (wave - 3) % 4 === 0) {
-      return { speedMultiplier: 1.5, challengingStage: true }
-    }
-    return { speedMultiplier: 1 + (wave - 1) * 0.15 }
-  },
-}
-
-// Factory to get mode
-export function getGameMode(enhanced: boolean): GameMode {
-  return enhanced ? enhancedMode : classicMode
 }
 ```
 
@@ -2094,7 +1663,7 @@ type ServerEvent =
   | { type: 'event'; name: 'countdown_cancelled'; data: { reason: string } }
   | { type: 'event'; name: 'game_start' }
   | { type: 'event'; name: 'alien_killed'; data: { alienId: string; playerId: string | null } }
-  | { type: 'event'; name: 'score_awarded'; data: { playerId: string | null; points: number; source: 'alien' | 'ufo' | 'commander' | 'wave_bonus' } }
+  | { type: 'event'; name: 'score_awarded'; data: { playerId: string | null; points: number; source: 'alien' | 'ufo' | 'wave_bonus' } }
   | { type: 'event'; name: 'wave_complete'; data: { wave: number } }
   | { type: 'event'; name: 'game_over'; data: { result: 'victory' | 'defeat' } }
   | { type: 'event'; name: 'invasion'; data?: undefined }
@@ -2776,30 +2345,28 @@ import { createCliRenderer } from '@opentui/core'
 import { createRoot } from '@opentui/react'
 import { App } from './App'
 
-// Parse CLI flags: --room ABC123 --name Alice --matchmake --enhanced
-function parseArgs(): { room?: string; name: string; matchmake: boolean; enhanced: boolean } {
+// Parse CLI flags: --room ABC123 --name Alice --matchmake
+function parseArgs(): { room?: string; name: string; matchmake: boolean } {
   const args = process.argv.slice(2)
   const flags: Record<string, string | boolean> = {}
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--room' && args[i + 1]) flags.room = args[++i]
     else if (args[i] === '--name' && args[i + 1]) flags.name = args[++i]
     else if (args[i] === '--matchmake') flags.matchmake = true
-    else if (args[i] === '--enhanced') flags.enhanced = true
   }
   return {
     room: flags.room as string | undefined,
     name: (flags.name as string) || `Player${Math.floor(Math.random() * 1000)}`,
     matchmake: !!flags.matchmake,
-    enhanced: !!flags.enhanced,
   }
 }
 
 async function main() {
-  const { room, name, matchmake, enhanced } = parseArgs()
+  const { room, name, matchmake } = parseArgs()
   const renderer = await createCliRenderer()
   const root = createRoot(renderer)
 
-  root.render(<App roomCode={room} playerName={name} matchmake={matchmake} enhanced={enhanced} />)
+  root.render(<App roomCode={room} playerName={name} matchmake={matchmake} />)
 
   process.on('SIGINT', () => {
     root.unmount()
@@ -2825,15 +2392,13 @@ import type { InputState } from '../../../shared/types'
 interface AppProps {
   roomUrl: string
   playerName: string
-  enhanced: boolean
 }
 
-export function App({ roomUrl, playerName, enhanced }: AppProps) {
+export function App({ roomUrl, playerName }: AppProps) {
   const renderer = useRenderer()
   const { getRenderState, playerId, send, connected, updateInput, shoot } = useGameConnection(
     roomUrl,
-    playerName,
-    enhanced
+    playerName
   )
 
   // Track held keys for continuous input
@@ -3226,7 +2791,7 @@ export const COLORS = {
 The `useGameConnection` hook manages the WebSocket lifecycle and provides:
 
 ```typescript
-function useGameConnection(url: string, playerName: string, enhanced: boolean): {
+function useGameConnection(url: string, playerName: string): {
   serverState: GameState | null    // Raw server state
   getRenderState: () => GameState  // Interpolated + predicted state for rendering
   playerId: string | null
@@ -3464,10 +3029,6 @@ Sound effects use terminal bell for basic feedback, or optional native audio via
 | **Player died** | Low rumble + explosion | 300ms |
 | **Wave complete** | Triumphant arpeggio | 500ms |
 | **Game over** | Descending minor chord | 1000ms |
-| **Commander hit** (Enhanced) | Metallic clang | 150ms |
-| **Tractor beam** (Enhanced) | Warbling tone, sustained | Loop while active |
-| **Transform spawn** (Enhanced) | Splitting/sparkle effect | 200ms |
-| **Capture** (Enhanced) | Alarming siren | 400ms |
 | **Menu select** | Click/blip | 30ms |
 | **Menu navigate** | Soft tick | 20ms |
 | **Ready up** | Positive chime | 150ms |
@@ -3527,67 +3088,6 @@ const NORMAL_MODE_TRACKS: ChiptuneTrack[] = [
 | 50-25% | 1.3× |
 | 25-10% | 1.5× |
 | <10% | 1.75× |
-
-#### Enhanced Mode: Amiga-Style
-
-MOD/tracker-inspired music with:
-- 4 channels (Paula chip emulation)
-- Sample-based instruments
-- Characteristic Amiga "punch" and bass
-
-```typescript
-// client/src/audio/amigaMusic.ts
-
-/** Pattern row data for MOD-style tracker format */
-interface Pattern {
-  rows: number                // Typically 64 rows per pattern
-  channels: unknown[][]       // 4 channels of note/effect data
-}
-
-interface AmigaTrack {
-  name: string
-  bpm: number
-  samples: {
-    [key: string]: Float32Array  // Pre-loaded 8-bit samples (loadSample returns Float32Array)
-  }
-  patterns: Pattern[]
-  sequence: number[]  // Pattern order
-}
-
-const ENHANCED_MODE_TRACKS: AmigaTrack[] = [
-  {
-    name: 'shadow_assault',
-    bpm: 125,
-    samples: {
-      kick: loadSample('kick_amiga.raw'),
-      snare: loadSample('snare_amiga.raw'),
-      bass: loadSample('bass_amiga.raw'),
-      lead: loadSample('lead_amiga.raw'),
-      pad: loadSample('pad_amiga.raw'),
-    },
-    patterns: [
-      // Pattern 0: Intro
-      {
-        rows: 64,
-        channels: [
-          [/* Channel 1: Kick + Bass */],
-          [/* Channel 2: Snare + Hats */],
-          [/* Channel 3: Lead melody */],
-          [/* Channel 4: Pad/atmosphere */],
-        ],
-      },
-    ],
-    sequence: [0, 0, 1, 2, 1, 2, 3, 3],  // Pattern play order
-  },
-]
-```
-
-**Amiga music characteristics:**
-- **Crunchy bass**: Low-pass filtered, slightly distorted
-- **Punchy drums**: Short decay, no reverb
-- **Arpeggiated chords**: Fast note cycling for polyphony illusion
-- **Portamento leads**: Pitch slides between notes
-
 
 ### Audio Engine
 
@@ -3768,7 +3268,6 @@ Test full client-server flow:
 - Solo game: start → shoot aliens → wave complete → victory/defeat
 - 2-player co-op: both join → ready → countdown → game starts
 - Reconnection: disconnect → reconnect within grace period → resume
-- Enhanced mode: commanders, dive bombers, UFOs spawn correctly
 
 ### Coverage Targets
 
@@ -3817,8 +3316,6 @@ Pin all `@opentui/*` packages to the same version to avoid reconciler mismatches
 - **Durable Objects Best Practices**: https://developers.cloudflare.com/durable-objects/best-practices/
 - **Bun Runtime**: https://bun.sh/
 - **Space Invaders (1978)**: https://en.wikipedia.org/wiki/Space_Invaders
-- **Galaga (1981)**: https://en.wikipedia.org/wiki/Galaga
-- **Galaxian (1979)**: https://en.wikipedia.org/wiki/Galaxian
 
 ---
 

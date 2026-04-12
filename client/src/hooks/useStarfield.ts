@@ -7,10 +7,11 @@ import { ENABLE_STARFIELD } from '../config/featureFlags'
 
 const EMPTY: StarCell[] = []
 
-export function useStarfield(config?: Partial<StarfieldConfig>): (tick: number) => StarCell[] {
+export function useStarfield(config?: Partial<StarfieldConfig>, options?: { enabled?: boolean }): (tick: number) => StarCell[] {
+  const enabled = options?.enabled ?? ENABLE_STARFIELD
   const systemRef = useRef<StarfieldSystem | null>(null)
 
-  if (!ENABLE_STARFIELD) {
+  if (!enabled) {
     return () => EMPTY
   }
 

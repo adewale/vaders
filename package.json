@@ -7,9 +7,11 @@
     "vaders": "./bin/vaders.ts"
   },
   "workspaces": [
+    "shared",
+    "client-core",
     "client",
-    "worker",
-    "shared"
+    "web",
+    "worker"
   ],
   "scripts": {
     "vaders": "bun run bin/vaders.ts",
@@ -19,7 +21,8 @@
     "build": "cd client && bun run build",
     "deploy": "cd worker && bun run deploy",
     "typecheck": "cd worker && bun run typecheck && cd ../client && bun run typecheck",
-    "test": "bun run test:client && bun run test:worker && bun run test:shared",
+    "test": "bun run test:client && bun run test:worker && bun run test:shared && bun run test:core",
+    "test:core": "cd client-core && bun test",
     "test:client": "cd client && bun test",
     "test:worker": "cd worker && bun run test",
     "test:shared": "cd shared && bun test",

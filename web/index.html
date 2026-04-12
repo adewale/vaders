@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vaders — Space Invaders</title>
+
+    <!-- Preconnect to Google Fonts for faster load -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+
+    <!--
+      Typography system:
+        - Press Start 2P: iconic arcade pixel font — for display (logo, headlines)
+        - VT323: CRT terminal font (DEC VT320 heritage) — body, HUD, menus
+      Both loaded with font-display: swap so the page never blocks on fonts.
+    -->
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap"
+    />
+
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+
+      /* Semantic typography tokens */
+      :root {
+        --font-display: 'Press Start 2P', 'Courier New', monospace;
+        --font-body: 'VT323', 'Courier New', monospace;
+        --font-hud: 'VT323', 'Courier New', monospace;
+      }
+
+      body {
+        background: #000;
+        color: #fff;
+        font-family: var(--font-body);
+        font-size: 20px;
+        line-height: 1.4;
+        overflow: hidden;
+        /* VT323 renders best with no smoothing — preserves scanline-era feel */
+        -webkit-font-smoothing: none;
+        font-smooth: never;
+      }
+
+      #root {
+        width: 100vw;
+        height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
