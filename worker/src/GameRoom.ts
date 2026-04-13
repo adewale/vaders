@@ -598,10 +598,25 @@ export class GameRoom extends DurableObject<Env> {
     if (!this.game) return
     const playerCount = Object.keys(this.game.players).length
     const readyCount = this.game.readyPlayerIds.length
+    const willStart = playerCount >= 2 && readyCount === playerCount
+    // One wide event per evaluation so the countdown decision is
+    // queryable in Logpush. Useful when a user reports "we both readied
+    // and nothing happened" — the log tells you whether the server saw
+    // the ready, how many it counted, and whether it believed the
+    // threshold was met.
+    this.log('check_start_conditions', {
+      playerCount,
+      readyCount,
+      willStart,
+      reason: willStart
+        ? 'all-players-ready'
+        : playerCount < 2
+        ? 'too-few-players'
+        : 'not-all-ready',
+    })
+    debugLog('[CHECK_START]', { playerCount, readyCount, willStart })
 
-    debugLog('[CHECK_START]', { playerCount, readyCount, willStart: playerCount >= 2 && readyCount === playerCount })
-
-    if (playerCount >= 2 && readyCount === playerCount) {
+    if (willStart) {
       await this.startCountdown()
     }
   }
@@ -735,8 +750,13 @@ export class GameRoom extends DurableObject<Env> {
 
       if (this.countdownRemaining === 0) {
         this.countdownRemaining = null
+        this.log('countdown_tick', { count: 0, transitioningToGame: true })
         await this.startGame()
       } else {
+        // Wide event per countdown tick — 3 lines per game, safe for Logpush
+        // cost. Lets us observe countdown duration end-to-end and catch
+        // "the countdown fired but the game never started" cases.
+        this.log('countdown_tick', { count: this.countdownRemaining, transitioningToGame: false })
         this.broadcast({ type: 'event', name: 'countdown_tick', data: { count: this.countdownRemaining } })
         this.broadcastFullState()
         await this.ctx.storage.setAlarm(Date.now() + 1000)

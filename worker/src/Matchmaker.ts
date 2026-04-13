@@ -2,6 +2,7 @@
 // Matchmaker Durable Object - in-memory room registry
 
 import type { DurableObjectState } from '@cloudflare/workers-types'
+import { logEvent } from './logger'
 
 type RoomInfo = { playerCount: number; status: string; updatedAt: number }
 
@@ -13,6 +14,8 @@ export class Matchmaker {
     // Restore from storage on cold start
     this.state.blockConcurrencyWhile(async () => {
       const stored = await this.state.storage.get<Record<string, RoomInfo>>('rooms')
+      let totalRooms = 0
+      let openRooms = 0
       if (stored) {
         this.rooms = stored
         // Rebuild openRooms set. Require playerCount > 0 so stranded
@@ -20,11 +23,21 @@ export class Matchmaker {
         // don't become matchmaking targets and trap later joiners.
         // PBT finding — see state-machine.pbt.test.ts FOUND BUG (LOW).
         for (const [roomCode, info] of Object.entries(stored)) {
+          totalRooms++
           if (info.status === 'waiting' && info.playerCount > 0 && info.playerCount < 4) {
             this.openRooms.add(roomCode)
+            openRooms++
           }
         }
       }
+      // Wide event on DO cold-start rehydration so we can see how the
+      // matchmaker warmed up — useful for diagnosing "nobody found my
+      // room" cases where storage hydration might have stripped stale
+      // entries.
+      logEvent('mm_rehydrate', {
+        totalRoomsStored: totalRooms,
+        openRoomsRebuilt: openRooms,
+      })
     })
   }
 
@@ -36,6 +49,7 @@ export class Matchmaker {
       const { roomCode, playerCount, status } = await request.json() as {
         roomCode: string; playerCount: number; status: string
       }
+      const wasOpen = this.openRooms.has(roomCode)
       this.rooms[roomCode] = { playerCount, status, updatedAt: Date.now() }
 
       // Update openRooms set. Require playerCount > 0 to avoid
@@ -44,22 +58,40 @@ export class Matchmaker {
       // strand the next matchmaker alone in a dead room for the
       // full STALE_THRESHOLD (5 min). Once someone joins,
       // playerCount > 0 and the room becomes matchable.
-      if (status === 'waiting' && playerCount > 0 && playerCount < 4) {
+      const nowOpen = status === 'waiting' && playerCount > 0 && playerCount < 4
+      if (nowOpen) {
         this.openRooms.add(roomCode)
       } else {
         this.openRooms.delete(roomCode)
       }
 
       await this.state.storage.put('rooms', this.rooms)
+      // Wide event on every registration. Includes the transition so
+      // diagnostic queries like "which rooms flipped open ↔ closed
+      // around t?" are one filter. openRoomsCount is the post-update
+      // size of the matchable pool.
+      logEvent('mm_register', {
+        roomCode,
+        playerCount,
+        status,
+        openTransition: wasOpen === nowOpen ? 'no-change' : wasOpen ? 'opened→closed' : 'closed→opened',
+        openRoomsCount: this.openRooms.size,
+      })
       return new Response('OK')
     }
 
     // POST /unregister - Room removes itself
     if (url.pathname === '/unregister' && request.method === 'POST') {
       const { roomCode } = await request.json() as { roomCode: string }
+      const wasKnown = roomCode in this.rooms
       delete this.rooms[roomCode]
       this.openRooms.delete(roomCode)
       await this.state.storage.put('rooms', this.rooms)
+      logEvent('mm_unregister', {
+        roomCode,
+        wasKnown,
+        openRoomsCount: this.openRooms.size,
+      })
       return new Response('OK')
     }
 
@@ -76,15 +108,26 @@ export class Matchmaker {
       const STALE_THRESHOLD = 5 * 60 * 1000  // 5 minutes
       const now = Date.now()
 
+      // Track pruning reasons so the wide event can explain WHY /find
+      // returned null in any given call. Helpful for the "I matchmaked
+      // but ended up alone" report — shows whether the pool was empty,
+      // populated-but-stale, or populated-but-all-filtered.
+      const scanned = this.openRooms.size
+      let prunedMissing = 0
+      let prunedStale = 0
+      let prunedFiltered = 0
+
       for (const roomCode of this.openRooms) {
         const info = this.rooms[roomCode]
         if (!info) {
           this.openRooms.delete(roomCode)
+          prunedMissing++
           continue
         }
         if (now - info.updatedAt > STALE_THRESHOLD) {
           delete this.rooms[roomCode]
           this.openRooms.delete(roomCode)
+          prunedStale++
           continue
         }
         // Read-through guard — defends against `openRooms` drifting out
@@ -93,8 +136,19 @@ export class Matchmaker {
         // in between set updates would otherwise be briefly findable.
         if (info.status !== 'waiting' || info.playerCount <= 0 || info.playerCount >= 4) {
           this.openRooms.delete(roomCode)
+          prunedFiltered++
           continue
         }
+        logEvent('mm_find_result', {
+          result: 'hit',
+          roomCode,
+          playerCount: info.playerCount,
+          status: info.status,
+          openRoomsScanned: scanned,
+          prunedMissing,
+          prunedStale,
+          prunedFiltered,
+        })
         return new Response(JSON.stringify({ roomCode }), {
           headers: { 'Content-Type': 'application/json' }
         })
@@ -102,6 +156,15 @@ export class Matchmaker {
 
       await this.state.storage.put('rooms', this.rooms)
 
+      logEvent('mm_find_result', {
+        result: 'miss',
+        roomCode: null,
+        openRoomsScanned: scanned,
+        prunedMissing,
+        prunedStale,
+        prunedFiltered,
+        openRoomsRemaining: this.openRooms.size,
+      })
       return new Response(JSON.stringify({ roomCode: null }), {
         headers: { 'Content-Type': 'application/json' }
       })

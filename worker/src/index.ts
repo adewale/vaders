@@ -125,6 +125,7 @@ export default {
       const roomCode = await generateUniqueRoomCode(matchmaker)
 
       if (!roomCode) {
+        logEvent('http_room_create', { requestId, outcome: 'generation_failed' })
         return new Response(JSON.stringify({
           code: 'room_generation_failed',
           message: 'Could not generate unique room code'
@@ -136,6 +137,7 @@ export default {
 
       await createRoom(env, matchmaker, roomCode)
 
+      logEvent('http_room_create', { requestId, outcome: 'created', roomCode })
       return new Response(JSON.stringify({ roomCode }), {
         headers: { 'Content-Type': 'application/json', ...corsHeaders }
       })
@@ -145,6 +147,11 @@ export default {
     const wsMatch = url.pathname.match(/^\/room\/([A-Z0-9]{6})\/ws$/)
     if (wsMatch) {
       const roomCode = wsMatch[1]
+      // Wide event at the WS upgrade entry. The DO does the actual
+      // upgrade handshake; this line records that a client reached
+      // the edge with the intent to connect. Pair via requestId with
+      // any downstream room_join / game_in_progress / ws_error events.
+      logEvent('ws_upgrade_attempt', { requestId, roomCode })
       const id = env.GAME_ROOM.idFromName(roomCode)
       const stub = env.GAME_ROOM.get(id)
       // Thread requestId to the DO so its logs correlate with this request.
@@ -158,6 +165,15 @@ export default {
       const { roomCode: existingRoom } = await result.json() as { roomCode: string | null }
 
       if (existingRoom) {
+        // Wide event: matchmaker returned an existing room. Pair with
+        // the mm_find_result event emitted inside the Matchmaker DO so
+        // the full flow (HTTP entry → DO internals) can be correlated
+        // by requestId.
+        logEvent('http_matchmake', {
+          requestId,
+          outcome: 'joined_existing',
+          roomCode: existingRoom,
+        })
         return new Response(JSON.stringify({ roomCode: existingRoom }), {
           headers: { 'Content-Type': 'application/json', ...corsHeaders }
         })
@@ -167,6 +183,10 @@ export default {
       const newRoomCode = await generateUniqueRoomCode(matchmaker)
 
       if (!newRoomCode) {
+        logEvent('http_matchmake', {
+          requestId,
+          outcome: 'generation_failed',
+        })
         return new Response(JSON.stringify({
           code: 'room_generation_failed',
           message: 'Could not generate unique room code'
@@ -178,6 +198,14 @@ export default {
 
       await createRoom(env, matchmaker, newRoomCode)
 
+      // "created_fresh" is the interesting case for diagnosis — this is
+      // the path a "stranded matchmaker" hits (see docs/TODO.md). Pair
+      // with the Lobby-side UX that shows them they seeded a new room.
+      logEvent('http_matchmake', {
+        requestId,
+        outcome: 'created_fresh',
+        roomCode: newRoomCode,
+      })
       return new Response(JSON.stringify({ roomCode: newRoomCode }), {
         headers: { 'Content-Type': 'application/json', ...corsHeaders }
       })
