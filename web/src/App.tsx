@@ -297,6 +297,30 @@ function GameContainer({
     shoot,
   } = useGameConnection(serverUrl, playerName)
 
+  // ── Test hook: expose the live server state to Playwright ───────────
+  //
+  // Dev-only. `import.meta.env.DEV` is statically replaced by Vite at
+  // build time (true during `vite`, false during `vite build`), so the
+  // whole block tree-shakes cleanly in production. Playwright tests can
+  // read `window.__VADERS_STATE__` to verify gameplay progresses — e.g.
+  // that ticks advance, bullets spawn, aliens die — without needing
+  // pixel-level canvas introspection. Also includes the player's own
+  // id + the latest event so tests can correlate visual state with
+  // protocol traffic. Not part of any public API.
+  useEffect(() => {
+    if (!import.meta.env.DEV) return
+    const w = window as unknown as {
+      __VADERS_STATE__?: unknown
+      __VADERS_PLAYER_ID__?: string | null
+      __VADERS_LAST_EVENT__?: unknown
+      __VADERS_CONNECTED__?: boolean
+    }
+    w.__VADERS_STATE__ = serverState
+    w.__VADERS_PLAYER_ID__ = playerId
+    w.__VADERS_LAST_EVENT__ = lastEvent
+    w.__VADERS_CONNECTED__ = connected
+  }, [serverState, playerId, lastEvent, connected])
+
   // ── Auto-start solo mode after connecting ─────────────────────────────
 
   const soloSentRef = useRef(false)

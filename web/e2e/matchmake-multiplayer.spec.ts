@@ -152,15 +152,239 @@ test.describe('Matchmake multiplayer', () => {
         await expect(alice.getByTestId('game-canvas')).toBeVisible({ timeout: 10000 })
         await expect(bob.getByTestId('game-canvas')).toBeVisible({ timeout: 10000 })
 
-        await alice.keyboard.press('Space')
-        await bob.keyboard.press('ArrowLeft')
-        await alice.keyboard.press('ArrowRight')
-
         // No ErrorBoundary fallback. No error toast. No crash.
         await expect(alice.getByRole('button', { name: /reload/i })).not.toBeVisible()
         await expect(bob.getByRole('button', { name: /reload/i })).not.toBeVisible()
         await expect(alice.getByTestId('in-game-error-toast')).not.toBeVisible()
         await expect(bob.getByTestId('in-game-error-toast')).not.toBeVisible()
+      })
+
+      await test.step('Step 9 — The game is actually PLAYABLE: server ticks advance, shooting spawns bullets, both clients are in sync', async () => {
+        // Reads the dev-only __VADERS_STATE__ hook exposed by GameContainer.
+        // If this assertion fails, the game screen is visible but the
+        // simulation isn't running — which is precisely the "canvas is
+        // visible but nothing happens" failure mode that Step 8's
+        // `.toBeVisible()` misses.
+
+        // Wait for aliens to exist on both sides (they appear at the end
+        // of wipe_reveal, a few hundred ms after wipe_hold).
+        await expect
+          .poll(
+            async () => {
+              const aliens = await alice.evaluate(() => {
+                const s = (window as { __VADERS_STATE__?: { entities?: { kind: string }[] } }).__VADERS_STATE__
+                return s?.entities?.filter((e) => e.kind === 'alien').length ?? 0
+              })
+              return aliens
+            },
+            { timeout: 10000, message: 'aliens should populate after wipe_reveal' },
+          )
+          .toBeGreaterThan(0)
+
+        // Capture the tick count on both sides; wait briefly; assert it
+        // advanced — proves the server loop is running and broadcasting.
+        const aliceTickBefore = await alice.evaluate(
+          () => (window as { __VADERS_STATE__?: { tick?: number } }).__VADERS_STATE__?.tick ?? 0,
+        )
+        const bobTickBefore = await bob.evaluate(
+          () => (window as { __VADERS_STATE__?: { tick?: number } }).__VADERS_STATE__?.tick ?? 0,
+        )
+        await alice.waitForTimeout(400)
+        const aliceTickAfter = await alice.evaluate(
+          () => (window as { __VADERS_STATE__?: { tick?: number } }).__VADERS_STATE__?.tick ?? 0,
+        )
+        const bobTickAfter = await bob.evaluate(
+          () => (window as { __VADERS_STATE__?: { tick?: number } }).__VADERS_STATE__?.tick ?? 0,
+        )
+        expect(aliceTickAfter, 'Alice\'s tick advanced').toBeGreaterThan(aliceTickBefore)
+        expect(bobTickAfter, 'Bob\'s tick advanced').toBeGreaterThan(bobTickBefore)
+
+        // Alice shoots. The bullet must appear in BOTH clients' state
+        // (proves the server broadcasts reach both WebSockets).
+        await alice.keyboard.press('Space')
+        await expect
+          .poll(
+            async () => {
+              const n = await alice.evaluate(() => {
+                const s = (window as { __VADERS_STATE__?: { entities?: { kind: string }[] } }).__VADERS_STATE__
+                return s?.entities?.filter((e) => e.kind === 'bullet').length ?? 0
+              })
+              return n
+            },
+            { timeout: 3000, message: 'Alice\'s shoot should spawn a bullet in her state' },
+          )
+          .toBeGreaterThan(0)
+        await expect
+          .poll(
+            async () => {
+              const n = await bob.evaluate(() => {
+                const s = (window as { __VADERS_STATE__?: { entities?: { kind: string }[] } }).__VADERS_STATE__
+                return s?.entities?.filter((e) => e.kind === 'bullet').length ?? 0
+              })
+              return n
+            },
+            { timeout: 3000, message: 'Alice\'s bullet should also appear in Bob\'s state (coop sync)' },
+          )
+          .toBeGreaterThan(0)
+
+        // Bob moves. His player.x in BOTH his own and Alice's view should
+        // eventually differ from the starting position.
+        const bobId = await bob.evaluate(
+          () => (window as { __VADERS_PLAYER_ID__?: string | null }).__VADERS_PLAYER_ID__,
+        )
+        expect(bobId, 'Bob\'s playerId is known').toBeTruthy()
+        const bobXBefore = await bob.evaluate((id: string) => {
+          const s = (window as { __VADERS_STATE__?: { players?: Record<string, { x: number }> } }).__VADERS_STATE__
+          return s?.players?.[id]?.x ?? 0
+        }, bobId as string)
+        await bob.keyboard.down('ArrowLeft')
+        await bob.waitForTimeout(500)
+        await bob.keyboard.up('ArrowLeft')
+        const bobXAfterSelf = await bob.evaluate((id: string) => {
+          const s = (window as { __VADERS_STATE__?: { players?: Record<string, { x: number }> } }).__VADERS_STATE__
+          return s?.players?.[id]?.x ?? 0
+        }, bobId as string)
+        const bobXAfterAlice = await alice.evaluate((id: string) => {
+          const s = (window as { __VADERS_STATE__?: { players?: Record<string, { x: number }> } }).__VADERS_STATE__
+          return s?.players?.[id]?.x ?? 0
+        }, bobId as string)
+        expect(bobXAfterSelf, 'Bob\'s own view: his x changed').not.toBe(bobXBefore)
+        expect(
+          bobXAfterAlice,
+          'Alice\'s view of Bob: his x changed (sync). Exact equality not asserted — broadcast latency means Alice may be one tick behind Bob\'s local read.',
+        ).not.toBe(bobXBefore)
+        // Tolerance: Alice and Bob are within a few ticks of each other.
+        // At 30Hz ticks and 1 cell/tick movement speed, a broadcast lag
+        // of ≤ 3 ticks is normal.
+        expect(Math.abs(bobXAfterAlice - bobXAfterSelf)).toBeLessThanOrEqual(3)
+      })
+
+      await test.step('Step 10 — Canvas is actually painting (non-zero pixel variety)', async () => {
+        // toBeVisible() only checks element presence + non-zero size. A
+        // black canvas passes that. This step reads pixel data and
+        // asserts there's visible variety — i.e., something was drawn.
+        // The mid-game screen has starfield + HUD + aliens + ship, which
+        // produces many distinct colour values; a broken renderer would
+        // produce ≤ 2 (black + one accent or all black).
+        const uniqueColours = await alice.evaluate(() => {
+          const canvas = document.querySelector<HTMLCanvasElement>('[data-testid="game-canvas"]')
+          if (!canvas) return 0
+          const ctx = canvas.getContext('2d')
+          if (!ctx) return 0
+          // Sample a small strip from the middle of the canvas.
+          const data = ctx.getImageData(0, canvas.height / 2, canvas.width, 4).data
+          const seen = new Set<number>()
+          for (let i = 0; i < data.length; i += 4) {
+            const r = data[i], g = data[i + 1], b = data[i + 2]
+            seen.add((r << 16) | (g << 8) | b)
+          }
+          return seen.size
+        })
+        expect(uniqueColours, 'canvas has drawn pixels (not all one colour)').toBeGreaterThan(5)
+      })
+    } finally {
+      await aliceCtx.close()
+      await bobCtx.close()
+    }
+  })
+
+  /**
+   * Visual-regression golden files for the 2-player matchmake flow.
+   *
+   * Once the matchmake → lobby → countdown → game path is known to
+   * work (Step 9 proves the simulation runs; Step 10 proves the canvas
+   * paints), these snapshots become the "it still LOOKS right"
+   * regression guard. A pixel diff against the golden image catches
+   * silent CSS / layout drift that DOM assertions miss — e.g. a
+   * stacking-context change that hides the ticker behind the QR code.
+   *
+   * Skipped in CI — font anti-aliasing and GPU raster diffs across
+   * platforms produce false positives. Run locally before releases
+   * to regenerate / verify; matches the pattern in
+   * `visual-snapshots.spec.ts`.
+   *
+   * To update the golden files after a legitimate visual change:
+   *   cd web && ./node_modules/.bin/playwright test matchmake-multiplayer \
+   *     --grep "visual snapshots" --project=chromium --update-snapshots
+   *
+   * Lives in THIS file (not a sibling spec) so it shares the serial
+   * describe mode with the matchmake N-player tests — Playwright's
+   * `fullyParallel: true` would otherwise run it concurrently in its
+   * own worker and collide with our 2/3/4-player tests on the single
+   * global Matchmaker DO.
+   */
+  test('visual snapshots at each key moment of the 2-player flow', async ({ browser }) => {
+    test.skip(!!process.env.CI, 'Visual snapshots skipped in CI (font rendering + GPU raster differences)')
+
+    const aliceCtx = await browser.newContext({ viewport: { width: 1280, height: 720 } })
+    const bobCtx = await browser.newContext({ viewport: { width: 1280, height: 720 } })
+    const alice = await aliceCtx.newPage()
+    const bob = await bobCtx.newPage()
+
+    try {
+      // ── Moment 1: launch screen (Alice, pre-matchmake) ─────────────
+      await alice.goto('/')
+      await expect(alice.getByTestId('vaders-logo')).toBeVisible()
+      await alice.waitForTimeout(400)
+      await expect(alice).toHaveScreenshot('matchmake-1-launch.png', {
+        maxDiffPixelRatio: 0.05,
+        animations: 'disabled',
+      })
+
+      // ── Moment 2: Alice alone in lobby ("Waiting for another player") ─
+      await alice.keyboard.press('4')
+      await alice.waitForURL(/\/room\/[A-Z0-9]{6}(?:\/.*)?$/, { timeout: 10000 })
+      await expect(alice.getByTestId('lobby-ready-ticker')).toContainText(/waiting for another player/i)
+      await alice.waitForTimeout(300)
+      await expect(alice).toHaveScreenshot('matchmake-2-lobby-alone.png', {
+        maxDiffPixelRatio: 0.05,
+        animations: 'disabled',
+        // Mask the QR code (changes with room code) and the footer (changes per deploy).
+        mask: [alice.getByTestId('room-qr'), alice.locator('[data-testid="homepage-footer"]')],
+      })
+
+      // ── Moment 3: Bob joined, both in lobby with "0/2 ready" ───────
+      await bob.goto('/')
+      await expect(bob.getByTestId('vaders-logo')).toBeVisible()
+      await bob.keyboard.press('4')
+      await bob.waitForURL(/\/room\/[A-Z0-9]{6}(?:\/.*)?$/, { timeout: 10000 })
+      await expect(alice.getByTestId('lobby-player-row')).toHaveCount(2, { timeout: 10000 })
+      await expect(alice.getByTestId('lobby-ready-ticker')).toContainText('0/2 ready')
+      await alice.waitForTimeout(300)
+      await expect(alice).toHaveScreenshot('matchmake-3-lobby-two-players.png', {
+        maxDiffPixelRatio: 0.05,
+        animations: 'disabled',
+        mask: [alice.getByTestId('room-qr'), alice.locator('[data-testid="homepage-footer"]')],
+      })
+
+      // ── Moment 4: mid-countdown (after both readied) ───────────────
+      await alice.keyboard.press('Enter')
+      await bob.keyboard.press('Enter')
+      await expect(
+        alice
+          .getByTestId('lobby-ready-ticker')
+          .filter({ hasText: /starting in \d/i })
+          .or(alice.getByTestId('game-canvas')),
+      ).toBeVisible({ timeout: 5000 })
+      const countdownVisible = await alice
+        .getByTestId('lobby-ready-ticker')
+        .filter({ hasText: /starting in \d/i })
+        .isVisible()
+        .catch(() => false)
+      if (countdownVisible) {
+        await expect(alice).toHaveScreenshot('matchmake-4-countdown.png', {
+          maxDiffPixelRatio: 0.08, // countdown number changes across the window
+          animations: 'disabled',
+          mask: [alice.getByTestId('room-qr'), alice.locator('[data-testid="homepage-footer"]')],
+        })
+      }
+
+      // ── Moment 5: mid-game (aliens visible, ships visible) ─────────
+      await expect(alice.getByTestId('game-canvas')).toBeVisible({ timeout: 10000 })
+      await alice.waitForTimeout(800)
+      await expect(alice.getByTestId('game-canvas')).toHaveScreenshot('matchmake-5-gameplay.png', {
+        maxDiffPixelRatio: 0.15, // generous — aliens animate, UFO may appear
+        animations: 'disabled',
       })
     } finally {
       await aliceCtx.close()
