@@ -83,6 +83,15 @@ export interface Player {
   respawnAtTick: number | null      // Tick to respawn after death
   invulnerableUntilTick: number | null  // Tick until which player is invulnerable (after respawn)
   kills: number
+  // Heartbeat: tick of the last inbound message from this player's WS.
+  // Refreshed on every webSocketMessage. Server reaps players whose
+  // lastActiveTick is > IDLE_STALE_TICKS behind the current tick during
+  // playing/wipe_* phases — protection against phantoms born while a
+  // single DO instance is alive (Option B; Option A covers phantoms born
+  // across eviction). `null` means "unknown" (e.g. migrated from a
+  // pre-heartbeat persisted state) and is lazily initialised on first
+  // observation.
+  lastActiveTick: number | null
 
   // Input state (server-authoritative, updated from client input messages)
   inputState: {

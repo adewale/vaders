@@ -421,6 +421,114 @@ describe('state restoration', () => {
 })
 
 // ============================================================================
+// Option C: progress-stale prune
+// ============================================================================
+
+describe('REGRESSION: /find prunes progress-stale rooms (Option C)', () => {
+  // A room stuck in `waiting` with phantoms causes churning player
+  // counts to refresh updatedAt without ever making status progress.
+  // The original 5-minute STALE_THRESHOLD (based on updatedAt) can't
+  // catch this — each victim's join refreshes the timer. Option C
+  // tracks lastStatusChangeAt separately, so rooms that stay in
+  // waiting for >10 minutes without a status transition get pruned
+  // even when their updatedAt is fresh.
+
+  it('prunes a room whose lastStatusChangeAt is >10 min ago, even with fresh updatedAt', async () => {
+    const oldEnough = Date.now() - 11 * 60 * 1000   // 11 min ago — past threshold
+    const recent = Date.now() - 10 * 1000            // 10s ago — updatedAt stays fresh
+    const { matchmaker } = await createMatchmaker({
+      STUCK1: {
+        playerCount: 2,
+        status: 'waiting',
+        updatedAt: recent,
+        lastStatusChangeAt: oldEnough,
+      } as unknown as { playerCount: number; status: string; updatedAt: number },
+    })
+
+    const findResponse = await matchmaker.fetch(createRequest('GET', '/find'))
+    const result = await findResponse.json() as FindResponse
+    // The stuck room must NOT be returned — it should have been pruned.
+    expect(result.roomCode).toBe(null)
+
+    // The next /info lookup confirms it's been deleted.
+    const infoResponse = await matchmaker.fetch(createRequest('GET', '/info/STUCK1'))
+    expect(infoResponse.status).toBe(404)
+  })
+
+  it('does NOT prune a room with recent lastStatusChangeAt', async () => {
+    const recent = Date.now() - 10 * 1000   // 10s ago — well within threshold
+    const { matchmaker } = await createMatchmaker({
+      FRESH1: {
+        playerCount: 1,
+        status: 'waiting',
+        updatedAt: recent,
+        lastStatusChangeAt: recent,
+      } as unknown as { playerCount: number; status: string; updatedAt: number },
+    })
+
+    const findResponse = await matchmaker.fetch(createRequest('GET', '/find'))
+    const result = await findResponse.json() as FindResponse
+    expect(result.roomCode).toBe('FRESH1')
+  })
+
+  it('register without status change preserves lastStatusChangeAt', async () => {
+    const { matchmaker, mockState } = await createMatchmaker()
+
+    // Room registers in waiting at t=0.
+    await matchmaker.fetch(createRequest('POST', '/register', {
+      roomCode: 'CHURN1',
+      playerCount: 1,
+      status: 'waiting',
+    }))
+    const after1 = (mockState._storage.get('rooms') as Record<string, {
+      lastStatusChangeAt: number
+    }>)
+    const firstChangeAt = after1.CHURN1.lastStatusChangeAt
+
+    // Small delay so a "refresh" would be observable.
+    await new Promise(r => setTimeout(r, 5))
+
+    // Same status, different playerCount — simulates new victim joining.
+    await matchmaker.fetch(createRequest('POST', '/register', {
+      roomCode: 'CHURN1',
+      playerCount: 2,
+      status: 'waiting',
+    }))
+    const after2 = (mockState._storage.get('rooms') as Record<string, {
+      lastStatusChangeAt: number
+    }>)
+    expect(after2.CHURN1.lastStatusChangeAt).toBe(firstChangeAt)
+  })
+
+  it('register WITH status change refreshes lastStatusChangeAt', async () => {
+    const { matchmaker, mockState } = await createMatchmaker()
+
+    await matchmaker.fetch(createRequest('POST', '/register', {
+      roomCode: 'TRANS1',
+      playerCount: 1,
+      status: 'waiting',
+    }))
+    const firstChangeAt = (mockState._storage.get('rooms') as Record<string, {
+      lastStatusChangeAt: number
+    }>).TRANS1.lastStatusChangeAt
+
+    await new Promise(r => setTimeout(r, 5))
+
+    // Real status change — waiting → countdown.
+    await matchmaker.fetch(createRequest('POST', '/register', {
+      roomCode: 'TRANS1',
+      playerCount: 2,
+      status: 'countdown',
+    }))
+    const afterChange = (mockState._storage.get('rooms') as Record<string, {
+      lastStatusChangeAt: number
+    }>).TRANS1.lastStatusChangeAt
+
+    expect(afterChange).toBeGreaterThan(firstChangeAt)
+  })
+})
+
+// ============================================================================
 // Concurrent Operations Tests
 // ============================================================================
 

@@ -1282,3 +1282,210 @@ describe('PBT: Targeted bug-hypothesis probes', () => {
 // `REGRESSION:` to find each one. A test failure there now points directly
 // at the regression hypothesis.
 // ============================================================================
+
+// ============================================================================
+// Phantom players — reproduced in production room XPJZ7K on 2026-04-13 and
+// fixed via Option A (GameRoom constructor reconciliation). The original
+// symptom: the matchmaker kept returning a room with 3 phantom players whose
+// WebSockets were dead; countdown never fired; every new matchmaker got
+// trapped. Root cause was that the constructor loaded state.players from SQL
+// without cross-checking ctx.getWebSockets().
+//
+// The original CHARACTERIZATION probes have been subsumed by the REGRESSION
+// block below (they asserted the pre-fix behaviour and are therefore stale
+// after the fix). See docs/TODO.md "Phantom players" for the full incident
+// narrative and Options B + C which ship alongside A as defence in depth.
+// ============================================================================
+
+function makePhantomEnv(): Env {
+  return {
+    GAME_ROOM: { idFromName: vi.fn(), get: vi.fn() } as unknown as Env['GAME_ROOM'],
+    MATCHMAKER: {
+      idFromName: vi.fn(),
+      get: vi.fn(() => ({ fetch: vi.fn(async () => new Response('OK')) })),
+    } as unknown as Env['MATCHMAKER'],
+  }
+}
+
+describe('REGRESSION: GameRoom reconciles state.players against live WebSockets on wake (Option A)', () => {
+  // Guards the fix for the XPJZ7K production bug (2026-04-13). Before
+  // Option A landed, the constructor loaded state.players from SQL but
+  // never cross-checked ctx.getWebSockets(). Phantoms survived eviction
+  // and blocked countdown forever. GameRoom.ts constructor now prunes
+  // state.players ∩ live WebSockets on wake.
+  it('after eviction, state.players should only contain ids attached to live WebSockets', async () => {
+    const env = makePhantomEnv()
+
+    // Build state with 2 players on ctx1.
+    const ctx1 = createMockDurableObjectContext()
+    const room1 = new GameRoom(ctx1 as unknown as DurableObjectState, env)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    await room1.fetch(new Request('https://internal/init', {
+      method: 'POST',
+      body: JSON.stringify({ roomCode: 'FIXAB1' }),
+    }))
+    for (const name of ['Alice', 'Bob']) {
+      const ws = createMockWebSocket()
+      ctx1._webSockets.push(ws)
+      await room1.webSocketMessage(ws as unknown as WebSocket, JSON.stringify({
+        type: 'join',
+        name,
+      }))
+    }
+    const sql1 = JSON.parse(ctx1._sqlData['game_state']!.data) as GameState
+    expect(Object.keys(sql1.players).length).toBe(2)
+
+    // Eviction: fresh ctx, persisted SQL, no live WS.
+    const ctx2 = createMockDurableObjectContext()
+    ctx2._sqlData['game_state'] = ctx1._sqlData['game_state']!
+    const room2 = new GameRoom(ctx2 as unknown as DurableObjectState, env)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(room2).toBeDefined()
+
+    // Post-fix invariant: state.players must only include ids attached to
+    // currently-open WebSockets. Both Alice and Bob lost their connections,
+    // so the player set should be empty after reconciliation.
+    const after = JSON.parse(ctx2._sqlData['game_state']!.data) as GameState
+    expect(Object.keys(after.players)).toEqual([])
+    expect(after.readyPlayerIds).toEqual([])
+  })
+
+  it('after partial loss, state.players keeps survivors and prunes phantoms', async () => {
+    // The reconciler must be precise: keep ids whose WS survived, drop the rest.
+    const env = makePhantomEnv()
+
+    // Two players on ctx1.
+    const ctx1 = createMockDurableObjectContext()
+    const room1 = new GameRoom(ctx1 as unknown as DurableObjectState, env)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    await room1.fetch(new Request('https://internal/init', {
+      method: 'POST',
+      body: JSON.stringify({ roomCode: 'FIXAB2' }),
+    }))
+    const aliceWs = createMockWebSocket()
+    ctx1._webSockets.push(aliceWs)
+    await room1.webSocketMessage(aliceWs as unknown as WebSocket, JSON.stringify({ type: 'join', name: 'Alice' }))
+    const bobWs = createMockWebSocket()
+    ctx1._webSockets.push(bobWs)
+    await room1.webSocketMessage(bobWs as unknown as WebSocket, JSON.stringify({ type: 'join', name: 'Bob' }))
+
+    const stateOnDisk = JSON.parse(ctx1._sqlData['game_state']!.data) as GameState
+    const aliceId = Object.values(stateOnDisk.players).find(p => p.name === 'Alice')!.id
+
+    // Eviction: only Alice's WS survives the wake (e.g. Bob's force-killed tab).
+    const ctx2 = createMockDurableObjectContext()
+    ctx2._sqlData['game_state'] = ctx1._sqlData['game_state']!
+    // Re-attach Alice's WS only — Cloudflare's getWebSockets() is the source of truth.
+    ctx2._webSockets.push(aliceWs)
+
+    const room2 = new GameRoom(ctx2 as unknown as DurableObjectState, env)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(room2).toBeDefined()
+
+    const after = JSON.parse(ctx2._sqlData['game_state']!.data) as GameState
+    expect(Object.keys(after.players)).toEqual([aliceId])  // Bob pruned, Alice kept
+  })
+})
+
+describe('REGRESSION: heartbeat reap removes idle players during active play (Option B)', () => {
+  // Guards the fix for in-session phantoms: during `playing` / `wipe_*`,
+  // a player whose WS stopped delivering messages for > IDLE_STALE_TICKS
+  // (2400 ticks ≈ 80s) is reaped via PLAYER_LEAVE. Option A covers phantoms
+  // born across DO eviction; this guards against phantoms born while a
+  // single DO is alive (e.g. force-killed tab before its close event fires).
+  //
+  // Tests use direct mutation of player.lastActiveTick to decouple from
+  // gameplay mechanics — otherwise aliens kill the solo player long before
+  // the 2400-tick idle threshold, and the reap path would never be exercised.
+
+  it('idle player (lastActiveTick aged past threshold) is reaped', async () => {
+    const real = new RealSystem()
+    await real.createRoom('REAP01')
+    const alice = await real.joinRoom('REAP01', 'Alice')
+    if (!alice) throw new Error('join failed')
+
+    await real.sendAs(alice, { type: 'start_solo' })
+    // Drive far enough to exit wipe phases into `playing`.
+    await real.advanceTicks('REAP01', 100)
+
+    const entry = real.rooms.get('REAP01')!
+    const game = (entry.room as unknown as { game: GameState }).game
+    expect(['wipe_reveal', 'playing']).toContain(game.status)
+
+    // Force Alice idle by aging her lastActiveTick 3000 ticks behind
+    // the current game.tick. Threshold is 2400, so 3000 > threshold.
+    game.players[alice].lastActiveTick = game.tick - 3000
+
+    // One more alarm tick triggers the reap pass at the top of tick().
+    await real.advanceTicks('REAP01', 1)
+
+    const state = real.getState('REAP01')!
+    expect(Object.keys(state.players)).toEqual([])
+    // Reaping the last player during active status must end the game
+    // (otherwise status=playing with 0 players violates an invariant).
+    expect(state.status).toBe('game_over')
+  })
+
+  it('active player (lastActiveTick recent) is NOT reaped', async () => {
+    const real = new RealSystem()
+    await real.createRoom('ALIVE1')
+    const alice = await real.joinRoom('ALIVE1', 'Alice')
+    if (!alice) throw new Error('join failed')
+
+    await real.sendAs(alice, { type: 'start_solo' })
+    await real.advanceTicks('ALIVE1', 100)
+
+    const entry = real.rooms.get('ALIVE1')!
+    const game = (entry.room as unknown as { game: GameState }).game
+
+    // Simulate Alice sending a ping 100 ticks ago — well under the
+    // 2400 threshold. She must not be reaped on the next tick.
+    game.players[alice].lastActiveTick = game.tick - 100
+    await real.advanceTicks('ALIVE1', 1)
+
+    const state = real.getState('ALIVE1')!
+    expect(state.players[alice]).toBeDefined()
+  })
+
+  it('idle player during waiting is NOT reaped (lobby idleness is normal)', async () => {
+    // Reap only fires inside tick(), which itself only runs during
+    // active statuses (playing/wipe_*). Waiting lobbies never hit the
+    // reap path, regardless of how old lastActiveTick is.
+    const real = new RealSystem()
+    await real.createRoom('LOBBY1')
+    const alice = await real.joinRoom('LOBBY1', 'Alice')
+    if (!alice) throw new Error('join failed')
+
+    const entry = real.rooms.get('LOBBY1')!
+    const game = (entry.room as unknown as { game: GameState }).game
+    // Even if we artificially age Alice's lastActiveTick, waiting-status
+    // alarms don't trigger tick() at all, so no reap can occur.
+    game.players[alice].lastActiveTick = -99999
+    await real.advanceTicks('LOBBY1', 5)
+
+    const state = real.getState('LOBBY1')!
+    expect(state.status).toBe('waiting')
+    expect(state.players[alice]).toBeDefined()
+  })
+
+  it('heartbeat bump on every inbound message keeps lastActiveTick fresh', async () => {
+    const real = new RealSystem()
+    await real.createRoom('BEAT01')
+    const alice = await real.joinRoom('BEAT01', 'Alice')
+    if (!alice) throw new Error('join failed')
+
+    await real.sendAs(alice, { type: 'start_solo' })
+    await real.advanceTicks('BEAT01', 50)
+
+    const entry = real.rooms.get('BEAT01')!
+    const game = (entry.room as unknown as { game: GameState }).game
+
+    // Age the heartbeat, then send a message — the handler must bump
+    // lastActiveTick back to current tick, proving the bump path works
+    // regardless of message type (ping/shoot/move/input all count).
+    game.players[alice].lastActiveTick = game.tick - 5000
+    const tickAtSend = game.tick
+    await real.sendAs(alice, { type: 'ping' })
+    expect(game.players[alice].lastActiveTick).toBe(tickAtSend)
+  })
+})

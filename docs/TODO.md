@@ -92,9 +92,15 @@ Options 1 + 2 together:
 
 ---
 
-## Phantom players (reproduced in production 2026-04-13)
+## Phantom players (reproduced in production 2026-04-13 — **FIXED 2026-04-13**)
 
-**This is why 2-player matchmaking doesn't work for real users.** The
+**Status**: all three mitigations (A + B + C) shipped in the same pass.
+The production symptom (matchmaker trapped in XPJZ7K) will self-clear on
+that DO's next wake (Option A) or after 10 min of no status progress in
+the matchmaker (Option C). The history below is preserved for the
+postmortem.
+
+**This was why 2-player matchmaking didn't work for real users.** The
 test against production reproduced the exact failure the user
 reported.
 
@@ -169,52 +175,51 @@ events. (2) is the fundamental reason they persist while a single DO
 remains alive. (3) is the timing window that creates them in the
 first place.
 
-### Fix options (NOT implementing per current scope)
+### Fixes shipped (A + B + C)
 
-**A. Reconcile on wake** — in the GameRoom constructor, after
-loading `this.game` from SQL, prune any player whose id isn't
-attached to a living WebSocket:
+**A. Reconcile on wake** — GameRoom constructor now prunes
+`state.players` entries whose id is not attached to a live WebSocket
+after rehydrating from SQL. See `worker/src/GameRoom.ts` — new block
+below the `migrateGameState` call. Emits `reconcile_prune_phantoms`
+wide event on every prune. Closes the primary phantom creation path.
+Regression guard: `worker/src/state-machine.pbt.test.ts` → "REGRESSION:
+GameRoom reconciles state.players against live WebSockets on wake".
 
-```ts
-const live = new Set(
-  ctx.getWebSockets()
-    .map(ws => (ws.deserializeAttachment() as WebSocketAttachment | null)?.playerId)
-    .filter(Boolean)
-)
-for (const id of Object.keys(this.game.players)) {
-  if (!live.has(id)) delete this.game.players[id]
-}
-// Also trim readyPlayerIds.
-this.game.readyPlayerIds = this.game.readyPlayerIds.filter(id => id in this.game.players)
-this.persistState()
-await this.updateRoomRegistry()
-```
+**B. Heartbeat timeout** — `Player` type gained `lastActiveTick`
+(`shared/types.ts`). GameRoom bumps it on every inbound
+`webSocketMessage` and reaps any player idle for > 2400 ticks (~80s at
+30Hz) at the top of `tick()` during active statuses. Threshold is
+2× the `PING_INTERVAL + PONG_TIMEOUT` in `client-core`, so two missed
+pings are tolerated before treating a player as gone. Emits
+`reap_idle_player` wide event. If reaping empties the room during
+active play, `endGame('defeat')` fires to avoid
+`playing_with_zero_players`. Regression guards: `worker/src/state-machine.pbt.test.ts`
+→ "REGRESSION: heartbeat reap removes idle players during active play".
 
-Low risk, high impact — closes the primary phantom creation path.
+**C. Progress-stale prune** — Matchmaker `RoomInfo` gained
+`lastStatusChangeAt`. It refreshes only on status transitions, NOT on
+playerCount churn. `/find` prunes any `waiting` room whose
+`lastStatusChangeAt` is older than 10 minutes — the exact pattern of a
+phantom-trapped room where victims cycle through without ever readying.
+Emits `mm_prune_stale_by_progress` wide event. Regression guards:
+`worker/src/Matchmaker.test.ts` → "REGRESSION: /find prunes
+progress-stale rooms".
 
-**B. Heartbeat timeout** — add `lastActiveTick` per player,
-refreshed on every incoming message. During the game-tick alarm,
-reap any player whose lastActive is > N ticks stale. N = 90 ticks
-(3 seconds) would be conservative.
-
-**C. Force-prune stale rooms** — matchmaker's 5-minute stale
-threshold only ages out rooms whose `updatedAt` is old. A room with
-phantoms that keeps getting re-registered (via join/leave cycles of
-new victims) will never go stale. Add a secondary "idle" threshold
-based on game state (e.g., room in `waiting` with no ready flips
-for 10 minutes → force unregister AND reset players).
-
-Recommended: **A first** (closes the well), **B second**
-(prevents new wells from forming during a single DO lifetime). C is
-cleanup for rooms already poisoned; unnecessary once A+B ship.
+Defence-in-depth combination: A closes the source (eviction-origin
+phantoms), B catches in-session phantoms (force-killed tab before close
+event fires), C is the matchmaker-level safety net for anything that
+escapes A+B.
 
 ### Clean-up of XPJZ7K specifically
 
-XPJZ7K currently has 3 phantoms as of 2026-04-13 11:42 UTC. It will
-re-poison every matchmaker until its 5-minute stale threshold fires
-(or until it gets DO-evicted in a way Cloudflare cleans). Fix A
-would clean it on next DO wake. Until then: any user who matchmakes
-will get dumped into this specific dead room.
+XPJZ7K had 3 phantoms as of 2026-04-13 11:42 UTC. After the A+B+C
+deploy, it self-clears via one of:
+- Its next DO wake → Option A prunes the 3 phantoms from state.players
+- 10 minutes of no further status transition → Option C prunes the
+  matchmaker entry; no further matchmakers land there
+- 5 minutes of no activity → the pre-existing `STALE_THRESHOLD` fires
+
+No manual intervention required.
 
 ### Instrumentation that made this diagnosis possible
 

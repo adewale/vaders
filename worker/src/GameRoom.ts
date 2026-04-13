@@ -190,6 +190,47 @@ export class GameRoom extends DurableObject<Env> {
         // Migrate persisted state to fill any missing fields with defaults
         this.game = migrateGameState(JSON.parse(rows[0].data))
         this.nextEntityId = rows[0].next_entity_id
+
+        // --- Phantom-player reconciliation (Option A) ---
+        // After a DO eviction or hibernation wake, state.players is
+        // rehydrated from SQL but the WebSockets that created those
+        // entries may not be attached. Cross-check against
+        // ctx.getWebSockets() and prune any player id whose WS did not
+        // survive. Without this, phantoms persist across DO lifecycle
+        // events and block countdown forever — reproduced in production
+        // as room XPJZ7K (2026-04-13). See state-machine.pbt.test.ts
+        // "phantom players" section for the characterisation + regression
+        // guards.
+        const live = new Set<string>()
+        for (const ws of this.ctx.getWebSockets()) {
+          const a = ws.deserializeAttachment() as WebSocketAttachment | null
+          if (a?.playerId) live.add(a.playerId)
+        }
+        const phantoms = Object.keys(this.game.players).filter(id => !live.has(id))
+        if (phantoms.length > 0) {
+          for (const id of phantoms) delete this.game.players[id]
+          this.game.readyPlayerIds = this.game.readyPlayerIds.filter(
+            id => id in this.game!.players
+          )
+          // If countdown was in-flight and the threshold no longer holds,
+          // reset to waiting so a fresh ready flow can begin.
+          if (this.game.status === 'countdown' &&
+              Object.keys(this.game.players).length < 2) {
+            this.game.status = 'waiting'
+            this.game.countdownRemaining = null
+          }
+          this.persistState()
+          // Registry update is fire-and-forget — no await inside
+          // blockConcurrencyWhile (the matchmaker fetch is outbound).
+          void this.updateRoomRegistry()
+          logEvent('reconcile_prune_phantoms', {
+            roomCode: this.game.roomCode,
+            pruned: phantoms,
+            kept: [...live],
+            remainingPlayers: Object.keys(this.game.players).length,
+            prunedCount: phantoms.length,
+          })
+        }
       }
     })
   }
@@ -332,6 +373,14 @@ export class GameRoom extends DurableObject<Env> {
       const attachment = ws.deserializeAttachment() as WebSocketAttachment | null
       const playerId = attachment?.playerId
 
+      // Heartbeat bump (Option B): any inbound message proves the WS is
+      // alive. Refresh lastActiveTick so the reap-stale-players check in
+      // tick() knows this player is still reachable. Ping messages are
+      // included — that's the whole point of the 30s ping interval.
+      if (playerId && this.game.players[playerId]) {
+        this.game.players[playerId].lastActiveTick = this.game.tick
+      }
+
       // Diagnostic logging for multiplayer debugging
       debugLog('[WS] Message', {
         type: msg.type,
@@ -389,6 +438,7 @@ export class GameRoom extends DurableObject<Env> {
             invulnerableUntilTick: null,
             kills: 0,
             inputState: { left: false, right: false },
+            lastActiveTick: this.game.tick,
           }
 
           this.game.players[player.id] = player
@@ -789,6 +839,54 @@ export class GameRoom extends DurableObject<Env> {
     if (!activeStatuses.includes(this.game.status)) return
 
     const prevStatus = this.game.status
+
+    // 0. Heartbeat reap (Option B): any player whose lastActiveTick is
+    // > IDLE_STALE_TICKS behind the current tick is presumed phantom
+    // (their WS is dead but Cloudflare's close event hasn't fired). Only
+    // reap during active play — waiting is handled by Option A on wake
+    // and by normal lobby flow; countdown is too short to matter.
+    // Threshold 2400 ticks = 80s at 30Hz ≈ 2 × (PING_INTERVAL + PONG_TIMEOUT)
+    // so we allow two missed pings before treating a player as gone.
+    const IDLE_STALE_TICKS = 2400
+    let reaped = 0
+    for (const id of Object.keys(this.game.players)) {
+      const p = this.game.players[id]
+      if (p.lastActiveTick === null || p.lastActiveTick === undefined) {
+        // Migrated record from pre-heartbeat state — lazy-initialise so
+        // we don't false-reap the first time we see it.
+        p.lastActiveTick = this.game.tick
+        continue
+      }
+      const idle = this.game.tick - p.lastActiveTick
+      if (idle > IDLE_STALE_TICKS) {
+        this.log('reap_idle_player', {
+          playerId: id,
+          playerName: p.name,
+          idleTicks: idle,
+          thresholdTicks: IDLE_STALE_TICKS,
+        })
+        const leaveResult = gameReducer(this.game, { type: 'PLAYER_LEAVE', playerId: id })
+        this.game = leaveResult.state
+        for (const event of leaveResult.events) this.broadcast(event)
+        if (leaveResult.persist) this.persistState()
+        reaped++
+      }
+    }
+    if (reaped > 0) {
+      // Reaping the last player during active play must end the game —
+      // otherwise status=playing + playerCount=0 violates the
+      // playing_with_zero_players invariant and the room never cleans up.
+      if (
+        Object.keys(this.game.players).length === 0 &&
+        activeStatuses.includes(this.game.status)
+      ) {
+        this.log('reap_emptied_room', { wasStatus: this.game.status })
+        this.endGame('defeat')
+        return
+      }
+      // Registry counts changed — refresh matchmaker asynchronously.
+      void this.updateRoomRegistry()
+    }
 
     // 1. Process queued input actions via reducer
     const queuedActions = this.inputQueue

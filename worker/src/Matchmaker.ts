@@ -4,7 +4,19 @@
 import type { DurableObjectState } from '@cloudflare/workers-types'
 import { logEvent } from './logger'
 
-type RoomInfo = { playerCount: number; status: string; updatedAt: number }
+// lastStatusChangeAt is the timestamp of the most recent status
+// transition (waiting → countdown, waiting → playing, etc.). Unlike
+// updatedAt — which refreshes on every /register, including pure
+// playerCount churn — it only moves when productive progress happens.
+// A room that stays in `waiting` forever (because phantoms trap each
+// new victim in an endless "0/N ready" cycle) will have a frozen
+// lastStatusChangeAt and a fresh updatedAt. Option C prunes those.
+type RoomInfo = {
+  playerCount: number
+  status: string
+  updatedAt: number
+  lastStatusChangeAt: number
+}
 
 export class Matchmaker {
   private rooms: Record<string, RoomInfo> = {}
@@ -24,6 +36,12 @@ export class Matchmaker {
         // PBT finding — see state-machine.pbt.test.ts FOUND BUG (LOW).
         for (const [roomCode, info] of Object.entries(stored)) {
           totalRooms++
+          // Backfill lastStatusChangeAt on old persisted records —
+          // added alongside Option C. Use updatedAt as a conservative
+          // proxy; legacy entries aren't aged out immediately.
+          if (typeof info.lastStatusChangeAt !== 'number') {
+            info.lastStatusChangeAt = info.updatedAt ?? Date.now()
+          }
           if (info.status === 'waiting' && info.playerCount > 0 && info.playerCount < 4) {
             this.openRooms.add(roomCode)
             openRooms++
@@ -50,7 +68,19 @@ export class Matchmaker {
         roomCode: string; playerCount: number; status: string
       }
       const wasOpen = this.openRooms.has(roomCode)
-      this.rooms[roomCode] = { playerCount, status, updatedAt: Date.now() }
+      const prev = this.rooms[roomCode]
+      const statusChanged = !prev || prev.status !== status
+      const now = Date.now()
+      this.rooms[roomCode] = {
+        playerCount,
+        status,
+        updatedAt: now,
+        // Refresh only on status transitions (Option C). Plain
+        // playerCount churn — the signature of phantom-trapped rooms
+        // where new victims join/leave without ever readying — must
+        // NOT refresh this, or the progress-stale prune can't fire.
+        lastStatusChangeAt: statusChanged ? now : prev.lastStatusChangeAt,
+      }
 
       // Update openRooms set. Require playerCount > 0 to avoid
       // returning empty rooms from /find — a player who creates a
@@ -106,6 +136,13 @@ export class Matchmaker {
     // roomCode. Stale entries are pruned on-the-fly.
     if (url.pathname === '/find') {
       const STALE_THRESHOLD = 5 * 60 * 1000  // 5 minutes
+      // Option C: a room that's been in `waiting` for more than this
+      // threshold without any status transition is presumed stuck
+      // (e.g. phantom-trapped: new victims cycle through without
+      // readying, keeping updatedAt fresh but lastStatusChangeAt
+      // frozen). Force-prune it from the matchmaker so the next
+      // matchmaker sees a fresh pool.
+      const PROGRESS_STALE_THRESHOLD = 10 * 60 * 1000  // 10 minutes
       const now = Date.now()
 
       // Track pruning reasons so the wide event can explain WHY /find
@@ -115,6 +152,7 @@ export class Matchmaker {
       const scanned = this.openRooms.size
       let prunedMissing = 0
       let prunedStale = 0
+      let prunedProgressStale = 0
       let prunedFiltered = 0
 
       for (const roomCode of this.openRooms) {
@@ -128,6 +166,30 @@ export class Matchmaker {
           delete this.rooms[roomCode]
           this.openRooms.delete(roomCode)
           prunedStale++
+          continue
+        }
+        // Progress-stale: the room IS active (updatedAt recent) but
+        // hasn't made any status progress for >10 min. Phantom-trapped
+        // rooms look exactly like this. Prune the registry entry
+        // entirely — the GameRoom DO remains, but matchmakers stop
+        // sending new victims. Next DO wake will fire Option A's
+        // reconciliation, cleaning the phantoms. Meanwhile, the next
+        // matchmaker gets a fresh room rather than joining the trap.
+        if (
+          info.status === 'waiting' &&
+          now - info.lastStatusChangeAt > PROGRESS_STALE_THRESHOLD
+        ) {
+          logEvent('mm_prune_stale_by_progress', {
+            roomCode,
+            playerCount: info.playerCount,
+            status: info.status,
+            msSinceStatusChange: now - info.lastStatusChangeAt,
+            msSinceLastUpdate: now - info.updatedAt,
+            progressThresholdMs: PROGRESS_STALE_THRESHOLD,
+          })
+          delete this.rooms[roomCode]
+          this.openRooms.delete(roomCode)
+          prunedProgressStale++
           continue
         }
         // Read-through guard — defends against `openRooms` drifting out
@@ -147,6 +209,7 @@ export class Matchmaker {
           openRoomsScanned: scanned,
           prunedMissing,
           prunedStale,
+          prunedProgressStale,
           prunedFiltered,
         })
         return new Response(JSON.stringify({ roomCode }), {
@@ -162,6 +225,7 @@ export class Matchmaker {
         openRoomsScanned: scanned,
         prunedMissing,
         prunedStale,
+        prunedProgressStale,
         prunedFiltered,
         openRoomsRemaining: this.openRooms.size,
       })
