@@ -165,6 +165,18 @@ describe('LobbyScreen', () => {
 
   // ─── Ready ticker ─────────────────────────────────────────────────────────
 
+  it('does NOT render the homepage footer (Cloudflare / GitHub links) — launch-only', () => {
+    // The Cloudflare + GitHub footer is scoped to the homepage
+    // (LaunchScreen) only, per explicit design decision. Verify lobby
+    // does not show them — otherwise the link pair would surface on
+    // every screen and clutter mid-game UI.
+    const { container } = render(
+      <LobbyScreen state={makeState()} playerId="p1" onReady={() => {}} onUnready={() => {}} onStartSolo={() => {}} />,
+    )
+    expect(container.querySelector('a[href*="developers.cloudflare.com"]')).toBeNull()
+    expect(container.querySelector('a[href*="github.com/adewale/vaders"]')).toBeNull()
+  })
+
   it('ticker denominator is current playerCount, NOT room max — prevents the "I need 4 players to play" misread', () => {
     // Regression: the previous ticker read "2/4 ready" using the room cap
     // as the denominator, so a player who matchmaked alone saw "1/4 ready

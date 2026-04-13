@@ -450,6 +450,49 @@ export function LaunchScreen({
           </span>
           <span style={{ color: COLORS.ui.dim, fontSize: 14 }}>1-4 Players</span>
         </div>
+
+        {/*
+          Homepage-only footer: source-code + platform credit. Rendered
+          only on LaunchScreen by explicit design — lobby, game, and
+          game-over screens keep their UI uncluttered. Small font
+          (`fontSize: 11`) + modern sans-serif via system-ui to match
+          the convention of minimal platform credits (the Cloudflare
+          link style follows the same convention their free-tier
+          subdomain banner uses). pointerEvents scoped via standard
+          anchor behaviour; target=_blank opens externally; rel
+          noopener prevents the new tab from controlling this tab.
+        */}
+        <div
+          data-testid="homepage-footer"
+          style={{
+            position: 'absolute',
+            bottom: 8,
+            left: 0,
+            right: 0,
+            textAlign: 'center',
+            fontFamily: 'system-ui, -apple-system, sans-serif',
+            fontSize: 11,
+            color: 'rgba(255, 255, 255, 0.45)',
+            letterSpacing: 0,
+          }}
+        >
+          <a
+            href="https://github.com/adewale/vaders"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: 'inherit', textDecoration: 'none', marginRight: 16 }}
+          >
+            GitHub
+          </a>
+          <a
+            href="https://developers.cloudflare.com/"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: 'inherit', textDecoration: 'none' }}
+          >
+            Built on the Cloudflare Developer Platform
+          </a>
+        </div>
       </div>
     </MenuBackground>
   )

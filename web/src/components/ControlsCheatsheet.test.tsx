@@ -43,6 +43,42 @@ describe('ControlsCheatsheet', () => {
     expect(text).toMatch(/menu/i)
   })
 
+  it('GAME section does not claim ENTER does anything during gameplay', () => {
+    // Regression: the cheatsheet advertised `ENTER Ready` under GAME, but
+    // Enter is a Lobby action (ready toggle) — once the game is playing
+    // it's a no-op. Listing it under GAME misled users.
+    render(<ControlsCheatsheet />)
+    fireEvent.keyDown(window, { key: '?' })
+    const root = screen.getByTestId('controls-cheatsheet')
+    const sections = Array.from(root.querySelectorAll('h3'))
+    const gameSection = sections.find((h) => h.textContent === 'GAME')
+    expect(gameSection).toBeDefined()
+    // Collect all rows inside the GAME section only.
+    const gameTable = gameSection!.parentElement!.querySelector('table')!
+    const keyCells = Array.from(gameTable.querySelectorAll('td:first-child')).map(
+      (td) => td.textContent?.trim(),
+    )
+    // ENTER must not appear as a GAME action.
+    expect(keyCells).not.toContain('ENTER')
+  })
+
+  it('X is context-labelled — Forfeit in-game, Share Score on game-over', () => {
+    // Regression: cheatsheet listed "X Forfeit" under GAME only. On the
+    // game-over screen X opens the share dialog (different behaviour),
+    // so the single "Forfeit" label misrepresented context. Both are
+    // now listed with their respective contexts so the doc matches
+    // reality on every screen.
+    render(<ControlsCheatsheet />)
+    fireEvent.keyDown(window, { key: '?' })
+    const root = screen.getByTestId('controls-cheatsheet')
+    const allCellText = Array.from(root.querySelectorAll('td')).map(
+      (td) => td.textContent?.trim() ?? '',
+    )
+    // Both labels should be present somewhere in the modal.
+    expect(allCellText.some((t) => /forfeit/i.test(t))).toBe(true)
+    expect(allCellText.some((t) => /share score/i.test(t))).toBe(true)
+  })
+
   it('lists TUI-aligned menu + audio shortcuts (1-4, arrows, N music)', () => {
     render(<ControlsCheatsheet />)
     fireEvent.keyDown(window, { key: '?' })

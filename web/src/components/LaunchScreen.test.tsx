@@ -141,6 +141,27 @@ describe('LaunchScreen TUI-aligned keyboard shortcuts', () => {
     expect(text).toMatch(/([0-9a-f]{7,40}|dev)(-dirty)?/)
   })
 
+  it('homepage footer links to the GitHub repo (new tab, safe rel)', () => {
+    const { container } = render(
+      <LaunchScreen onStartSolo={noop} onCreateRoom={noop} onJoinRoom={noop} onMatchmake={noop} />,
+    )
+    const githubLink = container.querySelector('a[href*="github.com/adewale/vaders"]') as HTMLAnchorElement | null
+    expect(githubLink).not.toBeNull()
+    expect(githubLink!.getAttribute('target')).toBe('_blank')
+    expect(githubLink!.getAttribute('rel') ?? '').toMatch(/noopener/)
+  })
+
+  it('homepage footer links to the Cloudflare Developer Platform', () => {
+    const { container } = render(
+      <LaunchScreen onStartSolo={noop} onCreateRoom={noop} onJoinRoom={noop} onMatchmake={noop} />,
+    )
+    const cfLink = container.querySelector('a[href*="developers.cloudflare.com"]') as HTMLAnchorElement | null
+    expect(cfLink).not.toBeNull()
+    expect((cfLink!.textContent ?? '').toLowerCase()).toContain('cloudflare')
+    expect(cfLink!.getAttribute('target')).toBe('_blank')
+    expect(cfLink!.getAttribute('rel') ?? '').toMatch(/noopener/)
+  })
+
   it('M/N do not activate when typing a room code (input focused)', () => {
     let toggled = 0
     const { container } = render(

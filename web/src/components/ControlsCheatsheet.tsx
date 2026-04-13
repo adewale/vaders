@@ -13,12 +13,28 @@ const SECTIONS: ControlSection[] = [
     ],
   },
   {
+    title: 'LOBBY',
+    rows: [
+      ['ENTER', 'Ready / Unready'],
+      ['S', 'Start Solo (when alone)'],
+      ['ESC', 'Leave to menu'],
+    ],
+  },
+  {
     title: 'GAME',
     rows: [
       ['← →', 'Move'],
       ['SPACE', 'Shoot'],
-      ['ENTER', 'Ready'],
       ['X', 'Forfeit'],
+      ['ESC / Q', 'Quit to menu'],
+    ],
+  },
+  {
+    title: 'GAME OVER',
+    rows: [
+      ['R / ENTER', 'Play again'],
+      ['X', 'Share score'],
+      ['Q / ESC', 'Quit to menu'],
     ],
   },
   {

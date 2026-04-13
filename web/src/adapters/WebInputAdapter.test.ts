@@ -187,4 +187,56 @@ describe('WebInputAdapter', () => {
     expect(callback).toHaveBeenNthCalledWith(4, 'ready', 'down')
     expect(callback).toHaveBeenNthCalledWith(5, 'forfeit', 'down')
   })
+
+  it('maps N (music mute) to VadersKey mute-music', () => {
+    // Regression: previously `N` was handled only on the LaunchScreen via
+    // `onToggleMusicMute`. The in-game input adapter had no `n` mapping, so
+    // pressing N during lobby / gameplay / game-over was a no-op — despite
+    // every HintsBar in the project advertising `[N] Mute Music`. Doc lie.
+    const callback = vi.fn()
+    adapter.onKey(callback)
+
+    target.dispatchEvent(new KeyboardEvent('keydown', { key: 'n' }))
+
+    expect(callback).toHaveBeenCalledWith('mute-music', 'down')
+  })
+
+  it('accepts uppercase letter keys (Shift+letter) equivalently to lowercase', () => {
+    // Regression: KEY_MAP was lowercase-only, so Shift+M (which produces
+    // `key: 'M'`) fell through to "unmapped" and did nothing. Since every
+    // doc surface labels these keys in uppercase, holding Shift made the
+    // documentation lie. Fix: normalise single-character keys to
+    // lowercase before lookup.
+    const callback = vi.fn()
+    adapter.onKey(callback)
+
+    target.dispatchEvent(new KeyboardEvent('keydown', { key: 'M' }))
+    target.dispatchEvent(new KeyboardEvent('keydown', { key: 'N' }))
+    target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Q' }))
+    target.dispatchEvent(new KeyboardEvent('keydown', { key: 'R' }))
+    target.dispatchEvent(new KeyboardEvent('keydown', { key: 'S' }))
+    target.dispatchEvent(new KeyboardEvent('keydown', { key: 'X' }))
+
+    expect(callback).toHaveBeenNthCalledWith(1, 'mute', 'down')
+    expect(callback).toHaveBeenNthCalledWith(2, 'mute-music', 'down')
+    expect(callback).toHaveBeenNthCalledWith(3, 'quit', 'down')
+    expect(callback).toHaveBeenNthCalledWith(4, 'ready', 'down')
+    expect(callback).toHaveBeenNthCalledWith(5, 'solo', 'down')
+    expect(callback).toHaveBeenNthCalledWith(6, 'forfeit', 'down')
+  })
+
+  it('does NOT case-normalise non-letter keys (Arrow* / Enter / Escape stay exact)', () => {
+    // Negative guard on the case-insensitive normalisation: only
+    // single-character string keys are lowercased. Special keys like
+    // `ArrowLeft` and `Escape` must match exactly so `arrowleft` (which
+    // no browser emits) doesn't accidentally trigger anything.
+    const callback = vi.fn()
+    adapter.onKey(callback)
+
+    target.dispatchEvent(new KeyboardEvent('keydown', { key: 'arrowleft' }))
+    target.dispatchEvent(new KeyboardEvent('keydown', { key: 'escape' }))
+    target.dispatchEvent(new KeyboardEvent('keydown', { key: 'enter' }))
+
+    expect(callback).not.toHaveBeenCalled()
+  })
 })

@@ -365,6 +365,14 @@ function GameContainer({
           audio.setMuted(!audio.isMuted())
           return
         }
+        if (key === 'mute-music') {
+          // Wired in every post-launch screen (Lobby / Game / GameOver)
+          // so `[N] Mute Music` in HintsBars reflects reality. LaunchScreen
+          // has its own handler via the `onToggleMusicMute` prop.
+          const audio = getAudio()
+          audio.setMusicMuted(!audio.isMusicMuted())
+          return
+        }
       }
 
       // Movement keys: feed to held-keys tracker
