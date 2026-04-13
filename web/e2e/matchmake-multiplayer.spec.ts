@@ -49,6 +49,124 @@ test.describe('Matchmake multiplayer', () => {
   test('matchmake 4 players -> game starts with 4', async ({ browser }) => {
     await runMatchmakeTest(browser, 4)
   })
+
+  /**
+   * Step-by-step walkthrough of the 8-step human flow for a 2-player
+   * matchmaking game. Each `test.step()` block corresponds to one
+   * action a human player would take. A failure here names the exact
+   * step that broke — which maps 1:1 to the step a human would be
+   * stuck on.
+   *
+   * Lives in this file (not a sibling) so it shares the same serial
+   * describe and doesn't collide with the N-player tests above; the
+   * global Matchmaker DO can't be fragmented across spec files.
+   */
+  test('Alice and Bob get a successful 2-player matchmaking game via the 8-step flow', async ({ browser }) => {
+    const aliceCtx = await browser.newContext()
+    const bobCtx = await browser.newContext()
+    const alice = await aliceCtx.newPage()
+    const bob = await bobCtx.newPage()
+    let roomCode: string | null = null
+
+    try {
+      await test.step('Step 1 — Alice opens the URL and the launch screen loads', async () => {
+        await alice.goto('/')
+        await expect(alice.getByTestId('vaders-logo')).toBeVisible()
+        await expect(alice.locator('[data-testid="homepage-footer"]').first()).toBeVisible()
+      })
+
+      await test.step('Step 2 — Alice presses 4 → lobby opens, she is alone, ticker says "Waiting for another player"', async () => {
+        await alice.keyboard.press('4')
+        await alice.waitForURL(/\/room\/[A-Z0-9]{6}(?:\/.*)?$/, { timeout: 10000 })
+        const match = alice.url().match(/\/room\/([A-Z0-9]{6})/)
+        expect(match, 'room code should appear in Alice\'s URL').not.toBeNull()
+        roomCode = match![1]
+
+        const ticker = alice.getByTestId('lobby-ready-ticker')
+        await expect(ticker).toBeVisible({ timeout: 10000 })
+        await expect(ticker).toContainText(/waiting for another player/i)
+        // Regression guard on the "N/4 ready" misread — denominator
+        // must NOT claim 4 players are needed.
+        await expect(ticker).not.toContainText(/\d\/\d ready/)
+        await expect(alice.getByTestId('lobby-player-row')).toHaveCount(1)
+      })
+
+      await test.step('Step 3 — Bob opens the URL → launch screen loads', async () => {
+        await bob.goto('/')
+        await expect(bob.getByTestId('vaders-logo')).toBeVisible()
+      })
+
+      await test.step('Step 4 — Bob presses 4 → matchmaker hands him Alice\'s room → both see 2 players in distinct slot colours', async () => {
+        await bob.keyboard.press('4')
+        await bob.waitForURL(/\/room\/[A-Z0-9]{6}(?:\/.*)?$/, { timeout: 10000 })
+        const bobMatch = bob.url().match(/\/room\/([A-Z0-9]{6})/)
+        expect(bobMatch, 'room code should appear in Bob\'s URL').not.toBeNull()
+        // Critical: Bob converged on Alice's room (not a freshly created
+        // one). If this fails, the matchmaker's /find returned null
+        // instead of Alice's roomCode.
+        expect(bobMatch![1]).toBe(roomCode)
+
+        await expect(alice.getByTestId('lobby-player-row')).toHaveCount(2, { timeout: 10000 })
+        await expect(bob.getByTestId('lobby-player-row')).toHaveCount(2, { timeout: 10000 })
+
+        const aliceSlots = await alice
+          .getByTestId('lobby-player-row')
+          .evaluateAll((rows) => rows.map((r) => r.getAttribute('data-slot')))
+        const bobSlots = await bob
+          .getByTestId('lobby-player-row')
+          .evaluateAll((rows) => rows.map((r) => r.getAttribute('data-slot')))
+        expect(new Set(aliceSlots).size, 'both players have distinct slots').toBe(2)
+        expect(new Set(bobSlots)).toEqual(new Set(aliceSlots))
+      })
+
+      await test.step('Step 5 — Both see "0/2 ready — starting when all ready"', async () => {
+        await expect(alice.getByTestId('lobby-ready-ticker')).toContainText('0/2 ready', { timeout: 5000 })
+        await expect(bob.getByTestId('lobby-ready-ticker')).toContainText('0/2 ready', { timeout: 5000 })
+        await expect(alice.getByTestId('lobby-ready-ticker')).not.toContainText('/4 ready')
+      })
+
+      await test.step('Step 6 — Alice presses Enter → both see "1/2 ready"', async () => {
+        await alice.keyboard.press('Enter')
+        await expect(alice.getByTestId('lobby-ready-ticker')).toContainText('1/2 ready', { timeout: 5000 })
+        await expect(bob.getByTestId('lobby-ready-ticker')).toContainText('1/2 ready', { timeout: 5000 })
+      })
+
+      await test.step('Step 7 — Bob presses Enter → countdown starts', async () => {
+        await bob.keyboard.press('Enter')
+        // Countdown ticker OR game-canvas (fast-transition race) is fine.
+        await expect(
+          alice
+            .getByTestId('lobby-ready-ticker')
+            .filter({ hasText: /starting in \d/i })
+            .or(alice.getByTestId('game-canvas')),
+        ).toBeVisible({ timeout: 5000 })
+        await expect(
+          bob
+            .getByTestId('lobby-ready-ticker')
+            .filter({ hasText: /starting in \d/i })
+            .or(bob.getByTestId('game-canvas')),
+        ).toBeVisible({ timeout: 5000 })
+      })
+
+      await test.step('Step 8 — Game canvas visible for both; gameplay keys accepted without crashing', async () => {
+        await expect(alice.getByTestId('game-canvas')).toBeVisible({ timeout: 10000 })
+        await expect(bob.getByTestId('game-canvas')).toBeVisible({ timeout: 10000 })
+
+        await alice.keyboard.press('Space')
+        await bob.keyboard.press('ArrowLeft')
+        await alice.keyboard.press('ArrowRight')
+
+        // No ErrorBoundary fallback. No error toast. No crash.
+        await expect(alice.getByRole('button', { name: /reload/i })).not.toBeVisible()
+        await expect(bob.getByRole('button', { name: /reload/i })).not.toBeVisible()
+        await expect(alice.getByTestId('in-game-error-toast')).not.toBeVisible()
+        await expect(bob.getByTestId('in-game-error-toast')).not.toBeVisible()
+      })
+    } finally {
+      await aliceCtx.close()
+      await bobCtx.close()
+    }
+  })
 })
 
 async function runMatchmakeTest(browser: import('@playwright/test').Browser, n: 2 | 3 | 4) {
