@@ -15,6 +15,7 @@ import { PIXEL_ART, SPRITE_SIZE } from '../../../client-core/src/sprites/bitmaps
 import { COLORS, GRADIENT_COLORS } from '../../../client-core/src/sprites/colors'
 import { getUFOColor } from '../../../client-core/src/effects/colorCycling'
 import { StarfieldSystem } from '../../../client-core/src/animation/starfield'
+import { ENABLE_STARFIELD } from '../../../client-core/src/config/featureFlags'
 import { ConfettiSystem } from '../../../client-core/src/animation/confetti'
 import { easeOutQuad } from '../../../client-core/src/animation/easing'
 // DissolveSystem removed from web renderer — replaced by ExplosionSystem which
@@ -498,20 +499,24 @@ export function buildDrawCommands(
     }
   }
 
-  // 1b. Starfield background — size reflects depth (parallax via brightness)
-  const stars = starfield.getCells(state.tick)
-  for (const star of stars) {
-    const size = starSizeFromColor(star.color)
-    commands.push({
-      type: 'rect',
-      x: star.x * CELL_W,
-      y: star.y * CELL_H,
-      width: size,
-      height: size,
-      fill: star.color,
-      isStar: true,
-      kind: 'star',
-    })
+  // 1b. Starfield background — size reflects depth (parallax via brightness).
+  // Gated on the shared feature flag so TUI and web can enable/disable
+  // atmospheric background together (prevents cross-frontend drift).
+  if (ENABLE_STARFIELD) {
+    const stars = starfield.getCells(state.tick)
+    for (const star of stars) {
+      const size = starSizeFromColor(star.color)
+      commands.push({
+        type: 'rect',
+        x: star.x * CELL_W,
+        y: star.y * CELL_H,
+        width: size,
+        height: size,
+        fill: star.color,
+        isStar: true,
+        kind: 'star',
+      })
+    }
   }
 
   // 1b-bis. Shooting stars — periodic diagonal streaks with fading trails.

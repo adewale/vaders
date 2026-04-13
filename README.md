@@ -33,6 +33,12 @@ bun run vaders
 
 Requires [Bun](https://bun.sh), a terminal at least 120×36, and macOS (`afplay`) or Linux (`aplay`) for audio.
 
+### Browser support
+
+The web build targets **modern evergreen browsers**: the latest two major releases of Chrome, Firefox, Safari, and Edge. It uses ES2022, HTML5 Canvas, Web Audio API, WebSockets, and `crypto.randomUUID`. Older browsers are not supported.
+
+**Vaders is a keyboard-only game.** Mobile and touch input are explicitly out of scope — see `web/src/components/MobileGate.tsx` for the detection and message.
+
 ### Cross-frontend coop
 
 TUI and browser players can share the same room. The server is authoritative at 30 Hz and both frontends render the same game state.

@@ -63,7 +63,15 @@ export class Matchmaker {
       return new Response('OK')
     }
 
-    // GET /find - Find an open room
+    // GET /find - Find an open room.
+    //
+    // Read-through verification: openRooms is maintained on every
+    // /register, but it's possible (for instance, on cold-start race with
+    // an in-flight update, or a register/unregister out-of-order) for
+    // the set to contain a room whose current info no longer satisfies
+    // the open criteria. Rather than trust set-membership, we re-verify
+    // status + playerCount against this.rooms before returning the
+    // roomCode. Stale entries are pruned on-the-fly.
     if (url.pathname === '/find') {
       const STALE_THRESHOLD = 5 * 60 * 1000  // 5 minutes
       const now = Date.now()
@@ -76,6 +84,14 @@ export class Matchmaker {
         }
         if (now - info.updatedAt > STALE_THRESHOLD) {
           delete this.rooms[roomCode]
+          this.openRooms.delete(roomCode)
+          continue
+        }
+        // Read-through guard — defends against `openRooms` drifting out
+        // of sync with `rooms`. A room that started in `waiting` and
+        // flipped to `countdown`/`playing` via a re-register that came
+        // in between set updates would otherwise be briefly findable.
+        if (info.status !== 'waiting' || info.playerCount <= 0 || info.playerCount >= 4) {
           this.openRooms.delete(roomCode)
           continue
         }

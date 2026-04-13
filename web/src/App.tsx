@@ -6,6 +6,9 @@ import { GameOverScreen } from './components/GameOverScreen'
 import { LoadingSpinner } from './components/LoadingSpinner'
 import { PauseOverlay } from './components/PauseOverlay'
 import { ControlsCheatsheet } from './components/ControlsCheatsheet'
+import { ErrorBoundary } from './components/ErrorBoundary'
+import { ErrorToast } from './components/ErrorToast'
+import { PlayerDepartureNotice } from './components/PlayerDepartureNotice'
 import { useGameConnection } from '../../client-core/src/connection/useGameConnection'
 import { detectAudioTriggers } from '../../client-core/src/audio/triggers'
 import { createHeldKeysTracker } from '../../client-core/src/input/heldKeys'
@@ -19,7 +22,20 @@ import type { VadersKey as HeldVadersKey } from '../../client-core/src/input/typ
 
 type AppScreen = 'launch' | 'game'
 
+/**
+ * Top-level export. Wraps `AppInner` in a catastrophic error boundary so a
+ * crash in any screen/container that escapes the per-screen boundaries still
+ * shows a reload UI instead of a blank page.
+ */
 export function App() {
+  return (
+    <ErrorBoundary name="App">
+      <AppInner />
+    </ErrorBoundary>
+  )
+}
+
+function AppInner() {
   const route = useRoute()
   const [screen, setScreen] = useState<AppScreen>('launch')
   const [serverUrl, setServerUrl] = useState<string>('')
@@ -178,7 +194,7 @@ export function App() {
 
   if (screen === 'launch') {
     return (
-      <>
+      <ErrorBoundary name="Launch">
         <LaunchScreen
           onStartSolo={handleStartSolo}
           onCreateRoom={handleCreateRoom}
@@ -206,12 +222,12 @@ export function App() {
           error={launchError}
         />
         <ControlsCheatsheet />
-      </>
+      </ErrorBoundary>
     )
   }
 
   return (
-    <>
+    <ErrorBoundary name="Game">
       <GameContainer
         key={serverUrl}
         serverUrl={serverUrl}
@@ -224,7 +240,7 @@ export function App() {
       />
       <PauseOverlay />
       <ControlsCheatsheet />
-    </>
+    </ErrorBoundary>
   )
 }
 
@@ -527,23 +543,48 @@ function GameContainer({
   // At this point serverState is non-null
   const state = serverState!
 
+  // Shared overlays rendered above every in-game screen. The ErrorToast
+  // subscribes to `useGameConnection().error`, which is the string form of
+  // server `{ type: 'error' }` messages (encoded as `${code}: ${message}`).
+  // The PlayerDepartureNotice watches prev/curr player maps. Both sit above
+  // the screen content via `position: fixed` and high z-index.
+  const overlays = (
+    <>
+      <ErrorToast message={error} />
+      <PlayerDepartureNotice prevState={prevState} state={state} />
+    </>
+  )
+
   if (state.status === 'waiting') {
     return (
-      <LobbyScreen
-        state={state}
-        playerId={playerId}
-        onReady={() => send({ type: 'ready' })}
-        onUnready={() => send({ type: 'unready' })}
-        onStartSolo={() => send({ type: 'start_solo' })}
-      />
+      <ErrorBoundary name="Lobby">
+        <LobbyScreen
+          state={state}
+          playerId={playerId}
+          onReady={() => send({ type: 'ready' })}
+          onUnready={() => send({ type: 'unready' })}
+          onStartSolo={() => send({ type: 'start_solo' })}
+        />
+        {overlays}
+      </ErrorBoundary>
     )
   }
 
   if (state.status === 'game_over') {
-    return <GameOverScreen state={state} playerId={playerId} onReplay={onReplay} onQuit={onBackToLaunch} />
+    return (
+      <ErrorBoundary name="GameOver">
+        <GameOverScreen state={state} playerId={playerId} onReplay={onReplay} onQuit={onBackToLaunch} />
+        {overlays}
+      </ErrorBoundary>
+    )
   }
 
   // countdown, wipe_exit, wipe_hold, wipe_reveal, playing
   const renderState = getRenderState() ?? state
-  return <GameScreen state={renderState} playerId={playerId} prevState={prevState} />
+  return (
+    <ErrorBoundary name="Game">
+      <GameScreen state={renderState} playerId={playerId} prevState={prevState} />
+      {overlays}
+    </ErrorBoundary>
+  )
 }

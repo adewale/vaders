@@ -181,4 +181,49 @@ describe('navigateTo', () => {
     expect(replaceSpy).toHaveBeenCalledTimes(1)
     expect(pushSpy).not.toHaveBeenCalled()
   })
+
+  it('PBT: navigating to the current URL never grows the history stack', async () => {
+    // The auto-replace behaviour is property-shaped: for ANY path, if
+    // you're already at that path and navigate to it again, push must
+    // not fire. Previously only a handful of example tests covered
+    // this; a PBT over arbitrary paths catches the class.
+    const fc = await import('fast-check')
+    await fc.assert(
+      fc.asyncProperty(
+        fc.stringMatching(/^\/(?:room\/[A-Z0-9]{6}|solo|\?matchmake=true|)?$/),
+        async (path) => {
+          window.history.replaceState(null, '', path || '/')
+          pushSpy.mockClear()
+          replaceSpy.mockClear()
+          navigateTo(path || '/')
+          // Same URL → zero pushes, exactly one replace.
+          return pushSpy.mock.calls.length === 0 && replaceSpy.mock.calls.length === 1
+        },
+      ),
+      { numRuns: 40 },
+    )
+  })
+
+  it('PBT: navigating to a DIFFERENT URL always pushes (back-stack grows by one)', async () => {
+    // Mirror property: if the target differs from the current URL, we
+    // push. Guards against an over-eager auto-replace that would swallow
+    // genuine forward navigation.
+    const fc = await import('fast-check')
+    await fc.assert(
+      fc.asyncProperty(
+        fc.stringMatching(/^\/[a-z]{3,6}$/),
+        fc.stringMatching(/^\/[a-z]{3,6}$/),
+        async (from, to) => {
+          if (from === to) return true // same-URL case covered by sibling PBT
+          window.history.replaceState(null, '', from)
+          pushSpy.mockClear()
+          replaceSpy.mockClear()
+          navigateTo(to)
+          // Different URL, default push path.
+          return pushSpy.mock.calls.length === 1 && replaceSpy.mock.calls.length === 0
+        },
+      ),
+      { numRuns: 40 },
+    )
+  })
 })
