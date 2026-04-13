@@ -2,6 +2,21 @@
 
 All notable changes to Vaders are documented in this file.
 
+## [1.1.1] — 2026-04-13
+
+### Fixed
+
+- **Phantom players in matchmaking** (reproduced in production as room `XPJZ7K`) — a `GameRoom` rehydrated from SQL after eviction kept `state.players` entries whose WebSockets had died, trapping every subsequent matchmaker in "0/N ready" forever. Shipped three orthogonal mitigations as defence-in-depth; see `Lessons_learned.md` §20 and `docs/TODO.md` for the full postmortem:
+  - **A. Reconcile on wake** — `GameRoom` constructor now prunes `state.players` against `ctx.getWebSockets()` on every rehydrate. Emits `reconcile_prune_phantoms` wide event.
+  - **B. Heartbeat timeout** — new `Player.lastActiveTick` refreshed on every inbound message; the game tick reaps any player idle > 2400 ticks (~80 s at 30 Hz) during `playing` / `wipe_*` statuses. Emits `reap_idle_player` / `reap_emptied_room` wide events.
+  - **C. Progress-stale matchmaker prune** — `Matchmaker` tracks `lastStatusChangeAt` separately from `updatedAt`. `/find` prunes any `waiting` room whose `lastStatusChangeAt` is > 10 min old even when `updatedAt` is fresh (the signature of a phantom-trapped room cycling through victims). Emits `mm_prune_stale_by_progress` wide event.
+
+### Changed
+
+- `shared/types.ts` — added optional `lastActiveTick: number | null` to `Player`. Backward-compatible: `migrateGameState` lazy-initialises legacy records.
+- `worker/src/Matchmaker.ts` — `RoomInfo` gains `lastStatusChangeAt: number`. Legacy persisted records backfill on rehydrate using `updatedAt` as a conservative proxy.
+- **Launch screen footer** — replaced the abbreviated "GitHub" link with the explicit URL `github.com/adewale/vaders`, and moved "Built on the Cloudflare Developer Platform" onto its own line underneath.
+
 ## [1.1.0] — 2026-04-12
 
 ### Added

@@ -1273,3 +1273,167 @@ The session's most productive rhythm:
 The audit step is the force multiplier. A 2-minute sub-agent sweep of "where else do we have this shape?" routinely finds 5–15 additional instances. Without that step, each bug gets fixed individually and the class drifts until the next user report.
 
 **The anti-pattern**: user reports bug → fix that bug → close ticket → repeat. No class-level enforcement, no contract test, no audit. The same class reappears in a different surface three commits later and nobody connects the two reports.
+
+---
+
+## 20. Phantom Players: When Hibernation Separates State From Reality
+
+### The bug
+
+Production room `XPJZ7K` (observed 2026-04-13 via `wrangler tail`) had 3 phantom players — entries in `state.players` whose WebSockets were dead. The Matchmaker kept handing it out as the only open room. Every new matchmaker joined as player 4/4, saw "0/4 ready", waited forever because the phantoms never readied, then closed the tab — which dropped playerCount back to 3, re-opened the room, and trapped the next victim. The bug had existed since the initial commit (c222282, 2026-01-24) and affected TUI and web users equally because it's purely server-side.
+
+### Why state and reality drift
+
+A Cloudflare Durable Object persists two layers of information:
+
+| Layer | Where it lives | Survives hibernation? | Survives eviction? |
+|---|---|---|---|
+| Game state | SQL storage | Yes | Yes |
+| WebSocket set | `ctx.getWebSockets()` | Yes (hibernation-only) | No |
+
+On a full eviction — process migration, memory pressure, etc. — the DO is reconstructed from SQL but the WebSocket set comes back empty. Cloudflare will re-attach WSes whose underlying TCP connection is still alive, but if any of them were force-killed without a FIN (phone died, browser hard-close, laptop lid shut on Wi-Fi), their entries in `state.players` persist forever with no living socket.
+
+The Cloudflare docs ([Rules of Durable Objects](https://developers.cloudflare.com/durable-objects/best-practices/rules-of-durable-objects/)) imply this — `ctx.getWebSockets()` is described as authoritative for attached connections — but no rule says "reconcile your per-player state against it on wake." A careful reader infers it. Nobody else does. The Keyboardia [LESSONS-LEARNED.md](https://github.com/adewale/keyboardia/blob/main/docs/LESSONS-LEARNED.md) is more explicit — Lesson 13 "WebSocket Connection Storm — Phantom Players" describes this exact shape, and Lesson 3 "DO Hibernation Breaks setTimeout" establishes the principle that anything you assume lives in memory across hibernation is fair game to disappear.
+
+### Three compounding failures
+
+1. **No reconciliation on DO wake.** `GameRoom` constructor loaded `state.players` from SQL without cross-checking `ctx.getWebSockets()`.
+2. **No server-side heartbeat timeout.** The only heartbeat was client-initiated (`ping` → `pong`). A dead client that stopped pinging kept its slot indefinitely while the DO stayed alive.
+3. **Cloudflare close-event lag.** Close events usually fire promptly (`1006 / wasClean=false` was observed in logs), but force-killed clients without TCP FIN rely on the underlying TCP timeout — minutes, not seconds. That's the window where phantoms are born.
+
+(1) is the source of cross-eviction phantoms. (2) is the source of in-session phantoms. (3) is the timing window that creates them.
+
+### Fix: defence-in-depth (A + B + C)
+
+We shipped all three because they're orthogonal — each catches a different subset of the phantom-producing paths — and the code cost was low.
+
+**A. Reconcile on wake** (`worker/src/GameRoom.ts` constructor, ~15 LoC):
+
+```typescript
+if (rows.length > 0) {
+  this.game = migrateGameState(JSON.parse(rows[0].data))
+  this.nextEntityId = rows[0].next_entity_id
+
+  const live = new Set<string>()
+  for (const ws of this.ctx.getWebSockets()) {
+    const a = ws.deserializeAttachment() as WebSocketAttachment | null
+    if (a?.playerId) live.add(a.playerId)
+  }
+  const phantoms = Object.keys(this.game.players).filter(id => !live.has(id))
+  if (phantoms.length > 0) {
+    for (const id of phantoms) delete this.game.players[id]
+    this.game.readyPlayerIds = this.game.readyPlayerIds.filter(id => id in this.game!.players)
+    if (this.game.status === 'countdown' && Object.keys(this.game.players).length < 2) {
+      this.game.status = 'waiting'
+      this.game.countdownRemaining = null
+    }
+    this.persistState()
+    void this.updateRoomRegistry()
+    logEvent('reconcile_prune_phantoms', { roomCode, pruned: phantoms, kept: [...live] })
+  }
+}
+```
+
+Low risk — runs inside the existing `blockConcurrencyWhile`, no new race surface. Closes the cross-eviction path.
+
+**B. Heartbeat timeout** (`shared/types.ts` + `worker/src/GameRoom.ts`):
+
+```typescript
+// shared/types.ts
+interface Player {
+  // ...
+  lastActiveTick: number | null   // refreshed on every webSocketMessage
+}
+
+// GameRoom.ts webSocketMessage, after playerId extraction:
+if (playerId && this.game.players[playerId]) {
+  this.game.players[playerId].lastActiveTick = this.game.tick
+}
+
+// GameRoom.ts tick(), during active statuses only:
+const IDLE_STALE_TICKS = 2400  // 80s at 30Hz ≈ 2× (PING_INTERVAL + PONG_TIMEOUT)
+for (const id of Object.keys(this.game.players)) {
+  const p = this.game.players[id]
+  if (p.lastActiveTick === null) { p.lastActiveTick = this.game.tick; continue }
+  if (this.game.tick - p.lastActiveTick > IDLE_STALE_TICKS) {
+    // reap via PLAYER_LEAVE reducer — cleans up bullets too
+    this.game = gameReducer(this.game, { type: 'PLAYER_LEAVE', playerId: id }).state
+  }
+}
+```
+
+Key tuning: the threshold must be ≥ 2× (client `PING_INTERVAL + PONG_TIMEOUT`). Too tight and one dropped ping reaps a healthy player; too loose and phantoms linger longer than needed. 2400 ticks = 80s for our 30s ping interval felt right.
+
+Subtle constraint — reap only during active statuses (`playing`, `wipe_*`). Waiting lobbies legitimately have idle players: someone in a lobby for 5 minutes is not a phantom, they're reading Slack.
+
+Another subtle constraint — if reaping drops playerCount to 0 during `playing`, call `endGame('defeat')` explicitly. Otherwise `status=playing && playerCount=0` violates the `playing_with_zero_players` invariant forever.
+
+**C. Progress-stale matchmaker prune** (`worker/src/Matchmaker.ts`):
+
+```typescript
+type RoomInfo = {
+  playerCount: number
+  status: string
+  updatedAt: number                // refreshes on every /register (inc. playerCount churn)
+  lastStatusChangeAt: number       // refreshes ONLY on status transitions
+}
+
+// On /register:
+const prev = this.rooms[roomCode]
+const statusChanged = !prev || prev.status !== status
+this.rooms[roomCode] = {
+  playerCount,
+  status,
+  updatedAt: now,
+  lastStatusChangeAt: statusChanged ? now : prev!.lastStatusChangeAt,
+}
+
+// On /find, after the existing 5-min STALE_THRESHOLD check:
+const PROGRESS_STALE_THRESHOLD = 10 * 60 * 1000
+if (info.status === 'waiting' && now - info.lastStatusChangeAt > PROGRESS_STALE_THRESHOLD) {
+  delete this.rooms[roomCode]
+  this.openRooms.delete(roomCode)
+  continue
+}
+```
+
+The insight: a phantom-trapped room's `updatedAt` stays fresh — each new victim refreshes it on join — but `lastStatusChangeAt` freezes at the moment the room entered `waiting`. Tracking them separately gives the matchmaker a way to recognise "churning through victims without ever making progress."
+
+### Why all three and not just A
+
+A alone covers the production bug cleanly. B and C are cheap insurance against failure modes we haven't observed yet but know are structurally possible:
+
+- **A alone, B+C missing:** if a player's tab dies and the DO stays alive for hours (plausible during peak traffic), the phantom sits in state until the next eviction. No user-visible symptom unless someone joins the same room.
+- **B added:** phantoms die within 80s of their last message, regardless of DO lifecycle.
+- **C added:** even if A and B fail for some unforeseen reason, the matchmaker stops feeding victims to a stuck room after 10 minutes of no status progress.
+
+Layered defences don't duplicate work — they each close a different hole. The combined marginal cost was ~60 lines of production code and ~300 lines of regression tests.
+
+### Instrumentation that made the diagnosis possible
+
+The phantom state would have been undebuggable with `console.log` breadcrumbs. It needed the wide-event pipeline from §16:
+
+- `mm_rehydrate { totalRoomsStored: 74, openRoomsRebuilt: 1 }` — first hint that the matchmaker was working from a narrow slice of stored rooms.
+- `mm_find_result { result: "hit", roomCode: "XPJZ7K", playerCount: 3 }` — matchmaker returned a non-empty room before the test player joined. That's the smoking gun.
+- `http_matchmake { outcome: "joined_existing" }` — confirmed the client's symptom corresponded to the server's view.
+- `mm_register { openTransition: "closed→opened" }` after a player left — showed the room oscillating 3 ↔ 4 without ever unregistering.
+
+Without these, we'd have seen "Alice reports 0/4 ready" and nothing else.
+
+### New regression posture
+
+The [`testing-best-practices`](.claude/skills/testing-best-practices) skill calls for writing the reproducer BEFORE the fix. We did, in `worker/src/state-machine.pbt.test.ts`:
+
+- Two REGRESSION tests for A (full eviction + partial loss) using a fresh mock `ctx` with persisted SQL but empty `_webSockets`.
+- Four REGRESSION tests for B (reap fires during playing; doesn't fire during waiting; `lastActiveTick` bumps on every message type; active player survives).
+- Four REGRESSION tests for C (progress-stale prune fires with fresh `updatedAt`; recent `lastStatusChangeAt` survives; playerCount churn preserves `lastStatusChangeAt`; real status transitions refresh it).
+
+The first B tests initially used natural solo-game flow and failed — aliens killed the solo player before the 2400-tick idle threshold, so the reap path was never exercised. Switching to direct mutation of `player.lastActiveTick` decoupled the tests from gameplay mechanics. **When a regression guard depends on a long time horizon, don't fight the simulation — mutate the trigger condition directly.**
+
+### The lesson
+
+1. **Persistent state lies about reality.** SQL tells you what you stored; `ctx.getWebSockets()` tells you what's reachable. Always cross-check on wake.
+2. **Server-initiated heartbeats are non-negotiable.** Client pings tell you when the client is alive; they don't tell you when the server should give up waiting. For a DO holding per-player state, `lastActiveTick` plus a periodic reap is the minimum viable liveness protocol.
+3. **Matchmakers need a progress signal, not just an update signal.** `updatedAt` refreshes on any registration — including churn. `lastStatusChangeAt` refreshes only on productive transitions. They measure different things, and you need both.
+4. **Wide events made the undebuggable debuggable.** With per-message `console.log` the phantom state would have been invisible.
+5. **Write the reproducer before the fix, but pick the right harness.** A 2400-tick natural gameplay sim is too brittle; direct mutation is more honest.

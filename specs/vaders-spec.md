@@ -1125,7 +1125,12 @@ function generateRoomCode(): string {
 
 // Matchmaker Durable Object - in-memory room lookup (no KV roundtrip)
 // Uses Record for JSON serialization (Map doesn't survive structured clone reliably)
-type RoomInfo = { playerCount: number; status: string; updatedAt: number }
+type RoomInfo = {
+  playerCount: number
+  status: string
+  updatedAt: number              // refreshes on every /register
+  lastStatusChangeAt: number     // refreshes ONLY on status transitions (Option C, 1.1.1)
+}
 
 export class Matchmaker {
   // Record serializes properly via structured clone (Map doesn't)
@@ -1139,9 +1144,14 @@ export class Matchmaker {
       const stored = await this.state.storage.get<Record<string, RoomInfo>>('rooms')
       if (stored) {
         this.rooms = stored
-        // Rebuild openRooms set from stored data
+        // Rebuild openRooms set from stored data. Require playerCount > 0
+        // so abandoned empty rooms don't strand the next matchmaker.
         for (const [roomCode, info] of Object.entries(stored)) {
-          if (info.status === 'waiting' && info.playerCount < 4) {
+          // Legacy backfill for pre-1.1.1 records.
+          if (typeof info.lastStatusChangeAt !== 'number') {
+            info.lastStatusChangeAt = info.updatedAt ?? Date.now()
+          }
+          if (info.status === 'waiting' && info.playerCount > 0 && info.playerCount < 4) {
             this.openRooms.add(roomCode)
           }
         }
@@ -1157,10 +1167,22 @@ export class Matchmaker {
       const { roomCode, playerCount, status } = await request.json() as {
         roomCode: string; playerCount: number; status: string
       }
-      this.rooms[roomCode] = { playerCount, status, updatedAt: Date.now() }
+      const prev = this.rooms[roomCode]
+      const statusChanged = !prev || prev.status !== status
+      const now = Date.now()
+      this.rooms[roomCode] = {
+        playerCount,
+        status,
+        updatedAt: now,
+        // Refresh only on status transitions. PlayerCount churn — the
+        // signature of phantom-trapped rooms where victims cycle through
+        // without ever readying — must NOT refresh this.
+        lastStatusChangeAt: statusChanged ? now : prev!.lastStatusChangeAt,
+      }
 
-      // Update openRooms set for O(1) find
-      if (status === 'waiting' && playerCount < 4) {
+      // Update openRooms set. Require playerCount > 0 so abandoned empty
+      // rooms don't become matchmaking targets.
+      if (status === 'waiting' && playerCount > 0 && playerCount < 4) {
         this.openRooms.add(roomCode)
       } else {
         this.openRooms.delete(roomCode)
@@ -1181,7 +1203,8 @@ export class Matchmaker {
 
     // GET /find - Find an open room (iterates Set to skip stale entries)
     if (url.pathname === '/find') {
-      const STALE_THRESHOLD = 5 * 60 * 1000  // 5 minutes without update = stale
+      const STALE_THRESHOLD = 5 * 60 * 1000           // 5 min since last /register
+      const PROGRESS_STALE_THRESHOLD = 10 * 60 * 1000 // 10 min since last status change
       const now = Date.now()
 
       // Find first non-stale open room
@@ -1193,7 +1216,15 @@ export class Matchmaker {
           continue
         }
         if (now - info.updatedAt > STALE_THRESHOLD) {
-          // Stale room (crashed or never unregistered), evict it
+          // Update-stale (GameRoom DO gone), evict
+          delete this.rooms[roomCode]
+          this.openRooms.delete(roomCode)
+          continue
+        }
+        if (info.status === 'waiting' &&
+            now - info.lastStatusChangeAt > PROGRESS_STALE_THRESHOLD) {
+          // Progress-stale (Option C): updatedAt fresh but no status
+          // transition for 10 min — signature of a phantom-trapped room.
           delete this.rooms[roomCode]
           this.openRooms.delete(roomCode)
           continue
@@ -1460,6 +1491,11 @@ interface Player {
   lives: number                     // Individual lives (starts at 3)
   respawnAtTick: number | null      // Tick to respawn after death
   kills: number
+  // Heartbeat liveness (Option B, 1.1.1). Refreshed on every inbound
+  // webSocketMessage; GameRoom.tick() reaps any player idle > 2400 ticks
+  // during active statuses. `null` means "unknown" (legacy record) and
+  // is lazy-initialised on first observation.
+  lastActiveTick: number | null
 
   // Input state (server-authoritative, updated from client input messages)
   inputState: {
@@ -1886,6 +1922,7 @@ export class GameRoom extends DurableObject<Env> {
           lives: 5,
           respawnAtTick: null,
           kills: 0,
+          lastActiveTick: this.game.tick,   // Heartbeat init (Option B)
           inputState: { left: false, right: false },
         }
 

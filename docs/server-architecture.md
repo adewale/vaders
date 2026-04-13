@@ -173,10 +173,11 @@ In-memory room registry for matchmaking.
     [roomCode]: {
       playerCount: number,
       status: string,
-      updatedAt: timestamp
+      updatedAt: timestamp,          // refreshes on every /register
+      lastStatusChangeAt: timestamp  // refreshes ONLY on status transitions
     }
   },
-  openRooms: Set<roomCode>  // status='waiting' && playerCount < 4
+  openRooms: Set<roomCode>  // status='waiting' && 0 < playerCount < 4
 }
 ```
 
@@ -187,7 +188,12 @@ In-memory room registry for matchmaking.
 | `GET /find` | Find open room for matchmaking |
 | `GET /info/:code` | Get specific room info |
 
-**Stale Room Cleanup**: Rooms not updated in 5+ minutes are removed from registry.
+**Two-tier stale cleanup** — the matchmaker prunes rooms for either of two reasons:
+
+1. **Update-stale** — no `/register` in 5 minutes (the original timeout). Indicates the `GameRoom` DO is gone.
+2. **Progress-stale** (added in 1.1.1) — still in `waiting` after 10 minutes of no status transitions, even if `updatedAt` is fresh. Signature of a phantom-trapped room where new victims cycle through without ever readying. Prune keeps both `updatedAt` fresh and `lastStatusChangeAt` frozen at the same time; tracking them separately is what makes the distinction observable. Emits `mm_prune_stale_by_progress`.
+
+See the **Phantom-player defence** section below for the full rationale.
 
 ---
 
@@ -625,16 +631,74 @@ tick, input, move, shoot              → persist = false
 
 ### Cold Start Recovery
 
+After a DO rehydration (hibernation wake or full eviction) the persisted
+`GameState` is restored from SQL AND reconciled against the live WebSocket
+set — any `state.players` entry whose WS did not survive is pruned. Without
+this, phantom players trap future matchmakers in the room (see **Phantom-
+player defence** below).
+
 ```typescript
-// On DO rehydration (after hibernation/crash)
+// On DO rehydration (after hibernation or eviction)
 blockConcurrencyWhile(async () => {
   const saved = await ctx.storage.sql.exec('SELECT * FROM game_state');
   if (saved) {
-    this.game = JSON.parse(saved.data);
+    this.game = migrateGameState(JSON.parse(saved.data));
     this.nextEntityId = saved.next_entity_id;
+
+    // Phantom-player reconciliation (Option A, 1.1.1).
+    const live = new Set<string>()
+    for (const ws of this.ctx.getWebSockets()) {
+      const a = ws.deserializeAttachment() as WebSocketAttachment | null
+      if (a?.playerId) live.add(a.playerId)
+    }
+    const phantoms = Object.keys(this.game.players).filter(id => !live.has(id))
+    if (phantoms.length > 0) {
+      for (const id of phantoms) delete this.game.players[id]
+      this.game.readyPlayerIds = this.game.readyPlayerIds.filter(id => id in this.game.players)
+      if (this.game.status === 'countdown' &&
+          Object.keys(this.game.players).length < 2) {
+        this.game.status = 'waiting'
+        this.game.countdownRemaining = null
+      }
+      this.persistState()
+      void this.updateRoomRegistry()
+      logEvent('reconcile_prune_phantoms', { /* … */ })
+    }
   }
 });
 ```
+
+### Phantom-player defence (1.1.1)
+
+The `GameRoom` DO persists per-player state in SQL but the WebSocket set is
+recreated on wake from `ctx.getWebSockets()`. If a WS died without a clean
+close (force-killed tab, killed process, lid-closed laptop on Wi-Fi), its
+player record in SQL outlives the socket. That entry is a "phantom": it
+counts toward `playerCount` and blocks countdown (ready threshold = "all
+players ready"), but nobody can ready it. Every subsequent matchmaker that
+lands in the poisoned room sees "0/N ready" and waits forever.
+
+Three orthogonal mitigations ship together:
+
+| Layer | Where | Catches |
+|---|---|---|
+| **A. Reconcile on wake** | `GameRoom` constructor | Phantoms born across DO eviction |
+| **B. Heartbeat reap** | `GameRoom.tick()` + `Player.lastActiveTick` | Phantoms born while a single DO lifetime persists |
+| **C. Progress-stale prune** | `Matchmaker.fetch('/find')` + `RoomInfo.lastStatusChangeAt` | Phantom-poisoned rooms that escape A+B — safety net |
+
+**Heartbeat threshold**: 2400 ticks (~80 s at 30 Hz) — roughly 2 × the client
+`PING_INTERVAL + PONG_TIMEOUT`, so two missed pings are tolerated before
+treating a player as gone. Reaping runs only during active statuses; lobby
+idleness is legitimate.
+
+**Progress-stale threshold**: 10 minutes without a status transition. A
+phantom-trapped room's `updatedAt` stays fresh (new victims refresh it on
+join), but `lastStatusChangeAt` freezes at the moment the room entered
+`waiting`. The asymmetry is the signal.
+
+Full postmortem: `Lessons_learned.md` §20. Regression guards live in
+`worker/src/state-machine.pbt.test.ts` (A + B) and
+`worker/src/Matchmaker.test.ts` (C).
 
 ---
 
