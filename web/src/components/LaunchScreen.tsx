@@ -480,15 +480,15 @@ export function LaunchScreen({
             href="https://github.com/adewale/vaders"
             target="_blank"
             rel="noopener noreferrer"
-            style={{ color: 'inherit', textDecoration: 'none', marginRight: 16 }}
+            style={{ color: 'inherit', textDecoration: 'none', display: 'block' }}
           >
-            GitHub
+            github.com/adewale/vaders
           </a>
           <a
             href="https://developers.cloudflare.com/"
             target="_blank"
             rel="noopener noreferrer"
-            style={{ color: 'inherit', textDecoration: 'none' }}
+            style={{ color: 'inherit', textDecoration: 'none', display: 'block' }}
           >
             Built on the Cloudflare Developer Platform
           </a>
