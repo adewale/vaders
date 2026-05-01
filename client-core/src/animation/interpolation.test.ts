@@ -81,7 +81,7 @@ describe('InterpolationManager', () => {
     test('updates existing entity position', () => {
       manager.updateEntity('player1', 10, 20, 1)
       manager.updateEntity('player1', 15, 25, 2)
-      const pos = manager.getVisualPosition('player1')
+      const _pos = manager.getVisualPosition('player1')
       // After update, visual position might not be at new position yet
       // (depends on interpolation)
       expect(manager.hasEntity('player1')).toBe(true)

@@ -23,8 +23,8 @@ interface ActiveStar {
   seed: number
 }
 
-const CELL_W = 8
-const CELL_H = 16
+const _CELL_W = 8
+const _CELL_H = 16
 
 /** Average spawn interval in ticks. */
 export const SPAWN_INTERVAL = 150

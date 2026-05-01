@@ -3,11 +3,7 @@
 
 import { describe, test, expect } from 'bun:test'
 import { getLobbyMenuItemCount } from './LobbyScreen'
-import type {
-  GameState,
-  Player,
-  PlayerSlot,
-} from '../../../shared/types'
+import type { GameState, Player, PlayerSlot } from '../../../shared/types'
 import { DEFAULT_CONFIG } from '../../../shared/types'
 
 // ─── Test Helpers ─────────────────────────────────────────────────────────────
@@ -30,12 +26,14 @@ function createMockPlayer(overrides: Partial<Player> = {}): Player {
   }
 }
 
-function createMockPlayers(count: number): Player[] {
-  return Array.from({ length: count }, (_, i) => createMockPlayer({
-    id: `player-${i + 1}`,
-    name: `Player${i + 1}`,
-    slot: (i + 1) as PlayerSlot,
-  }))
+function _createMockPlayers(count: number): Player[] {
+  return Array.from({ length: count }, (_, i) =>
+    createMockPlayer({
+      id: `player-${i + 1}`,
+      name: `Player${i + 1}`,
+      slot: (i + 1) as PlayerSlot,
+    }),
+  )
 }
 
 function createMockGameState(overrides: Partial<GameState> = {}): GameState {
@@ -111,9 +109,9 @@ describe('Ready State Logic', () => {
   test('ready count matches readyPlayerIds length', () => {
     const state = createMockGameState({
       players: {
-        'p1': createMockPlayer({ id: 'p1' }),
-        'p2': createMockPlayer({ id: 'p2', slot: 2 }),
-        'p3': createMockPlayer({ id: 'p3', slot: 3 }),
+        p1: createMockPlayer({ id: 'p1' }),
+        p2: createMockPlayer({ id: 'p2', slot: 2 }),
+        p3: createMockPlayer({ id: 'p3', slot: 3 }),
       },
       readyPlayerIds: ['p1', 'p3'],
     })
@@ -123,8 +121,8 @@ describe('Ready State Logic', () => {
 
   test('all players ready when readyCount equals playerCount', () => {
     const players = {
-      'p1': createMockPlayer({ id: 'p1' }),
-      'p2': createMockPlayer({ id: 'p2', slot: 2 }),
+      p1: createMockPlayer({ id: 'p1' }),
+      p2: createMockPlayer({ id: 'p2', slot: 2 }),
     }
     const state = createMockGameState({
       players,
@@ -137,9 +135,9 @@ describe('Ready State Logic', () => {
 
   test('not all players ready when readyCount less than playerCount', () => {
     const players = {
-      'p1': createMockPlayer({ id: 'p1' }),
-      'p2': createMockPlayer({ id: 'p2', slot: 2 }),
-      'p3': createMockPlayer({ id: 'p3', slot: 3 }),
+      p1: createMockPlayer({ id: 'p1' }),
+      p2: createMockPlayer({ id: 'p2', slot: 2 }),
+      p3: createMockPlayer({ id: 'p3', slot: 3 }),
     }
     const state = createMockGameState({
       players,
@@ -158,14 +156,13 @@ describe('Lobby Menu Items Construction', () => {
     const playerCount = 1
     const isReady = false
 
-    const menuItems = playerCount === 1
-      ? [
-          { label: isReady ? 'Cancel Ready' : 'Ready Up', desc: '(wait for others)' },
-          { label: 'Start Solo', desc: '' },
-        ]
-      : [
-          { label: isReady ? 'Cancel Ready' : 'Ready Up', desc: '' },
-        ]
+    const menuItems =
+      playerCount === 1
+        ? [
+            { label: isReady ? 'Cancel Ready' : 'Ready Up', desc: '(wait for others)' },
+            { label: 'Start Solo', desc: '' },
+          ]
+        : [{ label: isReady ? 'Cancel Ready' : 'Ready Up', desc: '' }]
 
     expect(menuItems.length).toBe(2)
     expect(menuItems[0].label).toBe('Ready Up')
@@ -176,14 +173,13 @@ describe('Lobby Menu Items Construction', () => {
     const playerCount = 1
     const isReady = true
 
-    const menuItems = playerCount === 1
-      ? [
-          { label: isReady ? 'Cancel Ready' : 'Ready Up', desc: '(wait for others)' },
-          { label: 'Start Solo', desc: '' },
-        ]
-      : [
-          { label: isReady ? 'Cancel Ready' : 'Ready Up', desc: '' },
-        ]
+    const menuItems =
+      playerCount === 1
+        ? [
+            { label: isReady ? 'Cancel Ready' : 'Ready Up', desc: '(wait for others)' },
+            { label: 'Start Solo', desc: '' },
+          ]
+        : [{ label: isReady ? 'Cancel Ready' : 'Ready Up', desc: '' }]
 
     expect(menuItems[0].label).toBe('Cancel Ready')
   })
@@ -192,14 +188,13 @@ describe('Lobby Menu Items Construction', () => {
     const playerCount: number = 3
     const isReady = false
 
-    const menuItems = playerCount === 1
-      ? [
-          { label: isReady ? 'Cancel Ready' : 'Ready Up', desc: '(wait for others)' },
-          { label: 'Start Solo', desc: '' },
-        ]
-      : [
-          { label: isReady ? 'Cancel Ready' : 'Ready Up', desc: '' },
-        ]
+    const menuItems =
+      playerCount === 1
+        ? [
+            { label: isReady ? 'Cancel Ready' : 'Ready Up', desc: '(wait for others)' },
+            { label: 'Start Solo', desc: '' },
+          ]
+        : [{ label: isReady ? 'Cancel Ready' : 'Ready Up', desc: '' }]
 
     expect(menuItems.length).toBe(1)
     expect(menuItems[0].label).toBe('Ready Up')
@@ -209,14 +204,13 @@ describe('Lobby Menu Items Construction', () => {
     const playerCount: number = 2
     const isReady = true
 
-    const menuItems = playerCount === 1
-      ? [
-          { label: isReady ? 'Cancel Ready' : 'Ready Up', desc: '(wait for others)' },
-          { label: 'Start Solo', desc: '' },
-        ]
-      : [
-          { label: isReady ? 'Cancel Ready' : 'Ready Up', desc: '' },
-        ]
+    const menuItems =
+      playerCount === 1
+        ? [
+            { label: isReady ? 'Cancel Ready' : 'Ready Up', desc: '(wait for others)' },
+            { label: 'Start Solo', desc: '' },
+          ]
+        : [{ label: isReady ? 'Cancel Ready' : 'Ready Up', desc: '' }]
 
     expect(menuItems.length).toBe(1)
     expect(menuItems[0].label).toBe('Cancel Ready')
@@ -224,14 +218,13 @@ describe('Lobby Menu Items Construction', () => {
 
   test('menu item count matches getLobbyMenuItemCount helper', () => {
     for (let playerCount = 1; playerCount <= 4; playerCount++) {
-      const menuItems = playerCount === 1
-        ? [
-            { label: 'Ready Up', desc: '(wait for others)' },
-            { label: 'Start Solo', desc: '' },
-          ]
-        : [
-            { label: 'Ready Up', desc: '' },
-          ]
+      const menuItems =
+        playerCount === 1
+          ? [
+              { label: 'Ready Up', desc: '(wait for others)' },
+              { label: 'Start Solo', desc: '' },
+            ]
+          : [{ label: 'Ready Up', desc: '' }]
 
       expect(menuItems.length).toBe(getLobbyMenuItemCount(playerCount))
     }
@@ -296,8 +289,8 @@ describe('Player Count Display', () => {
   test('player count format shows current/max', () => {
     const state = createMockGameState({
       players: {
-        'p1': createMockPlayer({ id: 'p1' }),
-        'p2': createMockPlayer({ id: 'p2', slot: 2 }),
+        p1: createMockPlayer({ id: 'p1' }),
+        p2: createMockPlayer({ id: 'p2', slot: 2 }),
       },
     })
     const playerCount = Object.values(state.players).length
@@ -358,7 +351,7 @@ describe('Lobby Edge Cases', () => {
     // This is an edge case the component should handle gracefully
     const state = createMockGameState({
       players: {
-        'p1': createMockPlayer({ id: 'p1' }),
+        p1: createMockPlayer({ id: 'p1' }),
       },
       readyPlayerIds: ['p1', 'disconnected-player'],
     })
@@ -373,13 +366,13 @@ describe('Lobby Edge Cases', () => {
   test('players list extraction works correctly', () => {
     const state = createMockGameState({
       players: {
-        'p1': createMockPlayer({ id: 'p1', name: 'Alice' }),
-        'p2': createMockPlayer({ id: 'p2', name: 'Bob', slot: 2 }),
+        p1: createMockPlayer({ id: 'p1', name: 'Alice' }),
+        p2: createMockPlayer({ id: 'p2', name: 'Bob', slot: 2 }),
       },
     })
 
     const players = Object.values(state.players)
     expect(players.length).toBe(2)
-    expect(players.map(p => p.name).sort()).toEqual(['Alice', 'Bob'])
+    expect(players.map((p) => p.name).sort()).toEqual(['Alice', 'Bob'])
   })
 })

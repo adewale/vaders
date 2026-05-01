@@ -42,7 +42,7 @@ try {
   const bundleMatch = html.match(/assets\/(index-[A-Za-z0-9_-]+\.js)/)
   if (!bundleMatch) throw new Error('no bundle reference in index.html')
   const bundlePath = bundleMatch[0]
-  const bundle = await fetchText('/' + bundlePath)
+  const bundle = await fetchText(`/${bundlePath}`)
   const hashMatch = bundle.match(/commitHash\s*:\s*["']([^"']+)["']/)
   if (!hashMatch) throw new Error('no commitHash literal baked into bundle')
   const webHash = hashMatch[1]

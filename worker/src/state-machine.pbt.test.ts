@@ -35,13 +35,7 @@ import { describe, it, expect, vi, type Mock } from 'vitest'
 import fc from 'fast-check'
 import { GameRoom, type Env } from './GameRoom'
 import { Matchmaker } from './Matchmaker'
-import type {
-  GameState,
-  GameStatus,
-  ServerMessage,
-  PlayerSlot,
-} from '../../shared/types'
-import { COUNTDOWN_SECONDS } from '../../shared/types'
+import type { GameState, GameStatus, ServerMessage, PlayerSlot } from '../../shared/types'
 
 // ============================================================================
 // Mock Cloudflare infrastructure (shared with GameRoom.test.ts / integration.test.ts)
@@ -83,18 +77,18 @@ function createMockDurableObjectContext() {
         exec: vi.fn((query: string, ...params: unknown[]) => {
           if (query.includes('CREATE TABLE')) return { toArray: () => [] }
           if (query.includes('SELECT')) {
-            if (sqlData['game_state']) return { toArray: () => [sqlData['game_state']] }
+            if (sqlData.game_state) return { toArray: () => [sqlData.game_state] }
             return { toArray: () => [] }
           }
           if (query.includes('INSERT OR REPLACE')) {
-            sqlData['game_state'] = {
+            sqlData.game_state = {
               data: params[0] as string,
               next_entity_id: params[1] as number,
             }
             return { toArray: () => [] }
           }
           if (query.includes('DELETE')) {
-            delete sqlData['game_state']
+            sqlData.game_state = undefined
             return { toArray: () => [] }
           }
           return { toArray: () => [] }
@@ -113,7 +107,7 @@ function createMockDurableObjectContext() {
     acceptWebSocket: vi.fn((ws: MockWebSocket) => {
       webSockets.push(ws)
     }),
-    getWebSockets: vi.fn(() => webSockets.filter(ws => !ws._closed)),
+    getWebSockets: vi.fn(() => webSockets.filter((ws) => !ws._closed)),
     _sqlData: sqlData,
     _webSockets: webSockets,
     _alarm: () => alarm,
@@ -209,18 +203,22 @@ class RealSystem {
     }
 
     const room = new GameRoom(ctx as unknown as DurableObjectState, env)
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await new Promise((resolve) => setTimeout(resolve, 0))
 
-    await room.fetch(new Request('https://internal/init', {
-      method: 'POST',
-      body: JSON.stringify({ roomCode }),
-    }))
+    await room.fetch(
+      new Request('https://internal/init', {
+        method: 'POST',
+        body: JSON.stringify({ roomCode }),
+      }),
+    )
 
     // Register with matchmaker (the Worker /room endpoint does this in production).
-    await this.matchmaker.fetch(new Request('https://internal/register', {
-      method: 'POST',
-      body: JSON.stringify({ roomCode, playerCount: 0, status: 'waiting' }),
-    }))
+    await this.matchmaker.fetch(
+      new Request('https://internal/register', {
+        method: 'POST',
+        body: JSON.stringify({ roomCode, playerCount: 0, status: 'waiting' }),
+      }),
+    )
 
     const entry = { ctx, room }
     this.rooms.set(roomCode, entry)
@@ -235,7 +233,7 @@ class RealSystem {
   /** Make a GET /find call to the matchmaker, mirroring the Worker endpoint. */
   async matchmakeFind(): Promise<string | null> {
     const response = await this.matchmaker.fetch(new Request('https://internal/find'))
-    const body = await response.json() as { roomCode: string | null }
+    const body = (await response.json()) as { roomCode: string | null }
     return body.roomCode
   }
 
@@ -249,10 +247,13 @@ class RealSystem {
 
     const ws = createMockWebSocket()
     entry.ctx._webSockets.push(ws)
-    await entry.room.webSocketMessage(ws as unknown as WebSocket, JSON.stringify({
-      type: 'join',
-      name,
-    }))
+    await entry.room.webSocketMessage(
+      ws as unknown as WebSocket,
+      JSON.stringify({
+        type: 'join',
+        name,
+      }),
+    )
 
     // Extract allocated playerId from the first sync message that included it.
     const syncCall = ws.send.mock.calls.find((call: unknown[]) => {
@@ -325,7 +326,7 @@ class RealSystem {
   getState(roomCode: string): GameState | null {
     const entry = this.rooms.get(roomCode)
     if (!entry) return null
-    const row = entry.ctx._sqlData['game_state']
+    const row = entry.ctx._sqlData.game_state
     if (!row) return null
     return JSON.parse(row.data) as GameState
   }
@@ -334,7 +335,7 @@ class RealSystem {
   async getMatchmakerInfo(roomCode: string): Promise<{ playerCount: number; status: string } | null> {
     const response = await this.matchmaker.fetch(new Request(`https://internal/info/${roomCode}`))
     if (response.status !== 200) return null
-    return await response.json() as { playerCount: number; status: string }
+    return (await response.json()) as { playerCount: number; status: string }
   }
 
   /** Extract all protocol messages a player has received (for protocol validation). */
@@ -419,11 +420,11 @@ function assertInvariants(real: RealSystem): InvariantViolation[] {
       }
     }
 
-    const slotSet = new Set(players.map(p => p.slot))
+    const slotSet = new Set(players.map((p) => p.slot))
     if (slotSet.size !== players.length) {
       violations.push({
         name: 'player_slot_collision',
-        details: `Room ${roomCode}: duplicate slots: ${players.map(p => p.slot).join(',')}`,
+        details: `Room ${roomCode}: duplicate slots: ${players.map((p) => p.slot).join(',')}`,
       })
     }
 
@@ -441,8 +442,7 @@ function assertInvariants(real: RealSystem): InvariantViolation[] {
       if (!allReady || playerCount < 2) {
         violations.push({
           name: 'countdown_requires_all_ready_plus_two',
-          details:
-            `Room ${roomCode}: countdown but playerCount=${playerCount}, readyCount=${state.readyPlayerIds.length}`,
+          details: `Room ${roomCode}: countdown but playerCount=${playerCount}, readyCount=${state.readyPlayerIds.length}`,
         })
       }
     }
@@ -617,8 +617,7 @@ const JoinRoomCommand = (roomIdx: number): Command => ({
 
 // ─── ReadyCommand ───────────────────────────────────────────────────────────
 const ReadyCommand = (roomIdx: number, playerIdx: number): Command => ({
-  check: (model) => model.rooms.size > 0 &&
-    Array.from(model.rooms.values()).some(r => r.players.size > 0),
+  check: (model) => model.rooms.size > 0 && Array.from(model.rooms.values()).some((r) => r.players.size > 0),
   run: async (ctx) => {
     const code = pickRoomFromModel(ctx.model, roomIdx)!
     const room = ctx.model.rooms.get(code)!
@@ -636,8 +635,7 @@ const ReadyCommand = (roomIdx: number, playerIdx: number): Command => ({
 
 // ─── UnreadyCommand ─────────────────────────────────────────────────────────
 const UnreadyCommand = (roomIdx: number, playerIdx: number): Command => ({
-  check: (model) => model.rooms.size > 0 &&
-    Array.from(model.rooms.values()).some(r => r.players.size > 0),
+  check: (model) => model.rooms.size > 0 && Array.from(model.rooms.values()).some((r) => r.players.size > 0),
   run: async (ctx) => {
     const code = pickRoomFromModel(ctx.model, roomIdx)!
     const room = ctx.model.rooms.get(code)!
@@ -655,8 +653,7 @@ const UnreadyCommand = (roomIdx: number, playerIdx: number): Command => ({
 
 // ─── StartSoloCommand ───────────────────────────────────────────────────────
 const StartSoloCommand = (roomIdx: number, playerIdx: number): Command => ({
-  check: (model) => model.rooms.size > 0 &&
-    Array.from(model.rooms.values()).some(r => r.players.size === 1),
+  check: (model) => model.rooms.size > 0 && Array.from(model.rooms.values()).some((r) => r.players.size === 1),
   run: async (ctx) => {
     const code = pickRoomFromModel(ctx.model, roomIdx)!
     const room = ctx.model.rooms.get(code)!
@@ -672,8 +669,7 @@ const StartSoloCommand = (roomIdx: number, playerIdx: number): Command => ({
 
 // ─── ForfeitCommand ─────────────────────────────────────────────────────────
 const ForfeitCommand = (roomIdx: number, playerIdx: number): Command => ({
-  check: (model) => model.rooms.size > 0 &&
-    Array.from(model.rooms.values()).some(r => r.players.size > 0),
+  check: (model) => model.rooms.size > 0 && Array.from(model.rooms.values()).some((r) => r.players.size > 0),
   run: async (ctx) => {
     const code = pickRoomFromModel(ctx.model, roomIdx)!
     const room = ctx.model.rooms.get(code)!
@@ -688,8 +684,7 @@ const ForfeitCommand = (roomIdx: number, playerIdx: number): Command => ({
 
 // ─── ShootCommand ───────────────────────────────────────────────────────────
 const ShootCommand = (roomIdx: number, playerIdx: number): Command => ({
-  check: (model) => model.rooms.size > 0 &&
-    Array.from(model.rooms.values()).some(r => r.players.size > 0),
+  check: (model) => model.rooms.size > 0 && Array.from(model.rooms.values()).some((r) => r.players.size > 0),
   run: async (ctx) => {
     const code = pickRoomFromModel(ctx.model, roomIdx)!
     const room = ctx.model.rooms.get(code)!
@@ -702,8 +697,7 @@ const ShootCommand = (roomIdx: number, playerIdx: number): Command => ({
 
 // ─── MoveCommand ────────────────────────────────────────────────────────────
 const MoveCommand = (roomIdx: number, playerIdx: number, direction: 'left' | 'right'): Command => ({
-  check: (model) => model.rooms.size > 0 &&
-    Array.from(model.rooms.values()).some(r => r.players.size > 0),
+  check: (model) => model.rooms.size > 0 && Array.from(model.rooms.values()).some((r) => r.players.size > 0),
   run: async (ctx) => {
     const code = pickRoomFromModel(ctx.model, roomIdx)!
     const room = ctx.model.rooms.get(code)!
@@ -716,8 +710,7 @@ const MoveCommand = (roomIdx: number, playerIdx: number, direction: 'left' | 'ri
 
 // ─── LeaveCommand ───────────────────────────────────────────────────────────
 const LeaveCommand = (roomIdx: number, playerIdx: number): Command => ({
-  check: (model) => model.rooms.size > 0 &&
-    Array.from(model.rooms.values()).some(r => r.players.size > 0),
+  check: (model) => model.rooms.size > 0 && Array.from(model.rooms.values()).some((r) => r.players.size > 0),
   run: async (ctx) => {
     const code = pickRoomFromModel(ctx.model, roomIdx)!
     const room = ctx.model.rooms.get(code)!
@@ -789,8 +782,8 @@ const tickCount = fc.integer({ min: 1, max: 3 })
 const direction = fc.constantFrom<'left' | 'right'>('left', 'right')
 
 const commandArb = fc.oneof(
-  { weight: 3, arbitrary: smallInt.map(i => CreateRoomCommand(i)) },
-  { weight: 8, arbitrary: smallInt.map(i => JoinRoomCommand(i)) },
+  { weight: 3, arbitrary: smallInt.map((i) => CreateRoomCommand(i)) },
+  { weight: 8, arbitrary: smallInt.map((i) => JoinRoomCommand(i)) },
   { weight: 5, arbitrary: fc.tuple(smallInt, smallInt).map(([r, p]) => ReadyCommand(r, p)) },
   { weight: 2, arbitrary: fc.tuple(smallInt, smallInt).map(([r, p]) => UnreadyCommand(r, p)) },
   { weight: 3, arbitrary: fc.tuple(smallInt, smallInt).map(([r, p]) => StartSoloCommand(r, p)) },
@@ -798,7 +791,7 @@ const commandArb = fc.oneof(
   { weight: 2, arbitrary: fc.tuple(smallInt, smallInt).map(([r, p]) => ShootCommand(r, p)) },
   { weight: 2, arbitrary: fc.tuple(smallInt, smallInt, direction).map(([r, p, d]) => MoveCommand(r, p, d)) },
   { weight: 3, arbitrary: fc.tuple(smallInt, smallInt).map(([r, p]) => LeaveCommand(r, p)) },
-  { weight: 2, arbitrary: smallInt.map(i => MatchmakeCommand(i)) },
+  { weight: 2, arbitrary: smallInt.map((i) => MatchmakeCommand(i)) },
   { weight: 2, arbitrary: fc.tuple(smallInt, tickCount).map(([r, t]) => AdvanceTickCommand(r, t)) },
 )
 
@@ -857,7 +850,8 @@ describe('PBT: State Machine Invariants', () => {
         const real = new RealSystem()
         const model = new SystemModel()
         const ctx: CmdCtx = {
-          model, real,
+          model,
+          real,
           roomCodePool: ROOM_CODE_POOL,
           roomCodesUsed: [],
           nextName: () => model.nextPlayerName(),
@@ -886,7 +880,8 @@ describe('PBT: State Machine Invariants', () => {
         const real = new RealSystem()
         const model = new SystemModel()
         const ctx: CmdCtx = {
-          model, real,
+          model,
+          real,
           roomCodePool: ROOM_CODE_POOL,
           roomCodesUsed: [],
           nextName: () => model.nextPlayerName(),
@@ -919,7 +914,8 @@ describe('PBT: State Machine Invariants', () => {
         const real = new RealSystem()
         const model = new SystemModel()
         const ctx: CmdCtx = {
-          model, real,
+          model,
+          real,
           roomCodePool: ROOM_CODE_POOL,
           roomCodesUsed: [],
           nextName: () => model.nextPlayerName(),
@@ -1024,7 +1020,7 @@ describe('PBT: Targeted bug-hypothesis probes', () => {
     const real = new RealSystem()
     await real.createRoom('NOPLAY')
     // No players joined.
-    const before = real.getState('NOPLAY')
+    const _before = real.getState('NOPLAY')
     // The handler requires attachment.playerId; sending without any ws is
     // impossible here. The closest we can do is drive start_solo on a ws
     // with no attachment.
@@ -1137,7 +1133,7 @@ describe('PBT: Targeted bug-hypothesis probes', () => {
     expect(typeof afterX).toBe('number')
     // Allow x to not change if reducer guards differently — the key invariant
     // is that we received no error message.
-    const errors = real.getReceivedMessages(p1).filter(m => m.type === 'error')
+    const errors = real.getReceivedMessages(p1).filter((m) => m.type === 'error')
     expect(errors.length).toBe(0)
   })
 
@@ -1158,7 +1154,7 @@ describe('PBT: Targeted bug-hypothesis probes', () => {
     await real.advanceTicks('CDSHT1', 1)
 
     state = real.getState('CDSHT1')
-    const bullets = state!.entities.filter(e => e.kind === 'bullet')
+    const bullets = state!.entities.filter((e) => e.kind === 'bullet')
     expect(bullets.length).toBe(0)
   })
 
@@ -1255,12 +1251,18 @@ describe('PBT: Targeted bug-hypothesis probes', () => {
 
     // Late joiner was NOT added.
     const stateAfter = real.getState('LATEJN')
-    const added = Object.values(stateAfter!.players).find(p => p.name === 'late')
+    const added = Object.values(stateAfter!.players).find((p) => p.name === 'late')
     expect(added).toBeUndefined()
     // And the WS received an error message with the expected code.
     const sendSpy = newWs.send as unknown as { mock: { calls: unknown[][] } }
     const errors = sendSpy.mock.calls
-      .map((call) => { try { return JSON.parse(String(call[0])) } catch { return null } })
+      .map((call) => {
+        try {
+          return JSON.parse(String(call[0]))
+        } catch {
+          return null
+        }
+      })
       .filter((m) => m && m.type === 'error')
     expect(errors.length).toBeGreaterThan(0)
     expect(errors[0].code).toBe('game_in_progress')
@@ -1319,33 +1321,38 @@ describe('REGRESSION: GameRoom reconciles state.players against live WebSockets 
     // Build state with 2 players on ctx1.
     const ctx1 = createMockDurableObjectContext()
     const room1 = new GameRoom(ctx1 as unknown as DurableObjectState, env)
-    await new Promise(resolve => setTimeout(resolve, 0))
-    await room1.fetch(new Request('https://internal/init', {
-      method: 'POST',
-      body: JSON.stringify({ roomCode: 'FIXAB1' }),
-    }))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await room1.fetch(
+      new Request('https://internal/init', {
+        method: 'POST',
+        body: JSON.stringify({ roomCode: 'FIXAB1' }),
+      }),
+    )
     for (const name of ['Alice', 'Bob']) {
       const ws = createMockWebSocket()
       ctx1._webSockets.push(ws)
-      await room1.webSocketMessage(ws as unknown as WebSocket, JSON.stringify({
-        type: 'join',
-        name,
-      }))
+      await room1.webSocketMessage(
+        ws as unknown as WebSocket,
+        JSON.stringify({
+          type: 'join',
+          name,
+        }),
+      )
     }
-    const sql1 = JSON.parse(ctx1._sqlData['game_state']!.data) as GameState
+    const sql1 = JSON.parse(ctx1._sqlData.game_state!.data) as GameState
     expect(Object.keys(sql1.players).length).toBe(2)
 
     // Eviction: fresh ctx, persisted SQL, no live WS.
     const ctx2 = createMockDurableObjectContext()
-    ctx2._sqlData['game_state'] = ctx1._sqlData['game_state']!
+    ctx2._sqlData.game_state = ctx1._sqlData.game_state!
     const room2 = new GameRoom(ctx2 as unknown as DurableObjectState, env)
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await new Promise((resolve) => setTimeout(resolve, 0))
     expect(room2).toBeDefined()
 
     // Post-fix invariant: state.players must only include ids attached to
     // currently-open WebSockets. Both Alice and Bob lost their connections,
     // so the player set should be empty after reconciliation.
-    const after = JSON.parse(ctx2._sqlData['game_state']!.data) as GameState
+    const after = JSON.parse(ctx2._sqlData.game_state!.data) as GameState
     expect(Object.keys(after.players)).toEqual([])
     expect(after.readyPlayerIds).toEqual([])
   })
@@ -1357,11 +1364,13 @@ describe('REGRESSION: GameRoom reconciles state.players against live WebSockets 
     // Two players on ctx1.
     const ctx1 = createMockDurableObjectContext()
     const room1 = new GameRoom(ctx1 as unknown as DurableObjectState, env)
-    await new Promise(resolve => setTimeout(resolve, 0))
-    await room1.fetch(new Request('https://internal/init', {
-      method: 'POST',
-      body: JSON.stringify({ roomCode: 'FIXAB2' }),
-    }))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await room1.fetch(
+      new Request('https://internal/init', {
+        method: 'POST',
+        body: JSON.stringify({ roomCode: 'FIXAB2' }),
+      }),
+    )
     const aliceWs = createMockWebSocket()
     ctx1._webSockets.push(aliceWs)
     await room1.webSocketMessage(aliceWs as unknown as WebSocket, JSON.stringify({ type: 'join', name: 'Alice' }))
@@ -1369,21 +1378,21 @@ describe('REGRESSION: GameRoom reconciles state.players against live WebSockets 
     ctx1._webSockets.push(bobWs)
     await room1.webSocketMessage(bobWs as unknown as WebSocket, JSON.stringify({ type: 'join', name: 'Bob' }))
 
-    const stateOnDisk = JSON.parse(ctx1._sqlData['game_state']!.data) as GameState
-    const aliceId = Object.values(stateOnDisk.players).find(p => p.name === 'Alice')!.id
+    const stateOnDisk = JSON.parse(ctx1._sqlData.game_state!.data) as GameState
+    const aliceId = Object.values(stateOnDisk.players).find((p) => p.name === 'Alice')!.id
 
     // Eviction: only Alice's WS survives the wake (e.g. Bob's force-killed tab).
     const ctx2 = createMockDurableObjectContext()
-    ctx2._sqlData['game_state'] = ctx1._sqlData['game_state']!
+    ctx2._sqlData.game_state = ctx1._sqlData.game_state!
     // Re-attach Alice's WS only — Cloudflare's getWebSockets() is the source of truth.
     ctx2._webSockets.push(aliceWs)
 
     const room2 = new GameRoom(ctx2 as unknown as DurableObjectState, env)
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await new Promise((resolve) => setTimeout(resolve, 0))
     expect(room2).toBeDefined()
 
-    const after = JSON.parse(ctx2._sqlData['game_state']!.data) as GameState
-    expect(Object.keys(after.players)).toEqual([aliceId])  // Bob pruned, Alice kept
+    const after = JSON.parse(ctx2._sqlData.game_state!.data) as GameState
+    expect(Object.keys(after.players)).toEqual([aliceId]) // Bob pruned, Alice kept
   })
 })
 

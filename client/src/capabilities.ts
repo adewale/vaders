@@ -1,22 +1,20 @@
 // client/src/capabilities.ts
 // Terminal capabilities detection - wraps the terminal compatibility layer
 
-import {
-  TERMINAL_CAPABILITIES,
-} from './terminal'
+import { TERMINAL_CAPABILITIES } from './terminal'
 
 /**
  * Simplified capabilities interface for backwards compatibility
  */
 export interface TerminalCapabilities {
-  trueColor: boolean    // 24-bit color support
-  color256: boolean     // 256-color support
-  unicode: boolean      // Unicode character support
-  asciiMode: boolean    // Use ASCII-only symbols (safer for alignment)
-  width: number         // Terminal width
-  height: number        // Terminal height
+  trueColor: boolean // 24-bit color support
+  color256: boolean // 256-color support
+  unicode: boolean // Unicode character support
+  asciiMode: boolean // Use ASCII-only symbols (safer for alignment)
+  width: number // Terminal width
+  height: number // Terminal height
   // New fields from terminal compatibility layer
-  terminal: string      // Terminal name
+  terminal: string // Terminal name
   supportsKittyKeyboard: boolean
   supportsWideCharacters: boolean
   insideMultiplexer: boolean

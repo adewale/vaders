@@ -9,8 +9,8 @@ const CONFIG_DIR = join(homedir(), '.config', 'vaders')
 const CONFIG_PATH = join(CONFIG_DIR, 'config.json')
 
 export interface UserConfig {
-  audioMuted: boolean    // Sound effects muted
-  musicMuted: boolean    // Background music muted
+  audioMuted: boolean // Sound effects muted
+  musicMuted: boolean // Background music muted
 }
 
 const DEFAULT_CONFIG: UserConfig = {

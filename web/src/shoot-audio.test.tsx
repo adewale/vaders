@@ -67,9 +67,6 @@ vi.mock('./adapters/WebAudioAdapter', () => {
   // Fake WebAudioAdapter — records play() calls via the shared spy, no-ops
   // everything else. Constructor accepts (ctx?) to match the real signature.
   class FakeWebAudioAdapter {
-    constructor(_ctx?: unknown) {
-      // ignore
-    }
     play = playSpy
     startMusic = vi.fn()
     stopMusic = vi.fn()

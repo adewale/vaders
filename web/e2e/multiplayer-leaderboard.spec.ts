@@ -49,9 +49,9 @@ test.describe('Multiplayer leaderboard', () => {
 
       // The two rows must be distinct slots (cyan = 1, orange = 2) — this is
       // the invariant that proves the server assigned different player slots.
-      const slots1 = await page1.locator('[data-testid="lobby-player-row"]').evaluateAll(
-        (els) => els.map((el) => (el as HTMLElement).dataset.slot).sort(),
-      )
+      const slots1 = await page1
+        .locator('[data-testid="lobby-player-row"]')
+        .evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.slot).sort())
       expect(slots1).toEqual(['1', '2'])
 
       // ── Both players ready up ───────────────────────────────────────────
@@ -80,9 +80,9 @@ test.describe('Multiplayer leaderboard', () => {
       await expect(page2.locator('[data-testid="leaderboard-row"]')).toHaveCount(2, { timeout: 15000 })
 
       // Slots on the leaderboard must match the slots seen in the lobby.
-      const leaderboardSlots1 = await page1.locator('[data-testid="leaderboard-row"]').evaluateAll(
-        (els) => els.map((el) => (el as HTMLElement).dataset.slot).sort(),
-      )
+      const leaderboardSlots1 = await page1
+        .locator('[data-testid="leaderboard-row"]')
+        .evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.slot).sort())
       expect(leaderboardSlots1).toEqual(['1', '2'])
     } finally {
       await ctx1.close()
@@ -104,4 +104,3 @@ async function extractRoomCode(page: Page): Promise<string> {
   const m = new URL(page.url()).pathname.match(/^\/room\/([A-Z0-9]{6})$/i)
   return m![1].toUpperCase()
 }
-

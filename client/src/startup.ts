@@ -53,9 +53,7 @@ export async function runStartupChecks(): Promise<StartupReport> {
   checks.push({
     name: 'Terminal Size',
     passed: cols >= 120 && rows >= 36,
-    message: cols >= 120 && rows >= 36
-      ? `${cols}x${rows} (OK)`
-      : `${cols}x${rows} (need 120x36)`,
+    message: cols >= 120 && rows >= 36 ? `${cols}x${rows} (OK)` : `${cols}x${rows} (need 120x36)`,
   })
 
   // Check 3: Unicode support
@@ -78,9 +76,7 @@ export async function runStartupChecks(): Promise<StartupReport> {
   checks.push({
     name: 'Colors',
     passed: termCaps.supportsTrueColor,
-    message: termCaps.supportsTrueColor
-      ? '24-bit true color'
-      : '256-color mode (colors may look different)',
+    message: termCaps.supportsTrueColor ? '24-bit true color' : '256-color mode (colors may look different)',
   })
 
   // Check 5: Audio player available
@@ -102,13 +98,12 @@ export async function runStartupChecks(): Promise<StartupReport> {
   // Check 6: Sound effects files exist
   const soundsDir = join(__dirname, '../sounds')
   const requiredSounds = ['shoot.wav', 'alien_killed.wav', 'game_start.wav', 'game_over.wav']
-  const missingSounds = requiredSounds.filter(s => !existsSync(join(soundsDir, s)))
+  const missingSounds = requiredSounds.filter((s) => !existsSync(join(soundsDir, s)))
   checks.push({
     name: 'Sound Effects',
     passed: missingSounds.length === 0,
-    message: missingSounds.length === 0
-      ? `${requiredSounds.length} files found`
-      : `Missing: ${missingSounds.join(', ')}`,
+    message:
+      missingSounds.length === 0 ? `${requiredSounds.length} files found` : `Missing: ${missingSounds.join(', ')}`,
   })
 
   // Check 7: Background music file exists
@@ -160,7 +155,7 @@ export async function runStartupChecks(): Promise<StartupReport> {
     message: config.musicMuted ? 'MUTED - press N to unmute' : 'Enabled',
   })
 
-  const allPassed = checks.every(c => c.passed)
+  const allPassed = checks.every((c) => c.passed)
   const audioAvailable = audioPlayerAvailable && audioPlaybackWorks && missingSounds.length === 0
   const musicAvailable = musicExists && audioPlayerAvailable
 
@@ -215,7 +210,9 @@ export function printStartupReport(report: StartupReport): void {
     console.log('')
     console.log(`  ${yellow}╭─────────────────────────────────────────────────╮${reset}`)
     console.log(`  ${yellow}│${reset} ${cyan}TIP:${reset} For the best Vaders experience, try:      ${yellow}│${reset}`)
-    console.log(`  ${yellow}│${reset}   • ${green}${recommendation.name}${reset} - ${recommendation.url.padEnd(27)}${yellow}│${reset}`)
+    console.log(
+      `  ${yellow}│${reset}   • ${green}${recommendation.name}${reset} - ${recommendation.url.padEnd(27)}${yellow}│${reset}`,
+    )
     console.log(`  ${yellow}│${reset}                                                 ${yellow}│${reset}`)
     console.log(`  ${yellow}│${reset} ${dim}${recommendation.reason.padEnd(40)}${reset}        ${yellow}│${reset}`)
     console.log(`  ${yellow}╰─────────────────────────────────────────────────╯${reset}`)

@@ -14,12 +14,14 @@ import { logEvent } from './logger'
 // module-load time (not per-request) makes it a cheap one-liner. We keep
 // this raw JSON (not via logEvent) because module-load is before any
 // request.cf context exists and we want a minimal, stable envelope here.
-console.log(JSON.stringify({
-  event: 'worker_boot',
-  version: BUILD_INFO.version,
-  commitHash: BUILD_INFO.commitHash,
-  buildTime: BUILD_INFO.buildTime,
-}))
+console.log(
+  JSON.stringify({
+    event: 'worker_boot',
+    version: BUILD_INFO.version,
+    commitHash: BUILD_INFO.commitHash,
+    buildTime: BUILD_INFO.buildTime,
+  }),
+)
 
 /** Header used to propagate the per-request ID from the Worker entry into
  *  the Durable Object so every log line from the DO can be correlated with
@@ -70,15 +72,19 @@ async function createRoom(env: Env, matchmaker: DurableObjectStub, roomCode: str
   const id = env.GAME_ROOM.idFromName(roomCode)
   const stub = env.GAME_ROOM.get(id)
 
-  await stub.fetch(new Request('https://internal/init', {
-    method: 'POST',
-    body: JSON.stringify({ roomCode })
-  }))
+  await stub.fetch(
+    new Request('https://internal/init', {
+      method: 'POST',
+      body: JSON.stringify({ roomCode }),
+    }),
+  )
 
-  await matchmaker.fetch(new Request('https://internal/register', {
-    method: 'POST',
-    body: JSON.stringify({ roomCode, playerCount: 0, status: 'waiting' })
-  }))
+  await matchmaker.fetch(
+    new Request('https://internal/register', {
+      method: 'POST',
+      body: JSON.stringify({ roomCode, playerCount: 0, status: 'waiting' }),
+    }),
+  )
 }
 
 export default {
@@ -94,9 +100,7 @@ export default {
     // subsequent logEvent() calls within this request can include it.
     // request.cf is undefined in tests/Node; we guard for that.
     const colo = (request as Request & { cf?: { colo?: string } }).cf?.colo
-    if (colo) {
-      ;(globalThis as { CF_REGION?: string }).CF_REGION = colo
-    }
+    ;(globalThis as { CF_REGION?: string | undefined }).CF_REGION = colo ?? undefined
 
     // CORS headers for all responses
     const corsHeaders = {
@@ -126,20 +130,23 @@ export default {
 
       if (!roomCode) {
         logEvent('http_room_create', { requestId, outcome: 'generation_failed' })
-        return new Response(JSON.stringify({
-          code: 'room_generation_failed',
-          message: 'Could not generate unique room code'
-        }), {
-          status: 503,
-          headers: { 'Content-Type': 'application/json', ...corsHeaders }
-        })
+        return new Response(
+          JSON.stringify({
+            code: 'room_generation_failed',
+            message: 'Could not generate unique room code',
+          }),
+          {
+            status: 503,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          },
+        )
       }
 
       await createRoom(env, matchmaker, roomCode)
 
       logEvent('http_room_create', { requestId, outcome: 'created', roomCode })
       return new Response(JSON.stringify({ roomCode }), {
-        headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        headers: { 'Content-Type': 'application/json', ...corsHeaders },
       })
     }
 
@@ -147,6 +154,12 @@ export default {
     const wsMatch = url.pathname.match(/^\/room\/([A-Z0-9]{6})\/ws$/)
     if (wsMatch) {
       const roomCode = wsMatch[1]
+      if (request.method !== 'GET' || request.headers.get('Upgrade') !== 'websocket') {
+        return new Response('Expected WebSocket upgrade', {
+          status: 426,
+          headers: { 'Content-Type': 'text/plain', ...corsHeaders },
+        })
+      }
       // Wide event at the WS upgrade entry. The DO does the actual
       // upgrade handshake; this line records that a client reached
       // the edge with the intent to connect. Pair via requestId with
@@ -162,7 +175,7 @@ export default {
     if (url.pathname === '/matchmake') {
       const matchmaker = env.MATCHMAKER.get(env.MATCHMAKER.idFromName('global'))
       const result = await matchmaker.fetch(new Request('https://internal/find'))
-      const { roomCode: existingRoom } = await result.json() as { roomCode: string | null }
+      const { roomCode: existingRoom } = (await result.json()) as { roomCode: string | null }
 
       if (existingRoom) {
         // Wide event: matchmaker returned an existing room. Pair with
@@ -175,7 +188,7 @@ export default {
           roomCode: existingRoom,
         })
         return new Response(JSON.stringify({ roomCode: existingRoom }), {
-          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+          headers: { 'Content-Type': 'application/json', ...corsHeaders },
         })
       }
 
@@ -187,13 +200,16 @@ export default {
           requestId,
           outcome: 'generation_failed',
         })
-        return new Response(JSON.stringify({
-          code: 'room_generation_failed',
-          message: 'Could not generate unique room code'
-        }), {
-          status: 503,
-          headers: { 'Content-Type': 'application/json', ...corsHeaders }
-        })
+        return new Response(
+          JSON.stringify({
+            code: 'room_generation_failed',
+            message: 'Could not generate unique room code',
+          }),
+          {
+            status: 503,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          },
+        )
       }
 
       await createRoom(env, matchmaker, newRoomCode)
@@ -207,7 +223,7 @@ export default {
         roomCode: newRoomCode,
       })
       return new Response(JSON.stringify({ roomCode: newRoomCode }), {
-        headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        headers: { 'Content-Type': 'application/json', ...corsHeaders },
       })
     }
 
@@ -221,13 +237,13 @@ export default {
       if (result.status === 404) {
         return new Response(JSON.stringify({ error: 'Room not found' }), {
           status: 404,
-          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+          headers: { 'Content-Type': 'application/json', ...corsHeaders },
         })
       }
 
       const data = await result.json()
       return new Response(JSON.stringify(data), {
-        headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        headers: { 'Content-Type': 'application/json', ...corsHeaders },
       })
     }
 
@@ -235,15 +251,18 @@ export default {
     // and buildTime are regenerated into ./buildInfo.ts on every deploy so
     // each running instance self-identifies which build it's serving.
     if (url.pathname === '/health') {
-      return new Response(JSON.stringify({
-        status: 'ok',
-        game: 'vaders',
-        version: BUILD_INFO.version,
-        commitHash: BUILD_INFO.commitHash,
-        buildTime: BUILD_INFO.buildTime,
-      }), {
-        headers: { 'Content-Type': 'application/json', ...corsHeaders }
-      })
+      return new Response(
+        JSON.stringify({
+          status: 'ok',
+          game: 'vaders',
+          version: BUILD_INFO.version,
+          commitHash: BUILD_INFO.commitHash,
+          buildTime: BUILD_INFO.buildTime,
+        }),
+        {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders },
+        },
+      )
     }
 
     // Fall through to static assets (SPA frontend).
@@ -254,7 +273,7 @@ export default {
 
     return new Response('Not Found', {
       status: 404,
-      headers: corsHeaders
+      headers: corsHeaders,
     })
-  }
+  },
 }

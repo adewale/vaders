@@ -28,22 +28,18 @@ interface EmptySlotProps {
  */
 function PlayerRow({ player, isReady, isCurrentPlayer }: PlayerRowProps) {
   const sprites = getSprites()
-  const colors = getColors()
+  const _colors = getColors()
   const playerColor = getTerminalPlayerColor(player.slot)
 
   // Use first line of ship sprite for compact display
   const shipSprite = sprites.player.a[0]
 
   // Format name with (you) indicator
-  const displayName = isCurrentPlayer
-    ? `${player.name} (you)`
-    : player.name
+  const displayName = isCurrentPlayer ? `${player.name} (you)` : player.name
 
   // Ready indicator: braille density when supported, filled box fallback
   const braille = supportsBraille(getTerminalCapabilities())
-  const readyIndicator = braille
-    ? (isReady ? '[\u28FF]' : '[\u2800]')
-    : (isReady ? '[■]' : '[ ]')
+  const readyIndicator = braille ? (isReady ? '[\u28FF]' : '[\u2800]') : isReady ? '[■]' : '[ ]'
   const readyText = isReady ? 'READY' : 'waiting'
 
   return (
@@ -52,7 +48,9 @@ function PlayerRow({ player, isReady, isCurrentPlayer }: PlayerRowProps) {
       <text fg={playerColor}>{shipSprite}</text>
       <box width={2} />
       {/* Player name in player color */}
-      <text fg={playerColor} width={24}>{displayName}</text>
+      <text fg={playerColor} width={24}>
+        {displayName}
+      </text>
       <box flexGrow={1} />
       {/* Ready indicator in player color */}
       <text fg={playerColor}>{readyIndicator}</text>
@@ -66,7 +64,7 @@ function PlayerRow({ player, isReady, isCurrentPlayer }: PlayerRowProps) {
  * Renders an empty player slot placeholder.
  */
 function EmptySlot({ slot }: EmptySlotProps) {
-  const sprites = getSprites()
+  const _sprites = getSprites()
   const colors = getColors()
 
   // Use dashes to indicate empty ship slot
@@ -76,11 +74,13 @@ function EmptySlot({ slot }: EmptySlotProps) {
     <box>
       <text fg={colors.ui.dim}>{emptyShip}</text>
       <box width={2} />
-      <text fg={colors.ui.dim} width={24}>(open)</text>
+      <text fg={colors.ui.dim} width={24}>
+        (open)
+      </text>
       <box flexGrow={1} />
       <text fg={colors.ui.dim}>[ ]</text>
       <box width={1} />
-      <text fg={colors.ui.dim}>      </text>
+      <text fg={colors.ui.dim}> </text>
     </box>
   )
 }
@@ -90,17 +90,12 @@ function EmptySlot({ slot }: EmptySlotProps) {
  * Shows all players with their ship sprites and ready status,
  * plus empty slots for remaining player positions.
  */
-export function PlayerList({
-  players,
-  readyPlayerIds,
-  currentPlayerId,
-  maxPlayers = 4
-}: PlayerListProps) {
+export function PlayerList({ players, readyPlayerIds, currentPlayerId, maxPlayers = 4 }: PlayerListProps) {
   // Sort players by slot to ensure consistent ordering
   const sortedPlayers = [...players].sort((a, b) => a.slot - b.slot)
 
   // Calculate which slots are taken
-  const takenSlots = new Set(players.map(p => p.slot))
+  const takenSlots = new Set(players.map((p) => p.slot))
 
   // Generate empty slots for positions not taken
   const emptySlots: PlayerSlot[] = []
@@ -113,7 +108,7 @@ export function PlayerList({
   return (
     <box flexDirection="column">
       {/* Render joined players */}
-      {sortedPlayers.map(player => (
+      {sortedPlayers.map((player) => (
         <PlayerRow
           key={player.id}
           player={player}
@@ -123,7 +118,7 @@ export function PlayerList({
       ))}
 
       {/* Render empty slots */}
-      {emptySlots.map(slot => (
+      {emptySlots.map((slot) => (
         <EmptySlot key={`empty-${slot}`} slot={slot} />
       ))}
     </box>

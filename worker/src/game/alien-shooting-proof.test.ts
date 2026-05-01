@@ -26,8 +26,8 @@ describe('PROOF: Alien shooting works end-to-end', () => {
         color: 'cyan',
         lastShotTick: 0,
         inputState: { left: false, right: false },
-        respawnAtTick: null
-      }
+        respawnAtTick: null,
+      },
     })
     state = s1
 
@@ -58,7 +58,7 @@ describe('PROOF: Alien shooting works end-to-end', () => {
     state.entities.push(...aliens)
 
     expect(getAliens(state.entities).length).toBeGreaterThan(0)
-    expect(getAliens(state.entities).every(a => a.entering)).toBe(true)
+    expect(getAliens(state.entities).every((a) => a.entering)).toBe(true)
 
     // 6. Tick through wipe_reveal until we transition to playing
     tickCount = 0
@@ -71,7 +71,7 @@ describe('PROOF: Alien shooting works end-to-end', () => {
 
     // 7. Verify aliens now have entering=false
     const aliensAfterReveal = getAliens(state.entities)
-    expect(aliensAfterReveal.every(a => a.entering === false)).toBe(true)
+    expect(aliensAfterReveal.every((a) => a.entering === false)).toBe(true)
 
     // 8. Run many ticks and count alien bullets
     let alienBulletCount = 0
@@ -81,7 +81,7 @@ describe('PROOF: Alien shooting works end-to-end', () => {
       const { state: next } = gameReducer(state, { type: 'TICK' })
 
       // Count new alien bullets (dy === 1)
-      const alienBullets = getBullets(next.entities).filter(b => b.dy === 1)
+      const alienBullets = getBullets(next.entities).filter((b) => b.dy === 1)
       for (const bullet of alienBullets) {
         if (!bulletIds.has(bullet.id)) {
           bulletIds.add(bullet.id)

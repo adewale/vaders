@@ -3,14 +3,7 @@
 
 import { describe, test, expect } from 'bun:test'
 import * as fc from 'fast-check'
-import {
-  checkPlayerHit,
-  checkAlienHit,
-  checkUfoHit,
-  checkBarrierSegmentHit,
-  HITBOX,
-  LAYOUT,
-} from './types'
+import { checkPlayerHit, checkAlienHit, checkUfoHit, checkBarrierSegmentHit, HITBOX, LAYOUT } from './types'
 
 // ─── Test Data Builders ─────────────────────────────────────────────────────
 
@@ -25,12 +18,12 @@ function player(x: number, y: number = LAYOUT.PLAYER_Y) {
 }
 
 /** Build an entity position at left edge (alien, ufo) */
-function entity(x: number, y: number) {
+function _entity(x: number, y: number) {
   return { x, y }
 }
 
 /** Build a barrier segment position */
-function segment(x: number, y: number) {
+function _segment(x: number, y: number) {
   return { x, y }
 }
 
@@ -81,22 +74,22 @@ describe('checkPlayerHit', () => {
   describe('Y boundary values', () => {
     test('bY = pY - 1 hits (within tolerance)', () => {
       expect(checkPlayerHit(pX, pY - 1, pX, pY)).toBe(true)
-      expect(Math.abs((pY - 1) - pY)).toBeLessThan(LAYOUT.COLLISION_V)
+      expect(Math.abs(pY - 1 - pY)).toBeLessThan(LAYOUT.COLLISION_V)
     })
 
     test('bY = pY + 1 hits (within tolerance)', () => {
       expect(checkPlayerHit(pX, pY + 1, pX, pY)).toBe(true)
-      expect(Math.abs((pY + 1) - pY)).toBeLessThan(LAYOUT.COLLISION_V)
+      expect(Math.abs(pY + 1 - pY)).toBeLessThan(LAYOUT.COLLISION_V)
     })
 
     test('bY = pY - 2 misses (at boundary, not strictly less than)', () => {
       expect(checkPlayerHit(pX, pY - 2, pX, pY)).toBe(false)
-      expect(Math.abs((pY - 2) - pY)).not.toBeLessThan(LAYOUT.COLLISION_V)
+      expect(Math.abs(pY - 2 - pY)).not.toBeLessThan(LAYOUT.COLLISION_V)
     })
 
     test('bY = pY + 2 misses (at boundary, not strictly less than)', () => {
       expect(checkPlayerHit(pX, pY + 2, pX, pY)).toBe(false)
-      expect(Math.abs((pY + 2) - pY)).not.toBeLessThan(LAYOUT.COLLISION_V)
+      expect(Math.abs(pY + 2 - pY)).not.toBeLessThan(LAYOUT.COLLISION_V)
     })
   })
 
@@ -140,7 +133,7 @@ describe('checkAlienHit', () => {
 
     test('right edge (aX + 6) hits, one right (aX + 7) misses', () => {
       const lastHit = aX + HITBOX.ALIEN_WIDTH - 1 // aX + 6
-      const firstMiss = aX + HITBOX.ALIEN_WIDTH   // aX + 7
+      const firstMiss = aX + HITBOX.ALIEN_WIDTH // aX + 7
       expect(checkAlienHit(lastHit, aY, aX, aY)).toBe(true)
       expect(checkAlienHit(firstMiss, aY, aX, aY)).toBe(false)
       // Width should be exactly ALIEN_WIDTH
@@ -243,7 +236,7 @@ describe('checkBarrierSegmentHit', () => {
 
     test('right edge (sX + 2) hits, one right (sX + 3) misses', () => {
       const lastHit = sX + HITBOX.BARRIER_SEGMENT_WIDTH - 1 // sX + 2
-      const firstMiss = sX + HITBOX.BARRIER_SEGMENT_WIDTH   // sX + 3
+      const firstMiss = sX + HITBOX.BARRIER_SEGMENT_WIDTH // sX + 3
       expect(checkBarrierSegmentHit(lastHit, sY, sX, sY)).toBe(true)
       expect(checkBarrierSegmentHit(firstMiss, sY, sX, sY)).toBe(false)
       expect(firstMiss - sX).toBe(HITBOX.BARRIER_SEGMENT_WIDTH)
@@ -259,7 +252,7 @@ describe('checkBarrierSegmentHit', () => {
 
     test('bottom edge (sY + 1) hits, one below (sY + 2) misses', () => {
       const lastHit = sY + HITBOX.BARRIER_SEGMENT_HEIGHT - 1 // sY + 1
-      const firstMiss = sY + HITBOX.BARRIER_SEGMENT_HEIGHT   // sY + 2
+      const firstMiss = sY + HITBOX.BARRIER_SEGMENT_HEIGHT // sY + 2
       expect(checkBarrierSegmentHit(sX, lastHit, sX, sY)).toBe(true)
       expect(checkBarrierSegmentHit(sX, firstMiss, sX, sY)).toBe(false)
       expect(firstMiss - sY).toBe(HITBOX.BARRIER_SEGMENT_HEIGHT)
@@ -346,7 +339,7 @@ describe('property-based collision tests', () => {
         fc.property(coordArb, coordArb, (pX, pY) => {
           expect(checkPlayerHit(pX, pY, pX, pY)).toBe(true)
         }),
-        { numRuns: 200 }
+        { numRuns: 200 },
       )
     })
 
@@ -356,7 +349,7 @@ describe('property-based collision tests', () => {
           const centerX = aX + Math.floor(HITBOX.ALIEN_WIDTH / 2) // aX + 3
           expect(checkAlienHit(centerX, aY, aX, aY)).toBe(true)
         }),
-        { numRuns: 200 }
+        { numRuns: 200 },
       )
     })
 
@@ -366,7 +359,7 @@ describe('property-based collision tests', () => {
           const centerX = uX + Math.floor(HITBOX.UFO_WIDTH / 2) // uX + 3
           expect(checkUfoHit(centerX, uY, uX, uY)).toBe(true)
         }),
-        { numRuns: 200 }
+        { numRuns: 200 },
       )
     })
 
@@ -377,7 +370,7 @@ describe('property-based collision tests', () => {
           const centerY = sY + Math.floor(HITBOX.BARRIER_SEGMENT_HEIGHT / 2) // sY + 1
           expect(checkBarrierSegmentHit(centerX, centerY, sX, sY)).toBe(true)
         }),
-        { numRuns: 200 }
+        { numRuns: 200 },
       )
     })
   })
@@ -389,62 +382,70 @@ describe('property-based collision tests', () => {
     test('player: bullet 50+ cells away never hits', () => {
       fc.assert(
         fc.property(
-          coordArb, coordArb,
-          farOffset, fc.constantFrom(-1, 1) as fc.Arbitrary<-1 | 1>,
+          coordArb,
+          coordArb,
+          farOffset,
+          fc.constantFrom(-1, 1) as fc.Arbitrary<-1 | 1>,
           (pX, pY, offset, sign) => {
             const bX = pX + offset * sign
             expect(checkPlayerHit(bX, pY, pX, pY)).toBe(false)
-          }
+          },
         ),
-        { numRuns: 200 }
+        { numRuns: 200 },
       )
     })
 
     test('alien: bullet 50+ cells away (X or Y) never hits', () => {
       fc.assert(
         fc.property(
-          coordArb, coordArb,
-          farOffset, fc.constantFrom(-1, 1) as fc.Arbitrary<-1 | 1>,
+          coordArb,
+          coordArb,
+          farOffset,
+          fc.constantFrom(-1, 1) as fc.Arbitrary<-1 | 1>,
           fc.boolean(),
           (aX, aY, offset, sign, useX) => {
             const bX = useX ? aX + offset * sign : aX
             const bY = useX ? aY : aY + offset * sign
             expect(checkAlienHit(bX, bY, aX, aY)).toBe(false)
-          }
+          },
         ),
-        { numRuns: 200 }
+        { numRuns: 200 },
       )
     })
 
     test('ufo: bullet 50+ cells away never hits', () => {
       fc.assert(
         fc.property(
-          coordArb, coordArb,
-          farOffset, fc.constantFrom(-1, 1) as fc.Arbitrary<-1 | 1>,
+          coordArb,
+          coordArb,
+          farOffset,
+          fc.constantFrom(-1, 1) as fc.Arbitrary<-1 | 1>,
           fc.boolean(),
           (uX, uY, offset, sign, useX) => {
             const bX = useX ? uX + offset * sign : uX
             const bY = useX ? uY : uY + offset * sign
             expect(checkUfoHit(bX, bY, uX, uY)).toBe(false)
-          }
+          },
         ),
-        { numRuns: 200 }
+        { numRuns: 200 },
       )
     })
 
     test('barrier segment: bullet 50+ cells away never hits', () => {
       fc.assert(
         fc.property(
-          coordArb, coordArb,
-          farOffset, fc.constantFrom(-1, 1) as fc.Arbitrary<-1 | 1>,
+          coordArb,
+          coordArb,
+          farOffset,
+          fc.constantFrom(-1, 1) as fc.Arbitrary<-1 | 1>,
           fc.boolean(),
           (sX, sY, offset, sign, useX) => {
             const bX = useX ? sX + offset * sign : sX
             const bY = useX ? sY : sY + offset * sign
             expect(checkBarrierSegmentHit(bX, bY, sX, sY)).toBe(false)
-          }
+          },
         ),
-        { numRuns: 200 }
+        { numRuns: 200 },
       )
     })
   })
@@ -457,7 +458,7 @@ describe('property-based collision tests', () => {
           const ufoResult = checkUfoHit(bX, bY, eX, eY)
           expect(alienResult).toBe(ufoResult)
         }),
-        { numRuns: 500 }
+        { numRuns: 500 },
       )
     })
 
@@ -470,42 +471,45 @@ describe('property-based collision tests', () => {
     test('player: any bullet in [pX-3, pX+3] x [pY-1, pY+1] hits', () => {
       fc.assert(
         fc.property(
-          coordArb, coordArb,
+          coordArb,
+          coordArb,
           fc.integer({ min: -HITBOX.PLAYER_HALF_WIDTH, max: HITBOX.PLAYER_HALF_WIDTH }),
           fc.integer({ min: -(LAYOUT.COLLISION_V - 1), max: LAYOUT.COLLISION_V - 1 }),
           (pX, pY, dx, dy) => {
             expect(checkPlayerHit(pX + dx, pY + dy, pX, pY)).toBe(true)
-          }
+          },
         ),
-        { numRuns: 200 }
+        { numRuns: 200 },
       )
     })
 
     test('alien: any bullet in [aX, aX+6] x [aY-1, aY+1] hits', () => {
       fc.assert(
         fc.property(
-          coordArb, coordArb,
+          coordArb,
+          coordArb,
           fc.integer({ min: 0, max: HITBOX.ALIEN_WIDTH - 1 }),
           fc.integer({ min: -(LAYOUT.COLLISION_V - 1), max: LAYOUT.COLLISION_V - 1 }),
           (aX, aY, dx, dy) => {
             expect(checkAlienHit(aX + dx, aY + dy, aX, aY)).toBe(true)
-          }
+          },
         ),
-        { numRuns: 200 }
+        { numRuns: 200 },
       )
     })
 
     test('barrier segment: any bullet in [sX, sX+2] x [sY, sY+1] hits', () => {
       fc.assert(
         fc.property(
-          coordArb, coordArb,
+          coordArb,
+          coordArb,
           fc.integer({ min: 0, max: HITBOX.BARRIER_SEGMENT_WIDTH - 1 }),
           fc.integer({ min: 0, max: HITBOX.BARRIER_SEGMENT_HEIGHT - 1 }),
           (sX, sY, dx, dy) => {
             expect(checkBarrierSegmentHit(sX + dx, sY + dy, sX, sY)).toBe(true)
-          }
+          },
         ),
-        { numRuns: 200 }
+        { numRuns: 200 },
       )
     })
   })
@@ -528,7 +532,7 @@ describe('property-based collision tests', () => {
           const alienHit = checkAlienHit(bX, bY, baseX - HITBOX.PLAYER_HALF_WIDTH, baseY)
           expect(playerHit).toBe(alienHit)
         }),
-        { numRuns: 300 }
+        { numRuns: 300 },
       )
     })
   })

@@ -14,49 +14,39 @@ export {
   detectTerminal,
   getTerminalDisplayName,
   type TerminalName,
-
   // Capabilities
   detectCapabilities,
   type TerminalCapabilities,
-
   // Helper functions
   getColorDepth,
   type ColorDepth,
   needsKeyReleaseTimeout,
   needsEscapePassthrough,
   wrapForPassthrough,
-
   // Keyboard configuration
   getKeyReleaseTimeoutMs,
   shouldEnableKittyKeyboard,
   usesDiscreteMovement,
-
   // Color conversion utilities
   hexTo256Color,
   hexTo16Color,
   formatColor,
   convertColorForTerminal,
   convertColorObject,
-
   // Platform utilities
   getAudioPlayer,
   isAudioSupported,
-
   // Terminal recommendations
   getTerminalRecommendation,
   shouldShowTerminalRecommendation,
   type TerminalRecommendation,
-
   // Terminal bell
   playTerminalBell,
-
   // Diagnostics
   getTerminalQuirks,
-
   // Feature detection helpers
   supportsRichColor,
   supportsBraille,
-
   // Singleton instances (for convenience)
   TERMINAL_NAME,
   TERMINAL_CAPABILITIES,
@@ -70,7 +60,6 @@ import {
   detectTerminal,
   detectCapabilities,
   getTerminalDisplayName as _getDisplayName,
-  getKeyReleaseTimeoutMs,
 } from './compatibility'
 
 /**

@@ -30,9 +30,9 @@ test.describe('Play Again flow', () => {
     // (b) in a new game (canvas visible AND no game_over screen)
     // Either is "playable"; staying on game_over is NOT acceptable.
     await expect(async () => {
-      const onLaunch = await page.locator('text=SOLO GAME').count() > 0
-      const onGame = await page.locator('[data-testid="game-canvas"]').count() > 0
-      const onGameOver = await page.locator('[data-testid="replay-button"]').count() > 0
+      const onLaunch = (await page.locator('text=SOLO GAME').count()) > 0
+      const onGame = (await page.locator('[data-testid="game-canvas"]').count()) > 0
+      const onGameOver = (await page.locator('[data-testid="replay-button"]').count()) > 0
       expect(onLaunch || (onGame && !onGameOver)).toBe(true)
     }).toPass({ timeout: 15000 })
   })

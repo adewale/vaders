@@ -44,14 +44,7 @@ const SCAN_ROOTS = ['web/src', 'client-core/src', 'shared', 'scripts']
 const TEST_FILE = /\.(test|spec)\.(ts|tsx|mjs)$/
 
 // Directories to skip entirely (build output, dependencies, reports).
-const SKIP_DIRS = new Set([
-  'node_modules',
-  'dist',
-  '.wrangler',
-  'test-results',
-  'playwright-report',
-  'coverage',
-])
+const SKIP_DIRS = new Set(['node_modules', 'dist', '.wrangler', 'test-results', 'playwright-report', 'coverage'])
 
 function walk(dir) {
   const out = []

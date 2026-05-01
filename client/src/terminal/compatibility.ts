@@ -112,18 +112,18 @@ export function detectTerminal(): TerminalName {
  */
 export function getTerminalDisplayName(terminal: TerminalName): string {
   const names: Record<TerminalName, string> = {
-    'kitty': 'Kitty',
-    'ghostty': 'Ghostty',
-    'iterm2': 'iTerm2',
-    'alacritty': 'Alacritty',
-    'wezterm': 'WezTerm',
+    kitty: 'Kitty',
+    ghostty: 'Ghostty',
+    iterm2: 'iTerm2',
+    alacritty: 'Alacritty',
+    wezterm: 'WezTerm',
     'apple-terminal': 'Apple Terminal',
-    'vscode': 'VS Code Terminal',
-    'tmux': 'tmux',
-    'screen': 'GNU Screen',
-    'xterm': 'xterm',
+    vscode: 'VS Code Terminal',
+    tmux: 'tmux',
+    screen: 'GNU Screen',
+    xterm: 'xterm',
     'linux-console': 'Linux Console',
-    'unknown': 'Unknown Terminal',
+    unknown: 'Unknown Terminal',
   }
   return names[terminal]
 }
@@ -225,7 +225,7 @@ export interface TerminalCapabilities {
  * These are baseline assumptions that may be overridden by environment detection.
  */
 const TERMINAL_DEFAULTS: Record<TerminalName, Partial<TerminalCapabilities>> = {
-  'kitty': {
+  kitty: {
     supportsTrueColor: true,
     supports256Color: true,
     supportsKittyKeyboard: true,
@@ -237,7 +237,7 @@ const TERMINAL_DEFAULTS: Record<TerminalName, Partial<TerminalCapabilities>> = {
     supportsSixel: true,
     supportsHyperlinks: true,
   },
-  'ghostty': {
+  ghostty: {
     supportsTrueColor: true,
     supports256Color: true,
     supportsKittyKeyboard: true,
@@ -249,7 +249,7 @@ const TERMINAL_DEFAULTS: Record<TerminalName, Partial<TerminalCapabilities>> = {
     supportsSixel: false,
     supportsHyperlinks: true,
   },
-  'iterm2': {
+  iterm2: {
     supportsTrueColor: true,
     supports256Color: true,
     supportsKittyKeyboard: false,
@@ -261,7 +261,7 @@ const TERMINAL_DEFAULTS: Record<TerminalName, Partial<TerminalCapabilities>> = {
     supportsSixel: false,
     supportsHyperlinks: true,
   },
-  'alacritty': {
+  alacritty: {
     supportsTrueColor: true,
     supports256Color: true,
     supportsKittyKeyboard: false,
@@ -273,7 +273,7 @@ const TERMINAL_DEFAULTS: Record<TerminalName, Partial<TerminalCapabilities>> = {
     supportsSixel: false,
     supportsHyperlinks: true,
   },
-  'wezterm': {
+  wezterm: {
     supportsTrueColor: true,
     supports256Color: true,
     supportsKittyKeyboard: true, // WezTerm has experimental support
@@ -297,7 +297,7 @@ const TERMINAL_DEFAULTS: Record<TerminalName, Partial<TerminalCapabilities>> = {
     supportsSixel: false,
     supportsHyperlinks: false,
   },
-  'vscode': {
+  vscode: {
     supportsTrueColor: true,
     supports256Color: true,
     supportsKittyKeyboard: false,
@@ -309,7 +309,7 @@ const TERMINAL_DEFAULTS: Record<TerminalName, Partial<TerminalCapabilities>> = {
     supportsSixel: false,
     supportsHyperlinks: true,
   },
-  'tmux': {
+  tmux: {
     supportsTrueColor: true, // With proper configuration
     supports256Color: true,
     supportsKittyKeyboard: false, // Requires passthrough
@@ -321,7 +321,7 @@ const TERMINAL_DEFAULTS: Record<TerminalName, Partial<TerminalCapabilities>> = {
     supportsSixel: false,
     supportsHyperlinks: true, // With passthrough
   },
-  'screen': {
+  screen: {
     supportsTrueColor: false,
     supports256Color: true,
     supportsKittyKeyboard: false,
@@ -333,7 +333,7 @@ const TERMINAL_DEFAULTS: Record<TerminalName, Partial<TerminalCapabilities>> = {
     supportsSixel: false,
     supportsHyperlinks: false,
   },
-  'xterm': {
+  xterm: {
     supportsTrueColor: true, // Modern xterm supports it
     supports256Color: true,
     supportsKittyKeyboard: false,
@@ -357,7 +357,7 @@ const TERMINAL_DEFAULTS: Record<TerminalName, Partial<TerminalCapabilities>> = {
     supportsSixel: false,
     supportsHyperlinks: false,
   },
-  'unknown': {
+  unknown: {
     supportsTrueColor: false,
     supports256Color: true,
     supportsKittyKeyboard: false,
@@ -463,7 +463,7 @@ const DEFAULT_KEY_RELEASE_TIMEOUT_MS = 40
  */
 const KEY_RELEASE_TIMEOUTS: Partial<Record<TerminalName, number>> = {
   // VS Code terminal can have variable latency
-  'vscode': 80,
+  vscode: 80,
 }
 
 /**
@@ -566,9 +566,9 @@ export function hexTo256Color(hex: string): number {
   const cleanHex = hex.replace(/^#/, '')
 
   // Parse RGB components
-  const r = parseInt(cleanHex.slice(0, 2), 16)
-  const g = parseInt(cleanHex.slice(2, 4), 16)
-  const b = parseInt(cleanHex.slice(4, 6), 16)
+  const r = Number.parseInt(cleanHex.slice(0, 2), 16)
+  const g = Number.parseInt(cleanHex.slice(2, 4), 16)
+  const b = Number.parseInt(cleanHex.slice(4, 6), 16)
 
   // Check for grayscale (when r, g, b are similar)
   if (Math.abs(r - g) < 8 && Math.abs(g - b) < 8) {
@@ -597,9 +597,9 @@ export function hexTo256Color(hex: string): number {
  */
 export function hexTo16Color(hex: string): number {
   const cleanHex = hex.replace(/^#/, '')
-  const r = parseInt(cleanHex.slice(0, 2), 16)
-  const g = parseInt(cleanHex.slice(2, 4), 16)
-  const b = parseInt(cleanHex.slice(4, 6), 16)
+  const r = Number.parseInt(cleanHex.slice(0, 2), 16)
+  const g = Number.parseInt(cleanHex.slice(2, 4), 16)
+  const b = Number.parseInt(cleanHex.slice(4, 6), 16)
 
   // Determine brightness
   const brightness = (r + g + b) / 3
@@ -637,9 +637,9 @@ export function formatColor(hex: string, caps: TerminalCapabilities): string {
   switch (depth) {
     case 'truecolor': {
       const cleanHex = hex.replace(/^#/, '')
-      const r = parseInt(cleanHex.slice(0, 2), 16)
-      const g = parseInt(cleanHex.slice(2, 4), 16)
-      const b = parseInt(cleanHex.slice(4, 6), 16)
+      const r = Number.parseInt(cleanHex.slice(0, 2), 16)
+      const g = Number.parseInt(cleanHex.slice(2, 4), 16)
+      const b = Number.parseInt(cleanHex.slice(4, 6), 16)
       return `\x1b[38;2;${r};${g};${b}m`
     }
     case '256':

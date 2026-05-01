@@ -166,8 +166,8 @@ describe('calculateSize', () => {
       const testCases = [
         { terminal: 140, standard: 120, expected: 10 },
         { terminal: 160, standard: 120, expected: 20 },
-        { terminal: 121, standard: 120, expected: 0 },  // Floor(0.5) = 0
-        { terminal: 122, standard: 120, expected: 1 },  // Floor(1) = 1
+        { terminal: 121, standard: 120, expected: 0 }, // Floor(0.5) = 0
+        { terminal: 122, standard: 120, expected: 1 }, // Floor(1) = 1
       ]
 
       for (const { terminal, standard, expected } of testCases) {
@@ -191,7 +191,7 @@ describe('calculateSize', () => {
       const size = calculateSize(500, 200)
       expect(size.isTooSmall).toBe(false)
       expect(size.offsetX).toBe(190) // (500-120)/2
-      expect(size.offsetY).toBe(82)  // (200-36)/2
+      expect(size.offsetY).toBe(82) // (200-36)/2
     })
 
     test('terminal with 0 width', () => {
@@ -264,8 +264,7 @@ describe('Resize Change Detection', () => {
     const prev = calculateSize(120, 36)
     const next = calculateSize(140, 36)
 
-    const changed = prev.terminalWidth !== next.terminalWidth ||
-                    prev.terminalHeight !== next.terminalHeight
+    const changed = prev.terminalWidth !== next.terminalWidth || prev.terminalHeight !== next.terminalHeight
     expect(changed).toBe(true)
   })
 
@@ -273,8 +272,7 @@ describe('Resize Change Detection', () => {
     const prev = calculateSize(120, 36)
     const next = calculateSize(120, 40)
 
-    const changed = prev.terminalWidth !== next.terminalWidth ||
-                    prev.terminalHeight !== next.terminalHeight
+    const changed = prev.terminalWidth !== next.terminalWidth || prev.terminalHeight !== next.terminalHeight
     expect(changed).toBe(true)
   })
 
@@ -282,8 +280,7 @@ describe('Resize Change Detection', () => {
     const prev = calculateSize(120, 36)
     const next = calculateSize(120, 36)
 
-    const changed = prev.terminalWidth !== next.terminalWidth ||
-                    prev.terminalHeight !== next.terminalHeight
+    const changed = prev.terminalWidth !== next.terminalWidth || prev.terminalHeight !== next.terminalHeight
     expect(changed).toBe(false)
   })
 
@@ -336,21 +333,21 @@ describe('Common Terminal Sizes', () => {
   test('132x43 (macOS Terminal default)', () => {
     const size = calculateSize(132, 43)
     expect(size.isTooSmall).toBe(false)
-    expect(size.offsetX).toBe(6)   // (132-120)/2 = 6
-    expect(size.offsetY).toBe(3)   // (43-36)/2 = 3.5 -> floor -> 3
+    expect(size.offsetX).toBe(6) // (132-120)/2 = 6
+    expect(size.offsetY).toBe(3) // (43-36)/2 = 3.5 -> floor -> 3
   })
 
   test('160x48 (large terminal)', () => {
     const size = calculateSize(160, 48)
     expect(size.isTooSmall).toBe(false)
-    expect(size.offsetX).toBe(20)  // (160-120)/2
-    expect(size.offsetY).toBe(6)   // (48-36)/2
+    expect(size.offsetX).toBe(20) // (160-120)/2
+    expect(size.offsetY).toBe(6) // (48-36)/2
   })
 
   test('240x67 (ultrawide)', () => {
     const size = calculateSize(240, 67)
     expect(size.isTooSmall).toBe(false)
-    expect(size.offsetX).toBe(60)  // (240-120)/2
-    expect(size.offsetY).toBe(15)  // (67-36)/2 = 15.5 -> floor -> 15
+    expect(size.offsetX).toBe(60) // (240-120)/2
+    expect(size.offsetY).toBe(15) // (67-36)/2 = 15.5 -> floor -> 15
   })
 })

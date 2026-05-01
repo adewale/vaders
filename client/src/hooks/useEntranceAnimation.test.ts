@@ -9,10 +9,7 @@
 // 4. Hook interface contracts (types, return values)
 
 import { describe, test, expect, beforeEach } from 'bun:test'
-import {
-  EntranceAnimation,
-  DEFAULT_ENTRANCE_CONFIG,
-} from '../animation/entrance'
+import { EntranceAnimation, DEFAULT_ENTRANCE_CONFIG } from '../animation/entrance'
 import type { EntranceAlien, AlienVisualPosition } from './useEntranceAnimation'
 
 // ─── Test Helpers ───────────────────────────────────────────────────────────
@@ -107,9 +104,7 @@ describe('Entrance Animation State Machine', () => {
       const firstAliens = createTestAliens(2)
       entrance.start(firstAliens)
 
-      const secondAliens = [
-        { id: 'new-1', row: 0, col: 0, targetX: 50, targetY: 10 },
-      ]
+      const secondAliens = [{ id: 'new-1', row: 0, col: 0, targetX: 50, targetY: 10 }]
       entrance.start(secondAliens)
 
       // Old aliens should be gone
@@ -243,9 +238,7 @@ describe('Entering Alien Tracking', () => {
       staggerDelay: 0,
     })
 
-    shortEntrance.start([
-      { id: 'tracked', row: 0, col: 0, targetX: 30, targetY: 10 },
-    ])
+    shortEntrance.start([{ id: 'tracked', row: 0, col: 0, targetX: 30, targetY: 10 }])
 
     // Phase 1: entering
     const enteringPos = shortEntrance.getVisualPosition('tracked')
@@ -364,9 +357,7 @@ describe('EntranceAlien Interface', () => {
 describe('AlienVisualPosition Shape', () => {
   test('has x, y, and animState fields', () => {
     const entrance = new EntranceAnimation()
-    entrance.start([
-      { id: 'a1', row: 0, col: 0, targetX: 10, targetY: 5 },
-    ])
+    entrance.start([{ id: 'a1', row: 0, col: 0, targetX: 10, targetY: 5 }])
 
     const pos = entrance.getVisualPosition('a1')
     expect(pos).not.toBeNull()
@@ -377,9 +368,7 @@ describe('AlienVisualPosition Shape', () => {
 
   test('position matches AlienVisualPosition shape', () => {
     const entrance = new EntranceAnimation()
-    entrance.start([
-      { id: 'a1', row: 0, col: 0, targetX: 42, targetY: 12 },
-    ])
+    entrance.start([{ id: 'a1', row: 0, col: 0, targetX: 42, targetY: 12 }])
 
     const rawPos = entrance.getVisualPosition('a1')!
     const typedPos: AlienVisualPosition = {

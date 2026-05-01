@@ -25,12 +25,7 @@ interface GradientTextProps {
  * When richColor is false (or on limited terminals), renders with
  * a single flat fallbackColor instead — no per-character spans.
  */
-export function GradientText({
-  text,
-  colors,
-  fallbackColor = '#00ffff',
-  richColor = true,
-}: GradientTextProps) {
+export function GradientText({ text, colors, fallbackColor = '#00ffff', richColor = true }: GradientTextProps) {
   // Fast path: flat color for terminals that can't render truecolor
   if (!richColor || colors.length < 2) {
     return <text fg={colors[0] ?? fallbackColor}>{text}</text>
@@ -43,7 +38,9 @@ export function GradientText({
       {lines.map((line, lineIdx) => (
         <text key={`line-${lineIdx}`}>
           {line.map((ch, charIdx) => (
-            <span fg={ch.color} key={`${lineIdx}-${charIdx}`}>{ch.char}</span>
+            <span fg={ch.color} key={`${lineIdx}-${charIdx}`}>
+              {ch.char}
+            </span>
           ))}
         </text>
       ))}

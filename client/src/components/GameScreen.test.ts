@@ -4,7 +4,6 @@
 import { describe, test, expect, beforeEach } from 'bun:test'
 import type {
   GameState,
-  GameConfig,
   Player,
   PlayerSlot,
   AlienEntity,
@@ -19,17 +18,12 @@ import {
   DEFAULT_CONFIG,
   STANDARD_WIDTH,
   STANDARD_HEIGHT,
-  LAYOUT,
   getAliens,
   getBullets,
   getBarriers,
   getUFOs,
 } from '../../../shared/types'
-import {
-  ConfettiSystem,
-  EntranceAnimation,
-  InterpolationManager,
-} from '../animation'
+import { ConfettiSystem, EntranceAnimation, InterpolationManager } from '../animation'
 
 // ─── Test Helpers ─────────────────────────────────────────────────────────────
 
@@ -126,7 +120,7 @@ function createAlienGrid(rows: number, cols: number): AlienEntity[] {
           col,
           x: 10 + col * 7,
           y: 3 + row * 3,
-        })
+        }),
       )
     }
   }
@@ -194,7 +188,7 @@ describe('Confetti triggers on wave complete', () => {
         lifetime: [3, 5],
         particlesPerBurst: 5,
         maxParticles: 20,
-      }
+      },
     )
 
     quickConfetti.start()
@@ -551,7 +545,7 @@ describe('Combined animation integration scenarios', () => {
         col: a.col,
         targetX: a.x,
         targetY: a.y,
-      }))
+      })),
     )
 
     // During entrance, positions come from entrance animation
@@ -595,7 +589,7 @@ describe('Combined animation integration scenarios', () => {
           col: a.col,
           targetX: a.x,
           targetY: a.y,
-        }))
+        })),
       )
     }
     expect(entrance.isRunning()).toBe(true)
@@ -655,7 +649,6 @@ describe('Animation integration edge cases', () => {
     confetti2.start()
     expect(confetti2.isRunning()).toBe(true)
   })
-
 })
 
 // ─── GameScreen State Derivation Tests ───────────────────────────────────────
@@ -726,7 +719,7 @@ describe('GameScreen Entity Extraction', () => {
 
     const bullets = getBullets(entities)
     expect(bullets.length).toBe(2)
-    expect(bullets.every(b => b.kind === 'bullet')).toBe(true)
+    expect(bullets.every((b) => b.kind === 'bullet')).toBe(true)
   })
 
   test('getBarriers filters only barrier entities', () => {
@@ -741,10 +734,7 @@ describe('GameScreen Entity Extraction', () => {
   })
 
   test('getUFOs filters only UFO entities', () => {
-    const entities: Entity[] = [
-      createMockUFO({ id: 'u1' }),
-      createMockAlien({ id: 'a1' }),
-    ]
+    const entities: Entity[] = [createMockUFO({ id: 'u1' }), createMockAlien({ id: 'a1' })]
 
     const ufos = getUFOs(entities)
     expect(ufos.length).toBe(1)
@@ -783,8 +773,8 @@ describe('GameScreen Header Data Derivation', () => {
   test('player count derived from players object', () => {
     const state = createMockGameState({
       players: {
-        'p1': createMockPlayer({ id: 'p1' }),
-        'p2': createMockPlayer({ id: 'p2', slot: 2 }),
+        p1: createMockPlayer({ id: 'p1' }),
+        p2: createMockPlayer({ id: 'p2', slot: 2 }),
       },
     })
     const playerCount = Object.keys(state.players).length
@@ -828,9 +818,9 @@ describe('GameScreen Header Data Derivation', () => {
     const multiState = createMockGameState({
       mode: 'coop',
       players: {
-        'p1': createMockPlayer({ id: 'p1' }),
-        'p2': createMockPlayer({ id: 'p2', slot: 2 }),
-        'p3': createMockPlayer({ id: 'p3', slot: 3 }),
+        p1: createMockPlayer({ id: 'p1' }),
+        p2: createMockPlayer({ id: 'p2', slot: 2 }),
+        p3: createMockPlayer({ id: 'p3', slot: 3 }),
       },
     })
 
@@ -874,12 +864,12 @@ describe('Player Ship Visibility Logic', () => {
     // This creates a 10-tick on, 10-tick off blink pattern
     const visibilityAt = (tick: number) => Math.floor(tick / 10) % 2 !== 0
 
-    expect(visibilityAt(0)).toBe(false)   // tick 0-9: hidden
-    expect(visibilityAt(5)).toBe(false)   // tick 5: hidden
-    expect(visibilityAt(10)).toBe(true)   // tick 10-19: visible
-    expect(visibilityAt(15)).toBe(true)   // tick 15: visible
-    expect(visibilityAt(20)).toBe(false)  // tick 20-29: hidden
-    expect(visibilityAt(30)).toBe(true)   // tick 30-39: visible
+    expect(visibilityAt(0)).toBe(false) // tick 0-9: hidden
+    expect(visibilityAt(5)).toBe(false) // tick 5: hidden
+    expect(visibilityAt(10)).toBe(true) // tick 10-19: visible
+    expect(visibilityAt(15)).toBe(true) // tick 15: visible
+    expect(visibilityAt(20)).toBe(false) // tick 20-29: hidden
+    expect(visibilityAt(30)).toBe(true) // tick 30-39: visible
   })
 })
 
@@ -888,10 +878,10 @@ describe('Player Ship Visibility Logic', () => {
 describe('PlayerScores Sorting', () => {
   test('players sorted by slot number ascending', () => {
     const players: Record<string, Player> = {
-      'p3': createMockPlayer({ id: 'p3', name: 'C', slot: 3 }),
-      'p1': createMockPlayer({ id: 'p1', name: 'A', slot: 1 }),
-      'p4': createMockPlayer({ id: 'p4', name: 'D', slot: 4 }),
-      'p2': createMockPlayer({ id: 'p2', name: 'B', slot: 2 }),
+      p3: createMockPlayer({ id: 'p3', name: 'C', slot: 3 }),
+      p1: createMockPlayer({ id: 'p1', name: 'A', slot: 1 }),
+      p4: createMockPlayer({ id: 'p4', name: 'D', slot: 4 }),
+      p2: createMockPlayer({ id: 'p2', name: 'B', slot: 2 }),
     }
 
     const sorted = Object.values(players).sort((a, b) => a.slot - b.slot)
@@ -903,7 +893,7 @@ describe('PlayerScores Sorting', () => {
 
   test('single player sorting is trivial', () => {
     const players: Record<string, Player> = {
-      'p1': createMockPlayer({ id: 'p1', slot: 1 }),
+      p1: createMockPlayer({ id: 'p1', slot: 1 }),
     }
     const sorted = Object.values(players).sort((a, b) => a.slot - b.slot)
     expect(sorted.length).toBe(1)
@@ -954,7 +944,7 @@ describe('Barrier Segment Filtering', () => {
       { offsetX: 1, offsetY: 1, health: 0 as const },
     ]
 
-    const visible = segments.filter(s => s.health > 0)
+    const visible = segments.filter((s) => s.health > 0)
     expect(visible.length).toBe(2)
     expect(visible[0].health).toBe(4)
     expect(visible[1].health).toBe(2)
@@ -966,7 +956,7 @@ describe('Barrier Segment Filtering', () => {
       { offsetX: 1, offsetY: 0, health: 0 as const },
     ]
 
-    const visible = segments.filter(s => s.health > 0)
+    const visible = segments.filter((s) => s.health > 0)
     expect(visible.length).toBe(0)
   })
 
@@ -978,7 +968,7 @@ describe('Barrier Segment Filtering', () => {
       { offsetX: 1, offsetY: 1, health: 4 as const },
     ]
 
-    const visible = segments.filter(s => s.health > 0)
+    const visible = segments.filter((s) => s.health > 0)
     expect(visible.length).toBe(4)
   })
 })

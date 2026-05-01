@@ -12,11 +12,7 @@
 // the old global behaviour so single-player tests still work.
 
 import { describe, it, expect, beforeEach } from 'vitest'
-import {
-  buildDrawCommands,
-  resetEffects,
-  _getFlashStateForTests,
-} from './canvasRenderer'
+import { buildDrawCommands, resetEffects, _getFlashStateForTests } from './canvasRenderer'
 import { createDefaultGameState } from '../../../shared/state-defaults'
 import type { GameState, Player } from '../../../shared/types'
 
@@ -42,10 +38,7 @@ function makePlayer(overrides: Partial<Player> = {}): Player {
   }
 }
 
-function stateWith(
-  players: Record<string, Player>,
-  overrides: Partial<GameState> = {},
-): GameState {
+function stateWith(players: Record<string, Player>, overrides: Partial<GameState> = {}): GameState {
   const state = createDefaultGameState('TEST01')
   state.players = players
   state.entities = []

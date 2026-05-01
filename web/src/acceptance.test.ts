@@ -150,12 +150,12 @@ describe('Renderer: gradient sprite coloring', () => {
     }
 
     // Each type should have the correct gradient from GRADIENT_COLORS
-    expect(gradientsByType['squid'].bright).toBe(GRADIENT_COLORS.alien.squid.bright)
-    expect(gradientsByType['squid'].dark).toBe(GRADIENT_COLORS.alien.squid.dark)
-    expect(gradientsByType['crab'].bright).toBe(GRADIENT_COLORS.alien.crab.bright)
-    expect(gradientsByType['crab'].dark).toBe(GRADIENT_COLORS.alien.crab.dark)
-    expect(gradientsByType['octopus'].bright).toBe(GRADIENT_COLORS.alien.octopus.bright)
-    expect(gradientsByType['octopus'].dark).toBe(GRADIENT_COLORS.alien.octopus.dark)
+    expect(gradientsByType.squid.bright).toBe(GRADIENT_COLORS.alien.squid.bright)
+    expect(gradientsByType.squid.dark).toBe(GRADIENT_COLORS.alien.squid.dark)
+    expect(gradientsByType.crab.bright).toBe(GRADIENT_COLORS.alien.crab.bright)
+    expect(gradientsByType.crab.dark).toBe(GRADIENT_COLORS.alien.crab.dark)
+    expect(gradientsByType.octopus.bright).toBe(GRADIENT_COLORS.alien.octopus.bright)
+    expect(gradientsByType.octopus.dark).toBe(GRADIENT_COLORS.alien.octopus.dark)
   })
 
   it('player sprite commands include slot-specific gradient colors', () => {
@@ -1048,7 +1048,7 @@ describe('Renderer: wave transition screen', () => {
 
 describe('Entrance animation', () => {
   const FORMATION_Y = 5
-  const SPRITE_H = 2 // SPRITE_SIZE.alien.height
+  const _SPRITE_H = 2 // SPRITE_SIZE.alien.height
 
   it('during wipe_reveal, alien sprites are rendered at entrance-animated positions', () => {
     const alien = makeAlien({ id: 'a-0', y: FORMATION_Y, row: 0, col: 0 })
@@ -2372,7 +2372,7 @@ describe('UFO elevation pass 2', () => {
 
   it('UFO does NOT emit beam at any tick', () => {
     for (const tick of [0, 12, 50, 100]) {
-      const ufo = makeUFO({ id: 'ufo-no-beam-t' + tick, x: 50, y: 1 })
+      const ufo = makeUFO({ id: `ufo-no-beam-t${tick}`, x: 50, y: 1 })
       const state = stateWith([ufo], {}, { tick })
       const cmds = buildDrawCommands(state, null, state, 1, 1)
       const beam = cmds.filter((c): c is RectCmd => isRect(c) && (c as any).kind === 'ufo-beam')
@@ -2428,7 +2428,7 @@ describe('UFO elevation pass 2', () => {
     // Regression guard: the pulsar rings rendered as small cells arranged in a
     // circle around the UFO, which read as a weird halo/outline. Removed.
     for (const tick of [0, 5, 20, 50]) {
-      const ufo = makeUFO({ id: 'ufo-no-pulsar-' + tick, x: 30, y: 1 })
+      const ufo = makeUFO({ id: `ufo-no-pulsar-${tick}`, x: 30, y: 1 })
       const state = stateWith([ufo], {}, { tick })
       const cmds = buildDrawCommands(state, null, state, 1, 1)
       const inner = cmds.filter((c): c is RectCmd => isRect(c) && (c as any).kind === 'ufo-pulsar-inner')
@@ -2876,7 +2876,10 @@ describe('Player elevation pass 2', () => {
     // 0.7 * 3 * 255 = ~535 minimum before slot contribution).
     const brightest = cores.reduce((acc, c) => {
       const hex = c.fill.replace('#', '')
-      const sum = Number.parseInt(hex.slice(0, 2), 16) + Number.parseInt(hex.slice(2, 4), 16) + Number.parseInt(hex.slice(4, 6), 16)
+      const sum =
+        Number.parseInt(hex.slice(0, 2), 16) +
+        Number.parseInt(hex.slice(2, 4), 16) +
+        Number.parseInt(hex.slice(4, 6), 16)
       return sum > acc ? sum : acc
     }, 0)
     expect(brightest).toBeGreaterThanOrEqual(500)
@@ -2978,7 +2981,7 @@ describe('Player elevation pass 2', () => {
 
   it('impact shield burst on hit', () => {
     const alivePlayer = makePlayer({ x: 60, alive: true, invulnerableUntilTick: null })
-    const deadPlayer = makePlayer({ x: 60, alive: false, invulnerableUntilTick: null })
+    const _deadPlayer = makePlayer({ x: 60, alive: false, invulnerableUntilTick: null })
     const prev = stateWith([], { [alivePlayer.id]: alivePlayer }, { tick: 10 })
     // Respawn with invuln set (we still render when alive=true)
     const respawnedPlayer = makePlayer({
@@ -3577,7 +3580,7 @@ describe('Barrier shield shimmer', () => {
 describe('Barrier ambient glow from UFO', () => {
   const makeUFOLocal = (x: number) => ({
     kind: 'ufo' as const,
-    id: 'ufo-glow-' + x,
+    id: `ufo-glow-${x}`,
     x,
     y: 1,
     direction: 1 as 1 | -1,
@@ -3586,7 +3589,7 @@ describe('Barrier ambient glow from UFO', () => {
   })
   const makeBarrierLocal = (x: number) => ({
     kind: 'barrier' as const,
-    id: 'bg-' + x,
+    id: `bg-${x}`,
     x,
     segments: [{ offsetX: 0, offsetY: 0, health: 4 as 1 | 2 | 3 | 4 }],
   })

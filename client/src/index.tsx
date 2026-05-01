@@ -92,7 +92,7 @@ async function main() {
     if (!report.audioAvailable) {
       console.log('\x1b[33m⚠ Audio unavailable - game will run without sound\x1b[0m')
       console.log('  Run "vaders --check" for diagnostics\n')
-      await new Promise(r => setTimeout(r, 1500))
+      await new Promise((r) => setTimeout(r, 1500))
     }
   }
 
@@ -108,13 +108,8 @@ async function main() {
   // Render the app with terminal size provider
   root.render(
     <TerminalSizeProvider>
-      <App
-        roomCode={room}
-        playerName={name}
-        matchmake={matchmake}
-        solo={solo}
-      />
-    </TerminalSizeProvider>
+      <App roomCode={room} playerName={name} matchmake={matchmake} solo={solo} />
+    </TerminalSizeProvider>,
   )
 
   // Handle graceful shutdown

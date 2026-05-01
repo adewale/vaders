@@ -5,7 +5,7 @@
 // and catches any unexpected content ("flash" bugs).
 
 import { describe, test, expect, beforeEach } from 'bun:test'
-import type { GameState, GameStatus, Player, Entity } from '../../shared/types'
+import type { GameState, GameStatus } from '../../shared/types'
 import { GAME_STATE_DEFAULTS } from '../../shared/state-defaults'
 
 // ─── Render Trace System ─────────────────────────────────────────────────────
@@ -14,7 +14,7 @@ interface RenderFrame {
   timestamp: number
   status: GameStatus
   component: string
-  content: string[]  // Key content identifiers
+  content: string[] // Key content identifiers
 }
 
 class RenderTracer {
@@ -110,9 +110,7 @@ class RenderTracer {
         const forbiddenContent = ['game-border', 'player-ship', 'aliens', 'barriers']
         for (const forbidden of forbiddenContent) {
           if (frame.content.includes(forbidden)) {
-            violations.push(
-              `Frame ${frame.timestamp}: ${forbidden} visible during ${frame.status} (would cause flash)`
-            )
+            violations.push(`Frame ${frame.timestamp}: ${forbidden} visible during ${frame.status} (would cause flash)`)
           }
         }
       }
@@ -121,7 +119,7 @@ class RenderTracer {
       if (frame.status === 'wipe_hold') {
         if (!frame.content.includes('black-background')) {
           violations.push(
-            `Frame ${frame.timestamp}: missing black-background during wipe_hold (would show terminal bg)`
+            `Frame ${frame.timestamp}: missing black-background during wipe_hold (would show terminal bg)`,
           )
         }
       }
@@ -143,18 +141,14 @@ class RenderTracer {
       // Transition from lobby to wipe_hold should NOT flash game content
       if (prev.status === 'waiting' && curr.status === 'wipe_hold') {
         if (curr.content.includes('game-border')) {
-          violations.push(
-            `Transition waiting->wipe_hold: game-border appeared (flash!)`
-          )
+          violations.push(`Transition waiting->wipe_hold: game-border appeared (flash!)`)
         }
       }
 
       // Transition from wipe_exit to wipe_hold should hide game content
       if (prev.status === 'wipe_exit' && curr.status === 'wipe_hold') {
         if (curr.content.includes('game-border')) {
-          violations.push(
-            `Transition wipe_exit->wipe_hold: game-border should be hidden`
-          )
+          violations.push(`Transition wipe_exit->wipe_hold: game-border should be hidden`)
         }
       }
     }
@@ -281,7 +275,7 @@ describe('Flash detection', () => {
     expect(frames[0].component).toBe('WipeHoldScreen')
 
     // Should NOT contain LobbyScreen
-    const hasLobby = frames.some(f => f.component === 'LobbyScreen')
+    const hasLobby = frames.some((f) => f.component === 'LobbyScreen')
     expect(hasLobby).toBe(false)
   })
 
@@ -347,12 +341,16 @@ describe('App.tsx render logic verification', () => {
 
     // Verify rendering logic for each status
     // Check that countdown/wipe_hold render wave title (not GameScreen)
-    const wipeHoldBlock = source.match(/case 'countdown':[\s\S]*?case 'wipe_hold':[\s\S]*?[Ww]ave[\s\S]*?(?=case 'wipe_exit')/)
+    const wipeHoldBlock = source.match(
+      /case 'countdown':[\s\S]*?case 'wipe_hold':[\s\S]*?[Ww]ave[\s\S]*?(?=case 'wipe_exit')/,
+    )
     expect(wipeHoldBlock).not.toBeNull()
     expect(wipeHoldBlock![0]).not.toContain('<GameScreen')
 
     // Check that wipe_exit/wipe_reveal/playing render GameScreen
-    const gameScreenBlock = source.match(/case 'wipe_exit':[\s\S]*?case 'wipe_reveal':[\s\S]*?case 'playing':[\s\S]*?<GameScreen/)
+    const gameScreenBlock = source.match(
+      /case 'wipe_exit':[\s\S]*?case 'wipe_reveal':[\s\S]*?case 'playing':[\s\S]*?<GameScreen/,
+    )
     expect(gameScreenBlock).not.toBeNull()
 
     // Verify that the switch rendering block for wipe_hold does NOT contain GameScreen

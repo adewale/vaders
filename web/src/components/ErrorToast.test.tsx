@@ -36,7 +36,7 @@ describe('ErrorToast', () => {
     render(<ErrorToast message="invalid_message: bad" />)
     const toast = screen.getByTestId('in-game-error-toast')
     expect(toast.style.position).toBe('fixed')
-    const z = parseInt(toast.style.zIndex || '0', 10)
+    const z = Number.parseInt(toast.style.zIndex || '0', 10)
     expect(z).toBeGreaterThanOrEqual(9000)
   })
 

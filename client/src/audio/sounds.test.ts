@@ -59,8 +59,8 @@ describe('Sound Definitions', () => {
 
     test('important sounds have more bell repetitions', () => {
       // player_died and game_over should have more bells to be more noticeable
-      expect(BELL_PATTERNS['player_died']).toBeGreaterThan(BELL_PATTERNS['shoot'])
-      expect(BELL_PATTERNS['game_over']).toBeGreaterThan(BELL_PATTERNS['shoot'])
+      expect(BELL_PATTERNS.player_died).toBeGreaterThan(BELL_PATTERNS.shoot)
+      expect(BELL_PATTERNS.game_over).toBeGreaterThan(BELL_PATTERNS.shoot)
     })
   })
 

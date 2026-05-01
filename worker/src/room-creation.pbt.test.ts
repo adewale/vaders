@@ -16,7 +16,7 @@
 // DIAGNOSTIC ONLY. Any property violations are captured as `describe.skip
 // ('FOUND BUG: …')` below with a minimal reproducer.
 
-import { describe, it, expect, vi, type Mock } from 'vitest'
+import { describe, it, vi, type Mock } from 'vitest'
 import fc from 'fast-check'
 import worker from './index'
 import { GameRoom, type Env } from './GameRoom'
@@ -36,7 +36,7 @@ interface MockWebSocket {
   _closed: boolean
 }
 
-function createMockWebSocket(): MockWebSocket {
+function _createMockWebSocket(): MockWebSocket {
   const ws: MockWebSocket = {
     send: vi.fn(),
     close: vi.fn(() => {
@@ -63,18 +63,18 @@ function createMockDurableObjectContext() {
         exec: vi.fn((query: string, ...params: unknown[]) => {
           if (query.includes('CREATE TABLE')) return { toArray: () => [] }
           if (query.includes('SELECT')) {
-            if (sqlData['game_state']) return { toArray: () => [sqlData['game_state']] }
+            if (sqlData.game_state) return { toArray: () => [sqlData.game_state] }
             return { toArray: () => [] }
           }
           if (query.includes('INSERT OR REPLACE')) {
-            sqlData['game_state'] = {
+            sqlData.game_state = {
               data: params[0] as string,
               next_entity_id: params[1] as number,
             }
             return { toArray: () => [] }
           }
           if (query.includes('DELETE')) {
-            delete sqlData['game_state']
+            sqlData.game_state = undefined
             return { toArray: () => [] }
           }
           return { toArray: () => [] }
@@ -93,7 +93,7 @@ function createMockDurableObjectContext() {
     acceptWebSocket: vi.fn((ws: MockWebSocket) => {
       webSockets.push(ws)
     }),
-    getWebSockets: vi.fn(() => webSockets.filter(ws => !ws._closed)),
+    getWebSockets: vi.fn(() => webSockets.filter((ws) => !ws._closed)),
     _sqlData: sqlData,
     _webSockets: webSockets,
     _alarm: () => alarm,
@@ -133,7 +133,6 @@ class WorkerHarness {
   constructor() {
     this.matchmaker = new Matchmaker(this.matchmakerState as unknown as DurableObjectState)
     const matchmakerFetch = async (request: Request) => this.matchmaker.fetch(request)
-    const self = this
 
     this.env = {
       GAME_ROOM: {
@@ -141,15 +140,15 @@ class WorkerHarness {
         get: vi.fn((id: { toString(): string }) => ({
           fetch: async (request: Request): Promise<Response> => {
             const code = id.toString()
-            let entry = self.rooms.get(code)
+            let entry = this.rooms.get(code)
             if (!entry) {
               const ctx = createMockDurableObjectContext()
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const room = new GameRoom(ctx as any, self.env)
+              const room = new GameRoom(ctx as any, this.env)
               // Wait for blockConcurrencyWhile microtask to drain.
-              await new Promise(resolve => setTimeout(resolve, 0))
+              await new Promise((resolve) => setTimeout(resolve, 0))
               entry = { ctx, room }
-              self.rooms.set(code, entry)
+              this.rooms.set(code, entry)
             }
             return entry.room.fetch(request)
           },
@@ -165,39 +164,28 @@ class WorkerHarness {
   }
 
   async postRoom(): Promise<{ status: number; roomCode: string | null; code?: string }> {
-    const response = await worker.fetch(
-      new Request('http://localhost/room', { method: 'POST' }),
-      this.env,
-    )
+    const response = await worker.fetch(new Request('http://localhost/room', { method: 'POST' }), this.env)
     if (response.status !== 200) {
-      const body = await response.json() as { code?: string; message?: string }
+      const body = (await response.json()) as { code?: string; message?: string }
       return { status: response.status, roomCode: null, code: body.code }
     }
-    const body = await response.json() as { roomCode: string }
+    const body = (await response.json()) as { roomCode: string }
     return { status: 200, roomCode: body.roomCode }
   }
 
-  async getMatchmakerInfo(
-    roomCode: string,
-  ): Promise<{ playerCount: number; status: string } | null> {
-    const response = await this.matchmaker.fetch(
-      new Request(`https://internal/info/${roomCode}`),
-    )
+  async getMatchmakerInfo(roomCode: string): Promise<{ playerCount: number; status: string } | null> {
+    const response = await this.matchmaker.fetch(new Request(`https://internal/info/${roomCode}`))
     if (response.status !== 200) return null
-    return await response.json() as { playerCount: number; status: string }
+    return (await response.json()) as { playerCount: number; status: string }
   }
 
   async matchmakerFind(): Promise<string | null> {
     const response = await this.matchmaker.fetch(new Request('https://internal/find'))
-    const body = await response.json() as { roomCode: string | null }
+    const body = (await response.json()) as { roomCode: string | null }
     return body.roomCode
   }
 
-  async registerExternal(
-    roomCode: string,
-    playerCount: number,
-    status: string,
-  ): Promise<void> {
+  async registerExternal(roomCode: string, playerCount: number, status: string): Promise<void> {
     await this.matchmaker.fetch(
       new Request('https://internal/register', {
         method: 'POST',
@@ -209,7 +197,7 @@ class WorkerHarness {
   getRoomState(roomCode: string): GameState | null {
     const entry = this.rooms.get(roomCode)
     if (!entry) return null
-    const row = entry.ctx._sqlData['game_state']
+    const row = entry.ctx._sqlData.game_state
     if (!row) return null
     return JSON.parse(row.data) as GameState
   }
@@ -247,22 +235,17 @@ describe('PBT Room Creation: POST /room uniqueness + format', () => {
         for (let i = 0; i < 100; i++) {
           const result = await harness.postRoom()
           if (result.status !== 200 || !result.roomCode) {
-            throw new Error(
-              `POST /room #${i} failed: status=${result.status} code=${result.code}`,
-            )
+            throw new Error(`POST /room #${i} failed: status=${result.status} code=${result.code}`)
           }
           if (!ROOM_CODE_RE.test(result.roomCode)) {
-            throw new Error(
-              `POST /room #${i} returned ${result.roomCode} which does not match ${ROOM_CODE_RE}`,
-            )
+            throw new Error(`POST /room #${i} returned ${result.roomCode} which does not match ${ROOM_CODE_RE}`)
           }
           codes.push(result.roomCode)
         }
         const unique = new Set(codes)
         if (unique.size !== codes.length) {
           throw new Error(
-            `POST /room returned duplicates: ${codes.length - unique.size} ` +
-            `duplicate(s) in ${codes.length} calls`,
+            `POST /room returned duplicates: ${codes.length - unique.size} ` + `duplicate(s) in ${codes.length} calls`,
           )
         }
       }),
@@ -278,16 +261,12 @@ describe('PBT Room Creation: POST /room uniqueness + format', () => {
           const result = await harness.postRoom()
           if (result.status === 200) {
             if (!result.roomCode || !ROOM_CODE_RE.test(result.roomCode)) {
-              throw new Error(
-                `POST /room returned invalid code: ${JSON.stringify(result)}`,
-              )
+              throw new Error(`POST /room returned invalid code: ${JSON.stringify(result)}`)
             }
           } else {
             // Only acceptable non-200 is 503 room_generation_failed.
             if (result.status !== 503 || result.code !== 'room_generation_failed') {
-              throw new Error(
-                `POST /room returned unexpected non-200: ${JSON.stringify(result)}`,
-              )
+              throw new Error(`POST /room returned unexpected non-200: ${JSON.stringify(result)}`)
             }
           }
         }
@@ -319,14 +298,10 @@ describe('PBT Room Creation: matchmaker sees the new room', () => {
             throw new Error(`Room ${code} created but /info/${code} returned 404`)
           }
           if (info.playerCount !== 0) {
-            throw new Error(
-              `Room ${code} just created; matchmaker playerCount=${info.playerCount} expected 0`,
-            )
+            throw new Error(`Room ${code} just created; matchmaker playerCount=${info.playerCount} expected 0`)
           }
           if (info.status !== 'waiting') {
-            throw new Error(
-              `Room ${code} just created; matchmaker status=${info.status} expected 'waiting'`,
-            )
+            throw new Error(`Room ${code} just created; matchmaker status=${info.status} expected 'waiting'`)
           }
         }
       }),
@@ -360,17 +335,13 @@ describe('PBT Room Creation: initial GameState is clean', () => {
             throw new Error(`Room ${code} status=${state.status}, expected 'waiting'`)
           }
           if (Object.keys(state.players).length !== 0) {
-            throw new Error(
-              `Room ${code} has ${Object.keys(state.players).length} players at creation`,
-            )
+            throw new Error(`Room ${code} has ${Object.keys(state.players).length} players at creation`)
           }
           if (state.score !== 0) {
             throw new Error(`Room ${code} score=${state.score} at creation`)
           }
           if (state.roomCode !== code) {
-            throw new Error(
-              `Room ${code} has roomCode=${state.roomCode} in persisted state (mismatch)`,
-            )
+            throw new Error(`Room ${code} has roomCode=${state.roomCode} in persisted state (mismatch)`)
           }
         }
       }),
@@ -403,8 +374,8 @@ describe('PBT Room Creation: empty room NOT findable (regression guard)', () => 
           if (found !== null && codes.includes(found)) {
             throw new Error(
               `Empty freshly created room ${found} was returned by /find. ` +
-              `This is the LOW-severity empty-room trap — Matchmaker.ts should ` +
-              `require playerCount > 0 to include a room in /find.`,
+                `This is the LOW-severity empty-room trap — Matchmaker.ts should ` +
+                `require playerCount > 0 to include a room in /find.`,
             )
           }
         }
@@ -424,49 +395,42 @@ describe('PBT Room Creation: saturation safety', () => {
     // fc.integer generator: how many pre-existing rooms (up to ~1000) to
     // seed the matchmaker with before the focus POST /room call.
     await fc.assert(
-      fc.asyncProperty(
-        fc.integer({ min: 0, max: 1000 }),
-        async (preExistingCount) => {
-          const harness = new WorkerHarness()
-          const seededCodes = new Set<string>()
-          // Seed via matchmaker.register directly — this simulates a huge
-          // corpus of already-taken codes without going through the Worker
-          // (faster, and we don't want to exercise the generator with itself).
-          for (let i = 0; i < preExistingCount; i++) {
-            // Pad with zeros to 6 chars; use hex to avoid colliding with
-            // the generator's 36-char set.
-            const code = `SEED${i.toString(36).padStart(2, '0').slice(-2).toUpperCase()}`
-            // Only accept codes that pass the regex.
-            if (ROOM_CODE_RE.test(code)) {
-              await harness.registerExternal(code, 1, 'waiting')
-              seededCodes.add(code)
-            }
+      fc.asyncProperty(fc.integer({ min: 0, max: 1000 }), async (preExistingCount) => {
+        const harness = new WorkerHarness()
+        const seededCodes = new Set<string>()
+        // Seed via matchmaker.register directly — this simulates a huge
+        // corpus of already-taken codes without going through the Worker
+        // (faster, and we don't want to exercise the generator with itself).
+        for (let i = 0; i < preExistingCount; i++) {
+          // Pad with zeros to 6 chars; use hex to avoid colliding with
+          // the generator's 36-char set.
+          const code = `SEED${i.toString(36).padStart(2, '0').slice(-2).toUpperCase()}`
+          // Only accept codes that pass the regex.
+          if (ROOM_CODE_RE.test(code)) {
+            await harness.registerExternal(code, 1, 'waiting')
+            seededCodes.add(code)
           }
-          const result = await harness.postRoom()
-          if (result.status === 200) {
-            if (!result.roomCode || !ROOM_CODE_RE.test(result.roomCode)) {
-              throw new Error(`Saturated POST /room returned invalid code: ${result.roomCode}`)
-            }
-            if (seededCodes.has(result.roomCode)) {
-              throw new Error(
-                `Saturated POST /room returned ${result.roomCode} which ` +
-                `is already in the seeded set — DUPLICATE`,
-              )
-            }
-          } else if (result.status === 503) {
-            if (result.code !== 'room_generation_failed') {
-              throw new Error(
-                `Saturated POST /room returned 503 with code=${result.code}, ` +
-                `expected 'room_generation_failed'`,
-              )
-            }
-          } else {
+        }
+        const result = await harness.postRoom()
+        if (result.status === 200) {
+          if (!result.roomCode || !ROOM_CODE_RE.test(result.roomCode)) {
+            throw new Error(`Saturated POST /room returned invalid code: ${result.roomCode}`)
+          }
+          if (seededCodes.has(result.roomCode)) {
             throw new Error(
-              `Saturated POST /room returned unexpected status=${result.status}`,
+              `Saturated POST /room returned ${result.roomCode} which is already in the seeded set — DUPLICATE`,
             )
           }
-        },
-      ),
+        } else if (result.status === 503) {
+          if (result.code !== 'room_generation_failed') {
+            throw new Error(
+              `Saturated POST /room returned 503 with code=${result.code}, expected 'room_generation_failed'`,
+            )
+          }
+        } else {
+          throw new Error(`Saturated POST /room returned unexpected status=${result.status}`)
+        }
+      }),
       { numRuns: 5 }, // each run seeds up to 1000 rooms so keep count modest
     )
   }, 300_000)

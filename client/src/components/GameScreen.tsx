@@ -2,21 +2,8 @@
 // Main game screen rendering with 2-line sprites and color cycling effects
 
 import { useEffect, useRef } from 'react'
-import type {
-  GameState,
-  Player,
-  BarrierEntity,
-  ClassicAlienType,
-  UFOEntity,
-  AlienEntity,
-} from '../../../shared/types'
-import {
-  LAYOUT,
-  getAliens,
-  getBullets,
-  getBarriers,
-  getUFOs,
-} from '../../../shared/types'
+import type { GameState, Player, BarrierEntity, ClassicAlienType, UFOEntity, AlienEntity } from '../../../shared/types'
+import { LAYOUT, getAliens, getBullets, getBarriers, getUFOs } from '../../../shared/types'
 import type { ServerEvent } from '../../../shared/protocol'
 import { SPRITES, SPRITE_SIZE, COLORS, GRADIENT_COLORS, getPlayerColor, getAnimationFrame } from '../sprites'
 import { MusicManager } from '../audio/MusicManager'
@@ -29,9 +16,7 @@ import { useStarfield } from '../hooks/useStarfield'
 import { convertColorForTerminal, getTerminalCapabilities } from '../terminal'
 
 // Terminal-compatible color cycling effects
-import {
-  getUFOColor,
-} from '../effects'
+import { getUFOColor } from '../effects'
 
 interface GameScreenProps {
   state: GameState
@@ -42,7 +27,14 @@ interface GameScreenProps {
   prevState?: GameState | null
 }
 
-export function GameScreen({ state, currentPlayerId, isMuted = false, isMusicMuted = false, lastEvent = null, prevState = null }: GameScreenProps) {
+export function GameScreen({
+  state,
+  currentPlayerId,
+  isMuted = false,
+  isMusicMuted = false,
+  lastEvent = null,
+  prevState = null,
+}: GameScreenProps) {
   const { terminalWidth, terminalHeight, gameWidth, gameHeight, offsetX, offsetY, isTooSmall } = useTerminalSize()
   const caps = getTerminalCapabilities()
 
@@ -66,13 +58,15 @@ export function GameScreen({ state, currentPlayerId, isMuted = false, isMusicMut
   useEffect(() => {
     if (status === 'wipe_reveal' && entranceStartedForWaveRef.current !== wave) {
       entranceStartedForWaveRef.current = wave
-      const enteringAliens = aliens.filter(a => a.alive).map(a => ({
-        id: a.id,
-        row: a.row,
-        col: a.col,
-        targetX: a.x,
-        targetY: a.y,
-      }))
+      const enteringAliens = aliens
+        .filter((a) => a.alive)
+        .map((a) => ({
+          id: a.id,
+          row: a.row,
+          col: a.col,
+          targetX: a.x,
+          targetY: a.y,
+        }))
       if (enteringAliens.length > 0) {
         startEntrance(enteringAliens)
       }
@@ -119,23 +113,27 @@ export function GameScreen({ state, currentPlayerId, isMuted = false, isMusicMut
     // Update all moving entities for interpolation
     const movingEntities = [
       // Players
-      ...Object.values(players).filter(p => p.alive).map(p => ({
-        id: `player-${p.id}`,
-        x: p.x,
-        y: LAYOUT.PLAYER_Y,
-      })),
+      ...Object.values(players)
+        .filter((p) => p.alive)
+        .map((p) => ({
+          id: `player-${p.id}`,
+          x: p.x,
+          y: LAYOUT.PLAYER_Y,
+        })),
       // Bullets (move every tick)
-      ...bullets.map(b => ({
+      ...bullets.map((b) => ({
         id: `bullet-${b.id}`,
         x: b.x,
         y: b.y,
       })),
       // UFOs
-      ...ufos.filter(u => u.alive).map(u => ({
-        id: `ufo-${u.id}`,
-        x: u.x,
-        y: u.y,
-      })),
+      ...ufos
+        .filter((u) => u.alive)
+        .map((u) => ({
+          id: `ufo-${u.id}`,
+          x: u.x,
+          y: u.y,
+        })),
     ]
 
     updateEntities(movingEntities, tick)
@@ -165,11 +163,23 @@ export function GameScreen({ state, currentPlayerId, isMuted = false, isMusicMut
   // If terminal too small, show warning
   if (isTooSmall) {
     return (
-      <box width={terminalWidth} height={terminalHeight} justifyContent="center" alignItems="center" flexDirection="column">
-        <text fg={COLORS.ui.error}><b>Terminal Too Small</b></text>
+      <box
+        width={terminalWidth}
+        height={terminalHeight}
+        justifyContent="center"
+        alignItems="center"
+        flexDirection="column"
+      >
+        <text fg={COLORS.ui.error}>
+          <b>Terminal Too Small</b>
+        </text>
         <box height={1} />
-        <text fg={COLORS.ui.selectedText}>Required: {gameWidth}x{gameHeight}</text>
-        <text fg={COLORS.ui.dim}>Current: {terminalWidth}x{terminalHeight}</text>
+        <text fg={COLORS.ui.selectedText}>
+          Required: {gameWidth}x{gameHeight}
+        </text>
+        <text fg={COLORS.ui.dim}>
+          Current: {terminalWidth}x{terminalHeight}
+        </text>
         <box height={1} />
         <text fg={COLORS.ui.unselected}>Please resize your terminal.</text>
       </box>
@@ -182,7 +192,9 @@ export function GameScreen({ state, currentPlayerId, isMuted = false, isMusicMut
       <box flexDirection="column" width={gameWidth} height={gameHeight}>
         {/* Header */}
         <box height={1} paddingLeft={1} paddingRight={1}>
-          <text fg={COLORS.ui.title}><b>VADERS</b></text>
+          <text fg={COLORS.ui.title}>
+            <b>VADERS</b>
+          </text>
           <box flexGrow={1} />
           <text fg={COLORS.ui.unselected}>{mode === 'solo' ? 'SOLO' : `${playerCount}P CO-OP`}</text>
           <box width={2} />
@@ -200,9 +212,13 @@ export function GameScreen({ state, currentPlayerId, isMuted = false, isMusicMut
         {status === 'countdown' && state.countdownRemaining !== null && (
           <box position="absolute" width={gameWidth} height={gameHeight} justifyContent="center" alignItems="center">
             <box flexDirection="column" alignItems="center">
-              <text fg={COLORS.ui.warning}><b>GET READY!</b></text>
+              <text fg={COLORS.ui.warning}>
+                <b>GET READY!</b>
+              </text>
               <box height={1} />
-              <text fg={COLORS.ui.selectedText}><b>{state.countdownRemaining}</b></text>
+              <text fg={COLORS.ui.selectedText}>
+                <b>{state.countdownRemaining}</b>
+              </text>
             </box>
           </box>
         )}
@@ -223,18 +239,22 @@ export function GameScreen({ state, currentPlayerId, isMuted = false, isMusicMut
           ))}
 
           {/* UFOs - top of screen */}
-          {ufos.filter(u => u.alive).map(ufo => (
-            <UFOSprite key={`ufo-${ufo.id}`} ufo={ufo} tick={state.tick} />
-          ))}
+          {ufos
+            .filter((u) => u.alive)
+            .map((ufo) => (
+              <UFOSprite key={`ufo-${ufo.id}`} ufo={ufo} tick={state.tick} />
+            ))}
 
           {/* Aliens - 2 line braille sprites (with entrance animation) */}
-          {aliens.filter(a => a.alive).map(alien => {
-            const pos = getAlienVisualPosition(alien)
-            return <AlienSprite key={`alien-${alien.id}`} x={pos.x} y={pos.y} type={alien.type} tick={state.tick} />
-          })}
+          {aliens
+            .filter((a) => a.alive)
+            .map((alien) => {
+              const pos = getAlienVisualPosition(alien)
+              return <AlienSprite key={`alien-${alien.id}`} x={pos.x} y={pos.y} type={alien.type} tick={state.tick} />
+            })}
 
           {/* Bullets */}
-          {bullets.map(bullet => {
+          {bullets.map((bullet) => {
             const pos = getBulletVisualPosition(bullet)
             return (
               <text
@@ -250,7 +270,7 @@ export function GameScreen({ state, currentPlayerId, isMuted = false, isMusicMut
           })}
 
           {/* Barriers - 2 line sprites */}
-          {barriers.map(barrier => (
+          {barriers.map((barrier) => (
             <Barrier key={barrier.id} barrier={barrier} />
           ))}
 
@@ -269,7 +289,7 @@ export function GameScreen({ state, currentPlayerId, isMuted = false, isMusicMut
           ))}
 
           {/* Players - 2 line sprites */}
-          {Object.values(players).map(player => (
+          {Object.values(players).map((player) => (
             <PlayerShip
               key={player.id}
               player={player}
@@ -282,7 +302,7 @@ export function GameScreen({ state, currentPlayerId, isMuted = false, isMusicMut
 
         {/* Status Bar */}
         <box height={1} paddingLeft={1} paddingRight={1}>
-          <text fg={COLORS.ui.unselected}>Arrows Move  SPACE Shoot  M Mute  N Music  Q Quit</text>
+          <text fg={COLORS.ui.unselected}>Arrows Move SPACE Shoot M Mute N Music Q Quit</text>
           <box flexGrow={1} />
           {isMuted && <text fg={COLORS.ui.dim}>[SFX OFF] </text>}
           {isMusicMuted && <text fg={COLORS.ui.dim}>[MUSIC OFF] </text>}
@@ -344,19 +364,14 @@ function PlayerShip({
       <text fg={player.alive ? gradient.dark : COLORS.ui.dim}>{SPRITES.player.a[1]}</text>
       {/* Player indicator below ship */}
       <text fg={playerColor}>
-        {'   '}{isCurrentPlayer ? 'v' : `P${player.slot}`}
+        {'   '}
+        {isCurrentPlayer ? 'v' : `P${player.slot}`}
       </text>
     </box>
   )
 }
 
-function PlayerScores({
-  players,
-  currentPlayerId
-}: {
-  players: Record<string, Player>
-  currentPlayerId: string
-}) {
+function PlayerScores({ players, currentPlayerId }: { players: Record<string, Player>; currentPlayerId: string }) {
   const sorted = Object.values(players).sort((a, b) => a.slot - b.slot)
   return (
     <box>
@@ -380,22 +395,24 @@ function PlayerScores({
 function Barrier({ barrier }: { barrier: BarrierEntity }) {
   return (
     <>
-      {barrier.segments.filter(s => s.health > 0).map((seg, i) => {
-        const sprite = SPRITES.barrier[seg.health as 1 | 2 | 3 | 4]
-        const color = COLORS.barrier[seg.health as 1 | 2 | 3 | 4] || COLORS.ui.dim
-        return (
-          <box
-            key={i}
-            position="absolute"
-            top={LAYOUT.BARRIER_Y + seg.offsetY * SPRITE_SIZE.barrier.height}
-            left={barrier.x + seg.offsetX * SPRITE_SIZE.barrier.width}
-            flexDirection="column"
-          >
-            <text fg={color}>{sprite[0]}</text>
-            <text fg={color}>{sprite[1]}</text>
-          </box>
-        )
-      })}
+      {barrier.segments
+        .filter((s) => s.health > 0)
+        .map((seg, i) => {
+          const sprite = SPRITES.barrier[seg.health as 1 | 2 | 3 | 4]
+          const color = COLORS.barrier[seg.health as 1 | 2 | 3 | 4] || COLORS.ui.dim
+          return (
+            <box
+              key={i}
+              position="absolute"
+              top={LAYOUT.BARRIER_Y + seg.offsetY * SPRITE_SIZE.barrier.height}
+              left={barrier.x + seg.offsetX * SPRITE_SIZE.barrier.width}
+              flexDirection="column"
+            >
+              <text fg={color}>{sprite[0]}</text>
+              <text fg={color}>{sprite[1]}</text>
+            </box>
+          )
+        })}
     </>
   )
 }

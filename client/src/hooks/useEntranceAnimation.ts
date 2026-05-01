@@ -2,11 +2,7 @@
 // React hook for alien entrance animations
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import {
-  EntranceAnimation,
-  type EntranceConfig,
-  type AlienAnimState,
-} from '../animation'
+import { EntranceAnimation, type EntranceConfig, type AlienAnimState } from '../animation'
 import type { FrameScheduler } from '../../../client-core/src/adapters'
 
 /**
@@ -105,9 +101,7 @@ export interface UseEntranceAnimationReturn {
 // Stable empty config to avoid re-creating on every render
 const EMPTY_CONFIG: Partial<EntranceConfig> = {}
 
-export function useEntranceAnimation(
-  options: UseEntranceAnimationOptions = {}
-): UseEntranceAnimationReturn {
+export function useEntranceAnimation(options: UseEntranceAnimationOptions = {}): UseEntranceAnimationReturn {
   // Use stable reference for empty config
   const config = options.config ?? EMPTY_CONFIG
   const scheduler = options.frameScheduler ?? DEFAULT_FRAME_SCHEDULER
@@ -149,17 +143,20 @@ export function useEntranceAnimation(
   }, [])
 
   // Start entrance animation
-  const start = useCallback((aliens: EntranceAlien[]) => {
-    entranceRef.current.start(aliens)
-    setIsRunning(true)
-    setIsComplete(false)
+  const start = useCallback(
+    (aliens: EntranceAlien[]) => {
+      entranceRef.current.start(aliens)
+      setIsRunning(true)
+      setIsComplete(false)
 
-    // Start animation loop
-    if (animationFrameRef.current) {
-      scheduler.cancelFrame(animationFrameRef.current)
-    }
-    animationFrameRef.current = scheduler.requestFrame(updateLoop)
-  }, [updateLoop])
+      // Start animation loop
+      if (animationFrameRef.current) {
+        scheduler.cancelFrame(animationFrameRef.current)
+      }
+      animationFrameRef.current = scheduler.requestFrame(updateLoop)
+    },
+    [updateLoop],
+  )
 
   // Stop and snap to formation
   const stop = useCallback(() => {

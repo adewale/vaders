@@ -223,6 +223,7 @@ export function LobbyScreen({ state, playerId, onReady, onUnready, onStartSolo }
             {tickerText}
           </p>
           <button
+            type="button"
             onClick={isReady ? onUnready : onReady}
             className="vaders-menu-item"
             style={{
@@ -237,9 +238,7 @@ export function LobbyScreen({ state, playerId, onReady, onUnready, onStartSolo }
           >
             {isReady ? 'Unready' : 'Ready'}
             {isAlone && !isReady && (
-              <span style={{ fontSize: 13, color: COLORS.ui.label, marginLeft: 8 }}>
-                (wait for others)
-              </span>
+              <span style={{ fontSize: 13, color: COLORS.ui.label, marginLeft: 8 }}>(wait for others)</span>
             )}
           </button>
           {/* Start Solo button: shown when playerCount === 1 regardless of
@@ -249,6 +248,7 @@ export function LobbyScreen({ state, playerId, onReady, onUnready, onStartSolo }
               isn't stuck waiting indefinitely for nobody. */}
           {isAlone && (
             <button
+              type="button"
               onClick={onStartSolo}
               className="vaders-menu-item"
               style={{
@@ -268,7 +268,7 @@ export function LobbyScreen({ state, playerId, onReady, onUnready, onStartSolo }
         </div>
 
         <HintsBar
-          role="lobby"
+          screen="lobby"
           hints={[
             ['ENTER', isReady ? 'Unready' : 'Ready'],
             // `[S] Start Solo` hint is the keyboard mirror of the button.

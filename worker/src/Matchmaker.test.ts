@@ -1,7 +1,7 @@
 // worker/src/Matchmaker.test.ts
 // Unit tests for the Matchmaker Durable Object
 
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { Matchmaker } from './Matchmaker'
 
 // ============================================================================
@@ -33,7 +33,9 @@ function createMockState() {
 }
 
 // Helper to create a Matchmaker instance
-async function createMatchmaker(initialRooms?: Record<string, { playerCount: number; status: string; updatedAt: number }>) {
+async function createMatchmaker(
+  initialRooms?: Record<string, { playerCount: number; status: string; updatedAt: number }>,
+) {
   const mockState = createMockState()
 
   // Pre-populate storage if initial rooms provided
@@ -44,7 +46,7 @@ async function createMatchmaker(initialRooms?: Record<string, { playerCount: num
   const matchmaker = new Matchmaker(mockState as any)
 
   // Wait for blockConcurrencyWhile to complete
-  await new Promise(resolve => setTimeout(resolve, 0))
+  await new Promise((resolve) => setTimeout(resolve, 0))
 
   return { matchmaker, mockState }
 }
@@ -97,8 +99,8 @@ describe('POST /register', () => {
     // Verify storage was updated
     expect(mockState.storage.put).toHaveBeenCalled()
     const storedRooms = mockState._storage.get('rooms') as Record<string, unknown>
-    expect(storedRooms['ABC123']).toBeDefined()
-    expect(storedRooms['ABC123']).toMatchObject({
+    expect(storedRooms.ABC123).toBeDefined()
+    expect(storedRooms.ABC123).toMatchObject({
       playerCount: 1,
       status: 'waiting',
     })
@@ -118,7 +120,7 @@ describe('POST /register', () => {
     await matchmaker.fetch(request)
 
     const storedRooms = mockState._storage.get('rooms') as Record<string, any>
-    expect(storedRooms['ABC123'].playerCount).toBe(2)
+    expect(storedRooms.ABC123.playerCount).toBe(2)
   })
 
   it('adds to openRooms when status=waiting and playerCount<4', async () => {
@@ -129,12 +131,12 @@ describe('POST /register', () => {
         roomCode: 'OPEN01',
         playerCount: 2,
         status: 'waiting',
-      })
+      }),
     )
 
     // Verify by finding the room
     const findResponse = await matchmaker.fetch(createRequest('GET', '/find'))
-    const findResult = await findResponse.json() as FindResponse as FindResponse
+    const findResult = (await findResponse.json()) as FindResponse as FindResponse
 
     expect(findResult.roomCode).toBe('OPEN01')
   })
@@ -146,7 +148,7 @@ describe('POST /register', () => {
 
     // First verify it's findable
     let findResponse = await matchmaker.fetch(createRequest('GET', '/find'))
-    let findResult = await findResponse.json() as FindResponse as FindResponse
+    let findResult = (await findResponse.json()) as FindResponse as FindResponse
     expect(findResult.roomCode).toBe('PLAY01')
 
     // Update to playing status
@@ -155,12 +157,12 @@ describe('POST /register', () => {
         roomCode: 'PLAY01',
         playerCount: 2,
         status: 'playing',
-      })
+      }),
     )
 
     // Should no longer be findable
     findResponse = await matchmaker.fetch(createRequest('GET', '/find'))
-    findResult = await findResponse.json() as FindResponse
+    findResult = (await findResponse.json()) as FindResponse
     expect(findResult.roomCode).toBeNull()
   })
 
@@ -175,12 +177,12 @@ describe('POST /register', () => {
         roomCode: 'FULL01',
         playerCount: 4,
         status: 'waiting',
-      })
+      }),
     )
 
     // Should no longer be findable
     const findResponse = await matchmaker.fetch(createRequest('GET', '/find'))
-    const findResult = await findResponse.json() as FindResponse as FindResponse
+    const findResult = (await findResponse.json()) as FindResponse as FindResponse
     expect(findResult.roomCode).toBeNull()
   })
 })
@@ -198,11 +200,11 @@ describe('POST /unregister', () => {
     await matchmaker.fetch(
       createRequest('POST', '/unregister', {
         roomCode: 'DEL001',
-      })
+      }),
     )
 
     const storedRooms = mockState._storage.get('rooms') as Record<string, unknown>
-    expect(storedRooms['DEL001']).toBeUndefined()
+    expect(storedRooms.DEL001).toBeUndefined()
   })
 
   it('removes from openRooms', async () => {
@@ -212,19 +214,19 @@ describe('POST /unregister', () => {
 
     // Verify it's findable first
     let findResponse = await matchmaker.fetch(createRequest('GET', '/find'))
-    let findResult = await findResponse.json() as FindResponse as FindResponse
+    let findResult = (await findResponse.json()) as FindResponse as FindResponse
     expect(findResult.roomCode).toBe('DEL002')
 
     // Unregister
     await matchmaker.fetch(
       createRequest('POST', '/unregister', {
         roomCode: 'DEL002',
-      })
+      }),
     )
 
     // Should no longer be findable
     findResponse = await matchmaker.fetch(createRequest('GET', '/find'))
-    findResult = await findResponse.json() as FindResponse
+    findResult = (await findResponse.json()) as FindResponse
     expect(findResult.roomCode).toBeNull()
   })
 
@@ -234,7 +236,7 @@ describe('POST /unregister', () => {
     const response = await matchmaker.fetch(
       createRequest('POST', '/unregister', {
         roomCode: 'NOTEXIST',
-      })
+      }),
     )
 
     expect(response.status).toBe(200)
@@ -254,7 +256,7 @@ describe('GET /find', () => {
     })
 
     const response = await matchmaker.fetch(createRequest('GET', '/find'))
-    const result = await response.json() as InfoResponse
+    const result = (await response.json()) as InfoResponse
 
     expect(response.status).toBe(200)
     expect(result.roomCode).toBeDefined()
@@ -265,7 +267,7 @@ describe('GET /find', () => {
     const { matchmaker } = await createMatchmaker()
 
     const response = await matchmaker.fetch(createRequest('GET', '/find'))
-    const result = await response.json() as InfoResponse
+    const result = (await response.json()) as InfoResponse
 
     expect(response.status).toBe(200)
     expect(result.roomCode).toBeNull()
@@ -280,13 +282,13 @@ describe('GET /find', () => {
     })
 
     const response = await matchmaker.fetch(createRequest('GET', '/find'))
-    const result = await response.json() as InfoResponse
+    const result = (await response.json()) as InfoResponse
 
     expect(result.roomCode).toBe('FRESH1')
 
     // Stale room should be removed from registry
     const storedRooms = mockState._storage.get('rooms') as Record<string, unknown>
-    expect(storedRooms['STALE1']).toBeUndefined()
+    expect(storedRooms.STALE1).toBeUndefined()
   })
 
   it('returns null if all rooms are stale', async () => {
@@ -298,7 +300,7 @@ describe('GET /find', () => {
     })
 
     const response = await matchmaker.fetch(createRequest('GET', '/find'))
-    const result = await response.json() as InfoResponse
+    const result = (await response.json()) as InfoResponse
 
     expect(result.roomCode).toBeNull()
   })
@@ -309,7 +311,7 @@ describe('GET /find', () => {
     })
 
     const response = await matchmaker.fetch(createRequest('GET', '/find'))
-    const result = await response.json() as InfoResponse
+    const result = (await response.json()) as InfoResponse
 
     expect(result.roomCode).toBeNull()
   })
@@ -320,7 +322,7 @@ describe('GET /find', () => {
     })
 
     const response = await matchmaker.fetch(createRequest('GET', '/find'))
-    const result = await response.json() as InfoResponse
+    const result = (await response.json()) as InfoResponse
 
     expect(result.roomCode).toBeNull()
   })
@@ -338,7 +340,7 @@ describe('GET /info/:roomCode', () => {
     })
 
     const response = await matchmaker.fetch(createRequest('GET', '/info/INFO01'))
-    const result = await response.json() as InfoResponse
+    const result = (await response.json()) as InfoResponse
 
     expect(response.status).toBe(200)
     expect(result.roomCode).toBe('INFO01')
@@ -402,7 +404,7 @@ describe('state restoration', () => {
 
     // Should be able to find the restored room
     const findResponse = await matchmaker.fetch(createRequest('GET', '/find'))
-    const findResult = await findResponse.json() as FindResponse as FindResponse
+    const findResult = (await findResponse.json()) as FindResponse as FindResponse
     expect(findResult.roomCode).toBe('RESTORED')
   })
 
@@ -415,7 +417,7 @@ describe('state restoration', () => {
 
     // Only OPEN should be findable
     const findResponse = await matchmaker.fetch(createRequest('GET', '/find'))
-    const findResult = await findResponse.json() as FindResponse as FindResponse
+    const findResult = (await findResponse.json()) as FindResponse as FindResponse
     expect(findResult.roomCode).toBe('OPEN')
   })
 })
@@ -434,8 +436,8 @@ describe('REGRESSION: /find prunes progress-stale rooms (Option C)', () => {
   // even when their updatedAt is fresh.
 
   it('prunes a room whose lastStatusChangeAt is >10 min ago, even with fresh updatedAt', async () => {
-    const oldEnough = Date.now() - 11 * 60 * 1000   // 11 min ago — past threshold
-    const recent = Date.now() - 10 * 1000            // 10s ago — updatedAt stays fresh
+    const oldEnough = Date.now() - 11 * 60 * 1000 // 11 min ago — past threshold
+    const recent = Date.now() - 10 * 1000 // 10s ago — updatedAt stays fresh
     const { matchmaker } = await createMatchmaker({
       STUCK1: {
         playerCount: 2,
@@ -446,7 +448,7 @@ describe('REGRESSION: /find prunes progress-stale rooms (Option C)', () => {
     })
 
     const findResponse = await matchmaker.fetch(createRequest('GET', '/find'))
-    const result = await findResponse.json() as FindResponse
+    const result = (await findResponse.json()) as FindResponse
     // The stuck room must NOT be returned — it should have been pruned.
     expect(result.roomCode).toBe(null)
 
@@ -456,7 +458,7 @@ describe('REGRESSION: /find prunes progress-stale rooms (Option C)', () => {
   })
 
   it('does NOT prune a room with recent lastStatusChangeAt', async () => {
-    const recent = Date.now() - 10 * 1000   // 10s ago — well within threshold
+    const recent = Date.now() - 10 * 1000 // 10s ago — well within threshold
     const { matchmaker } = await createMatchmaker({
       FRESH1: {
         playerCount: 1,
@@ -467,7 +469,7 @@ describe('REGRESSION: /find prunes progress-stale rooms (Option C)', () => {
     })
 
     const findResponse = await matchmaker.fetch(createRequest('GET', '/find'))
-    const result = await findResponse.json() as FindResponse
+    const result = (await findResponse.json()) as FindResponse
     expect(result.roomCode).toBe('FRESH1')
   })
 
@@ -475,54 +477,78 @@ describe('REGRESSION: /find prunes progress-stale rooms (Option C)', () => {
     const { matchmaker, mockState } = await createMatchmaker()
 
     // Room registers in waiting at t=0.
-    await matchmaker.fetch(createRequest('POST', '/register', {
-      roomCode: 'CHURN1',
-      playerCount: 1,
-      status: 'waiting',
-    }))
-    const after1 = (mockState._storage.get('rooms') as Record<string, {
-      lastStatusChangeAt: number
-    }>)
+    await matchmaker.fetch(
+      createRequest('POST', '/register', {
+        roomCode: 'CHURN1',
+        playerCount: 1,
+        status: 'waiting',
+      }),
+    )
+    const after1 = mockState._storage.get('rooms') as Record<
+      string,
+      {
+        lastStatusChangeAt: number
+      }
+    >
     const firstChangeAt = after1.CHURN1.lastStatusChangeAt
 
     // Small delay so a "refresh" would be observable.
-    await new Promise(r => setTimeout(r, 5))
+    await new Promise((r) => setTimeout(r, 5))
 
     // Same status, different playerCount — simulates new victim joining.
-    await matchmaker.fetch(createRequest('POST', '/register', {
-      roomCode: 'CHURN1',
-      playerCount: 2,
-      status: 'waiting',
-    }))
-    const after2 = (mockState._storage.get('rooms') as Record<string, {
-      lastStatusChangeAt: number
-    }>)
+    await matchmaker.fetch(
+      createRequest('POST', '/register', {
+        roomCode: 'CHURN1',
+        playerCount: 2,
+        status: 'waiting',
+      }),
+    )
+    const after2 = mockState._storage.get('rooms') as Record<
+      string,
+      {
+        lastStatusChangeAt: number
+      }
+    >
     expect(after2.CHURN1.lastStatusChangeAt).toBe(firstChangeAt)
   })
 
   it('register WITH status change refreshes lastStatusChangeAt', async () => {
     const { matchmaker, mockState } = await createMatchmaker()
 
-    await matchmaker.fetch(createRequest('POST', '/register', {
-      roomCode: 'TRANS1',
-      playerCount: 1,
-      status: 'waiting',
-    }))
-    const firstChangeAt = (mockState._storage.get('rooms') as Record<string, {
-      lastStatusChangeAt: number
-    }>).TRANS1.lastStatusChangeAt
+    await matchmaker.fetch(
+      createRequest('POST', '/register', {
+        roomCode: 'TRANS1',
+        playerCount: 1,
+        status: 'waiting',
+      }),
+    )
+    const firstChangeAt = (
+      mockState._storage.get('rooms') as Record<
+        string,
+        {
+          lastStatusChangeAt: number
+        }
+      >
+    ).TRANS1.lastStatusChangeAt
 
-    await new Promise(r => setTimeout(r, 5))
+    await new Promise((r) => setTimeout(r, 5))
 
     // Real status change — waiting → countdown.
-    await matchmaker.fetch(createRequest('POST', '/register', {
-      roomCode: 'TRANS1',
-      playerCount: 2,
-      status: 'countdown',
-    }))
-    const afterChange = (mockState._storage.get('rooms') as Record<string, {
-      lastStatusChangeAt: number
-    }>).TRANS1.lastStatusChangeAt
+    await matchmaker.fetch(
+      createRequest('POST', '/register', {
+        roomCode: 'TRANS1',
+        playerCount: 2,
+        status: 'countdown',
+      }),
+    )
+    const afterChange = (
+      mockState._storage.get('rooms') as Record<
+        string,
+        {
+          lastStatusChangeAt: number
+        }
+      >
+    ).TRANS1.lastStatusChangeAt
 
     expect(afterChange).toBeGreaterThan(firstChangeAt)
   })
@@ -542,21 +568,21 @@ describe('concurrent operations', () => {
           roomCode: 'ROOM01',
           playerCount: 1,
           status: 'waiting',
-        })
+        }),
       ),
       matchmaker.fetch(
         createRequest('POST', '/register', {
           roomCode: 'ROOM02',
           playerCount: 1,
           status: 'waiting',
-        })
+        }),
       ),
       matchmaker.fetch(
         createRequest('POST', '/register', {
           roomCode: 'ROOM03',
           playerCount: 1,
           status: 'waiting',
-        })
+        }),
       ),
     ])
 

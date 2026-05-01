@@ -202,6 +202,7 @@ export function GameOverScreen({ state, playerId, onReplay, onQuit }: GameOverSc
 
         <div style={{ marginTop: 32, display: 'flex', gap: 16 }}>
           <button
+            type="button"
             onClick={onReplay}
             data-testid="replay-button"
             className="vaders-menu-item"
@@ -218,6 +219,7 @@ export function GameOverScreen({ state, playerId, onReplay, onQuit }: GameOverSc
             Play Again
           </button>
           <button
+            type="button"
             onClick={onQuit}
             data-testid="quit-button"
             className="vaders-menu-item"
@@ -234,6 +236,7 @@ export function GameOverScreen({ state, playerId, onReplay, onQuit }: GameOverSc
             Quit
           </button>
           <button
+            type="button"
             onClick={handleShare}
             data-testid="share-button"
             className="vaders-menu-item"
@@ -252,7 +255,7 @@ export function GameOverScreen({ state, playerId, onReplay, onQuit }: GameOverSc
         </div>
 
         <HintsBar
-          role="game-over"
+          screen="game-over"
           hints={[
             ['R / ENTER', 'Play Again'],
             ['X', 'Share Score'],

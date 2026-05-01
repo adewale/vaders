@@ -518,14 +518,22 @@ function GameContainer({
         {error ? (
           <>
             <p style={{ color: '#f44' }}>{error}</p>
-            <button onClick={onBackToLaunch} style={{ marginTop: 20, cursor: 'pointer', padding: '8px 24px' }}>
+            <button
+              type="button"
+              onClick={onBackToLaunch}
+              style={{ marginTop: 20, cursor: 'pointer', padding: '8px 24px' }}
+            >
               Back to Menu
             </button>
           </>
         ) : (
           <>
             <LoadingSpinner label={reconnecting ? 'Reconnecting...' : 'Connecting...'} />
-            <button onClick={onBackToLaunch} style={{ marginTop: 20, cursor: 'pointer', padding: '8px 24px' }}>
+            <button
+              type="button"
+              onClick={onBackToLaunch}
+              style={{ marginTop: 20, cursor: 'pointer', padding: '8px 24px' }}
+            >
               Cancel
             </button>
           </>
@@ -557,7 +565,11 @@ function GameContainer({
           <p style={{ color: '#ff0' }}>Connection lost.</p>
         )}
         {error && <p style={{ color: '#f44', marginTop: 8 }}>{error}</p>}
-        <button onClick={onBackToLaunch} style={{ marginTop: 20, cursor: 'pointer', padding: '8px 24px' }}>
+        <button
+          type="button"
+          onClick={onBackToLaunch}
+          style={{ marginTop: 20, cursor: 'pointer', padding: '8px 24px' }}
+        >
           Back to Menu
         </button>
       </div>

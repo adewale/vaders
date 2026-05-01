@@ -20,7 +20,7 @@ describe('StarfieldSystem', () => {
   it('stars have varying phase offsets', () => {
     const system = new StarfieldSystem({ width: 120, height: 34 })
     const cells = system.getCells(0)
-    const colors = new Set(cells.map(c => c.color))
+    const colors = new Set(cells.map((c) => c.color))
     expect(colors.size).toBeGreaterThan(1)
   })
 
@@ -53,7 +53,8 @@ describe('StarfieldSystem', () => {
   })
 
   it('no star is out of bounds', () => {
-    const w = 120, h = 34
+    const w = 120,
+      h = 34
     const system = new StarfieldSystem({ width: w, height: h })
     for (const cell of system.getCells(0)) {
       expect(cell.x).toBeGreaterThanOrEqual(0)
@@ -65,7 +66,7 @@ describe('StarfieldSystem', () => {
 
   it('all colors come from their layer ramp', () => {
     const system = new StarfieldSystem()
-    const allRampColors = new Set(STAR_LAYERS.flatMap(l => l.ramp))
+    const allRampColors = new Set(STAR_LAYERS.flatMap((l) => l.ramp))
     for (const cell of system.getCells(0)) {
       expect(allRampColors.has(cell.color)).toBe(true)
     }
@@ -79,8 +80,8 @@ describe('StarfieldSystem', () => {
     // Each layer has distinct ramp colors; check that colors from multiple layers appear
     const layer0colors = new Set(STAR_LAYERS[0].ramp)
     const layer2colors = new Set(STAR_LAYERS[2].ramp)
-    const hasLayer0 = cells.some(c => layer0colors.has(c.color))
-    const hasLayer2 = cells.some(c => layer2colors.has(c.color))
+    const hasLayer0 = cells.some((c) => layer0colors.has(c.color))
+    const hasLayer2 = cells.some((c) => layer2colors.has(c.color))
     expect(hasLayer0).toBe(true)
     expect(hasLayer2).toBe(true)
   })
@@ -93,16 +94,16 @@ describe('StarfieldSystem', () => {
 
     // Collect colors from far-layer stars (ramp starts with #333366)
     const farRampColors = new Set(STAR_LAYERS[0].ramp)
-    const farIndices = cells0.map((c, i) => farRampColors.has(c.color) ? i : -1).filter(i => i >= 0)
+    const farIndices = cells0.map((c, i) => (farRampColors.has(c.color) ? i : -1)).filter((i) => i >= 0)
     const nearRampColors = new Set(STAR_LAYERS[2].ramp)
-    const nearIndices = cells0.map((c, i) => nearRampColors.has(c.color) ? i : -1).filter(i => i >= 0)
+    const nearIndices = cells0.map((c, i) => (nearRampColors.has(c.color) ? i : -1)).filter((i) => i >= 0)
 
     // Far stars should NOT have changed at tick 15 (28 ticks per step)
-    const farChanged = farIndices.some(i => cells0[i].color !== cells15[i].color)
+    const farChanged = farIndices.some((i) => cells0[i].color !== cells15[i].color)
     expect(farChanged).toBe(false)
 
     // Near stars SHOULD have changed at tick 15 (15 ticks per step)
-    const nearChanged = nearIndices.some(i => cells0[i].color !== cells15[i].color)
+    const nearChanged = nearIndices.some((i) => cells0[i].color !== cells15[i].color)
     expect(nearChanged).toBe(true)
   })
 
@@ -110,9 +111,9 @@ describe('StarfieldSystem', () => {
     const nearLayer = STAR_LAYERS[2]
     // The brightest color should be noticeably brighter than the dimmest
     const brightness = (hex: string) => {
-      const r = parseInt(hex.slice(1, 3), 16)
-      const g = parseInt(hex.slice(3, 5), 16)
-      const b = parseInt(hex.slice(5, 7), 16)
+      const r = Number.parseInt(hex.slice(1, 3), 16)
+      const g = Number.parseInt(hex.slice(3, 5), 16)
+      const b = Number.parseInt(hex.slice(5, 7), 16)
       return r + g + b
     }
     const brightnesses = nearLayer.ramp.map(brightness)

@@ -17,9 +17,9 @@ test.describe('Solo game flow', () => {
     // The app calls createSoloRoom() → POST /room → then connects WebSocket
     // Wait for either the game canvas OR an error/connecting state
     // Use a longer timeout since there's an HTTP call + WebSocket setup
-    await expect(
-      page.locator('[data-testid="game-canvas"], [data-testid="score"]').first()
-    ).toBeVisible({ timeout: 20000 })
+    await expect(page.locator('[data-testid="game-canvas"], [data-testid="score"]').first()).toBeVisible({
+      timeout: 20000,
+    })
 
     // Verify the score HUD is displayed with a SCORE label
     await expect(page.locator('[data-testid="score"]')).toContainText('SCORE')

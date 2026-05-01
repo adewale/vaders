@@ -13,8 +13,6 @@ import type {
   InputState,
 } from '../../shared/types'
 import {
-  DEFAULT_CONFIG,
-  LAYOUT,
   HITBOX,
   WIPE_TIMING,
   PLAYER_COLORS,
@@ -74,14 +72,18 @@ function getRequestId(request?: Request): string {
   return crypto.randomUUID()
 }
 
-// WebSocket attachment for player session data
+// WebSocket attachment for player session data. Attachments survive
+// hibernation while the WebSocket remains connected and are intentionally
+// small (<2KB Cloudflare limit).
 interface WebSocketAttachment {
-  playerId: string
+  playerId?: string
+  acceptedAt?: number
 }
 
 // Rate limiting constants
 const RATE_LIMIT_WINDOW_MS = 1000
 const RATE_LIMIT_MAX_MESSAGES = 60
+const UNAUTHENTICATED_SOCKET_TIMEOUT_MS = 5000
 
 // Per-connection rate limiting state (not serialized into attachment — lives in memory only)
 interface RateLimitState {
@@ -146,7 +148,6 @@ export class GameRoom extends DurableObject<Env> {
   private game: GameState | null = null
   private nextEntityId = 1
   private inputQueue: GameAction[] = []
-  private countdownRemaining: number | null = null
   private rateLimits: Map<WebSocket, RateLimitState> = new Map()
   // Current request's correlation id — set by each entry point (fetch, ws
   // message, ws close, alarm) so logEvent() calls reached from within share
@@ -178,13 +179,18 @@ export class GameRoom extends DurableObject<Env> {
           id INTEGER PRIMARY KEY CHECK (id = 1),
           data TEXT NOT NULL,
           next_entity_id INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE TABLE IF NOT EXISTS rejoin_sessions (
+          token TEXT PRIMARY KEY,
+          player_id TEXT NOT NULL,
+          expires_at INTEGER NOT NULL
         )
       `)
 
       // Load existing state if any
-      const rows = this.ctx.storage.sql.exec<{ data: string; next_entity_id: number }>(
-        'SELECT data, next_entity_id FROM game_state WHERE id = 1'
-      ).toArray()
+      const rows = this.ctx.storage.sql
+        .exec<{ data: string; next_entity_id: number }>('SELECT data, next_entity_id FROM game_state WHERE id = 1')
+        .toArray()
 
       if (rows.length > 0) {
         // Migrate persisted state to fill any missing fields with defaults
@@ -206,23 +212,17 @@ export class GameRoom extends DurableObject<Env> {
           const a = ws.deserializeAttachment() as WebSocketAttachment | null
           if (a?.playerId) live.add(a.playerId)
         }
-        const phantoms = Object.keys(this.game.players).filter(id => !live.has(id))
+        const phantoms = Object.keys(this.game.players).filter((id) => !live.has(id))
         if (phantoms.length > 0) {
           for (const id of phantoms) delete this.game.players[id]
-          this.game.readyPlayerIds = this.game.readyPlayerIds.filter(
-            id => id in this.game!.players
-          )
+          this.game.readyPlayerIds = this.game.readyPlayerIds.filter((id) => id in this.game!.players)
           // If countdown was in-flight and the threshold no longer holds,
           // reset to waiting so a fresh ready flow can begin.
-          if (this.game.status === 'countdown' &&
-              Object.keys(this.game.players).length < 2) {
+          if (this.game.status === 'countdown' && Object.keys(this.game.players).length < 2) {
             this.game.status = 'waiting'
             this.game.countdownRemaining = null
           }
           this.persistState()
-          // Registry update is fire-and-forget — no await inside
-          // blockConcurrencyWhile (the matchmaker fetch is outbound).
-          void this.updateRoomRegistry()
           logEvent('reconcile_prune_phantoms', {
             roomCode: this.game.roomCode,
             pruned: phantoms,
@@ -244,12 +244,65 @@ export class GameRoom extends DurableObject<Env> {
     this.ctx.storage.sql.exec(
       `INSERT OR REPLACE INTO game_state (id, data, next_entity_id) VALUES (1, ?, ?)`,
       JSON.stringify(this.game),
-      this.nextEntityId
+      this.nextEntityId,
     )
   }
 
   private createInitialState(roomCode: string): GameState {
     return createDefaultGameState(roomCode)
+  }
+
+  private createRejoinToken(playerId: string): string {
+    const token = crypto.randomUUID()
+    const expiresAt = Date.now() + 24 * 60 * 60 * 1000
+    this.ctx.storage.sql.exec(
+      'INSERT OR REPLACE INTO rejoin_sessions (token, player_id, expires_at) VALUES (?, ?, ?)',
+      token,
+      playerId,
+      expiresAt,
+    )
+    return token
+  }
+
+  private consumeValidRejoinToken(token: string): string | null {
+    const rows = this.ctx.storage.sql
+      .exec<{ player_id: string; expires_at: number }>(
+        'SELECT player_id, expires_at FROM rejoin_sessions WHERE token = ?',
+        token,
+      )
+      .toArray()
+    if (rows.length === 0) return null
+    const session = rows[0]
+    if (session.expires_at <= Date.now()) {
+      this.ctx.storage.sql.exec('DELETE FROM rejoin_sessions WHERE token = ?', token)
+      return null
+    }
+    return session.player_id
+  }
+
+  private async ensureUnauthenticatedSocketAlarm() {
+    const hasUnauthenticatedSocket = this.ctx.getWebSockets().some((ws) => {
+      const attachment = ws.deserializeAttachment() as WebSocketAttachment | null
+      return !attachment?.playerId
+    })
+    if (!hasUnauthenticatedSocket) return
+    await this.ctx.storage.setAlarm(Date.now() + UNAUTHENTICATED_SOCKET_TIMEOUT_MS)
+  }
+
+  private closeStaleUnauthenticatedSockets(now = Date.now()): number {
+    let closed = 0
+    for (const ws of this.ctx.getWebSockets()) {
+      const attachment = ws.deserializeAttachment() as WebSocketAttachment | null
+      if (attachment?.playerId) continue
+      const acceptedAt = attachment?.acceptedAt ?? now
+      if (now - acceptedAt >= UNAUTHENTICATED_SOCKET_TIMEOUT_MS) {
+        try {
+          ws.close(1008, 'Join timeout')
+          closed++
+        } catch {}
+      }
+    }
+    return closed
   }
 
   /**
@@ -286,19 +339,19 @@ export class GameRoom extends DurableObject<Env> {
       if (!this.game) {
         return new Response(JSON.stringify({ code: 'invalid_room', message: 'Room not initialized' }), {
           status: 404,
-          headers: { 'Content-Type': 'application/json' }
+          headers: { 'Content-Type': 'application/json' },
         })
       }
       if (this.game.status === 'playing' && !url.searchParams.has('rejoin')) {
         return new Response(JSON.stringify({ code: 'game_in_progress', message: 'Game in progress' }), {
           status: 409,
-          headers: { 'Content-Type': 'application/json' }
+          headers: { 'Content-Type': 'application/json' },
         })
       }
-      if (Object.keys(this.game.players).length >= 4) {
+      if (Object.keys(this.game.players).length >= 4 && !url.searchParams.has('rejoin')) {
         return new Response(JSON.stringify({ code: 'room_full', message: 'Room is full' }), {
           status: 429,
-          headers: { 'Content-Type': 'application/json' }
+          headers: { 'Content-Type': 'application/json' },
         })
       }
 
@@ -308,6 +361,8 @@ export class GameRoom extends DurableObject<Env> {
       // Accept WebSocket with hibernation support (DO can sleep while connection stays open)
       // Attachment stores player session data that survives hibernation
       this.ctx.acceptWebSocket(pair[1])
+      pair[1].serializeAttachment({ acceptedAt: Date.now() } satisfies WebSocketAttachment)
+      await this.ensureUnauthenticatedSocketAlarm()
 
       return new Response(null, { status: 101, webSocket: pair[0] })
     }
@@ -317,11 +372,14 @@ export class GameRoom extends DurableObject<Env> {
       if (!this.game) {
         return new Response(JSON.stringify({ error: 'Room not initialized' }), { status: 404 })
       }
-      return new Response(JSON.stringify({
-        roomCode: this.game.roomCode,
-        playerCount: Object.keys(this.game.players).length,
-        status: this.game.status
-      }), { headers: { 'Content-Type': 'application/json' } })
+      return new Response(
+        JSON.stringify({
+          roomCode: this.game.roomCode,
+          playerCount: Object.keys(this.game.players).length,
+          status: this.game.status,
+        }),
+        { headers: { 'Content-Type': 'application/json' } },
+      )
     }
 
     return new Response('Not Found', { status: 404 })
@@ -392,6 +450,38 @@ export class GameRoom extends DurableObject<Env> {
       })
 
       switch (msg.type) {
+        case 'rejoin': {
+          if (attachment?.playerId) {
+            this.sendError(ws, 'already_joined', 'Already in room')
+            return
+          }
+          const rawToken = (msg as Record<string, unknown>).token
+          if (typeof rawToken !== 'string' || rawToken.length === 0) {
+            this.sendError(ws, 'invalid_rejoin', 'Invalid rejoin token')
+            return
+          }
+          const rejoinPlayerId = this.consumeValidRejoinToken(rawToken)
+          if (!rejoinPlayerId || !this.game.players[rejoinPlayerId]) {
+            this.sendError(ws, 'invalid_rejoin', 'Invalid or expired rejoin token')
+            return
+          }
+          this.game.players[rejoinPlayerId].lastActiveTick = this.game.tick
+          this.game.players[rejoinPlayerId].inputState = { left: false, right: false }
+          ws.serializeAttachment({ playerId: rejoinPlayerId } satisfies WebSocketAttachment)
+          ws.send(
+            JSON.stringify({
+              type: 'sync',
+              state: this.game,
+              playerId: rejoinPlayerId,
+              rejoinToken: rawToken,
+              config: this.game.config,
+            }),
+          )
+          this.broadcastFullState()
+          this.log('room_rejoin', { playerId: rejoinPlayerId })
+          return
+        }
+
         case 'join': {
           // Prevent duplicate joins
           if (attachment?.playerId) {
@@ -453,8 +543,18 @@ export class GameRoom extends DurableObject<Env> {
             totalPlayers: Object.keys(this.game.players).length,
           })
 
-          // Send initial sync with playerId and config (only on join)
-          ws.send(JSON.stringify({ type: 'sync', state: this.game, playerId: player.id, config: this.game.config }))
+          const rejoinToken = this.createRejoinToken(player.id)
+
+          // Send initial sync with playerId, rejoin token, and config (only on join)
+          ws.send(
+            JSON.stringify({
+              type: 'sync',
+              state: this.game,
+              playerId: player.id,
+              rejoinToken,
+              config: this.game.config,
+            }),
+          )
           this.broadcast({ type: 'event', name: 'player_joined', data: { player } })
           this.broadcastFullState()
           this.persistState()
@@ -527,7 +627,7 @@ export class GameRoom extends DurableObject<Env> {
         case 'unready': {
           if (playerId && this.game.players[playerId]) {
             const wasReady = this.game.readyPlayerIds.includes(playerId)
-            this.game.readyPlayerIds = this.game.readyPlayerIds.filter(id => id !== playerId)
+            this.game.readyPlayerIds = this.game.readyPlayerIds.filter((id) => id !== playerId)
             this.broadcast({ type: 'event', name: 'player_unready', data: { playerId } })
             this.broadcastFullState()
 
@@ -544,7 +644,10 @@ export class GameRoom extends DurableObject<Env> {
           if (!isValidInputState(msg.held)) break
           const inputAccepted = !!(playerId && this.game.players[playerId])
           if (!inputAccepted) {
-            debugLog('[INPUT] DROPPED', { playerId: playerId ?? 'NULL', reason: !playerId ? 'no playerId' : 'player not found' })
+            debugLog('[INPUT] DROPPED', {
+              playerId: playerId ?? 'NULL',
+              reason: !playerId ? 'no playerId' : 'player not found',
+            })
           }
           if (inputAccepted) {
             this.inputQueue.push({ type: 'PLAYER_INPUT', playerId, input: msg.held })
@@ -555,7 +658,11 @@ export class GameRoom extends DurableObject<Env> {
         case 'move': {
           // Discrete movement - one step per message (for terminals without key release events)
           if (!isValidMoveDirection(msg.direction)) break
-          const moveAccepted = !!(playerId && this.game.players[playerId] && (this.game.status === 'playing' || this.game.status === 'countdown'))
+          const moveAccepted = !!(
+            playerId &&
+            this.game.players[playerId] &&
+            (this.game.status === 'playing' || this.game.status === 'countdown')
+          )
           if (!moveAccepted) {
             debugLog('[MOVE] DROPPED', {
               playerId: playerId ?? 'NULL',
@@ -590,7 +697,7 @@ export class GameRoom extends DurableObject<Env> {
           break
         }
       }
-    } catch (err) {
+    } catch (_err) {
       this.sendError(ws, 'invalid_message', 'Failed to parse message')
     }
   }
@@ -598,7 +705,7 @@ export class GameRoom extends DurableObject<Env> {
   /**
    * Hibernatable WebSocket close handler
    */
-  async webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean) {
+  async webSocketClose(ws: WebSocket, code: number, _reason: string, wasClean: boolean) {
     // Fresh requestId for this hibernation-wake event so its log correlates.
     this.currentRequestId = getRequestId()
 
@@ -609,12 +716,27 @@ export class GameRoom extends DurableObject<Env> {
     const playerId = attachment?.playerId
 
     if (playerId && this.game?.players[playerId]) {
+      const rejoinableStatuses = ['playing', 'wipe_exit', 'wipe_hold', 'wipe_reveal']
+      if (!wasClean && rejoinableStatuses.includes(this.game.status)) {
+        // Active-game disconnects keep their player slot for rejoin. Clear held
+        // input so a dropped client cannot keep drifting/shooting by stale state.
+        this.game.players[playerId].inputState = { left: false, right: false }
+        this.persistState()
+        this.broadcastFullState()
+        this.log('room_disconnect_grace', {
+          playerId,
+          closeCode: code,
+          wasClean,
+        })
+        return
+      }
+
       // Cancel countdown if player disconnects during it
       if (this.game.status === 'countdown') {
         await this.cancelCountdown('Player disconnected')
       }
 
-      // Remove player immediately
+      // Remove player immediately outside active play
       await this.removePlayer(playerId)
       this.broadcastFullState()
 
@@ -631,13 +753,13 @@ export class GameRoom extends DurableObject<Env> {
   /**
    * Hibernatable WebSocket error handler
    */
-  async webSocketError(ws: WebSocket, error: unknown) {
+  async webSocketError(ws: WebSocket, _error: unknown) {
     // Treat errors same as close
     await this.webSocketClose(ws, 1006, 'Error', false)
   }
 
   private getNextSlot(): PlayerSlot {
-    const usedSlots = new Set(Object.values(this.game!.players).map(p => p.slot))
+    const usedSlots = new Set(Object.values(this.game!.players).map((p) => p.slot))
     for (const slot of [1, 2, 3, 4] as const) {
       if (!usedSlots.has(slot)) return slot
     }
@@ -658,11 +780,7 @@ export class GameRoom extends DurableObject<Env> {
       playerCount,
       readyCount,
       willStart,
-      reason: willStart
-        ? 'all-players-ready'
-        : playerCount < 2
-        ? 'too-few-players'
-        : 'not-all-ready',
+      reason: willStart ? 'all-players-ready' : playerCount < 2 ? 'too-few-players' : 'not-all-ready',
     })
     debugLog('[CHECK_START]', { playerCount, readyCount, willStart })
 
@@ -680,7 +798,6 @@ export class GameRoom extends DurableObject<Env> {
     })
     this.game.status = 'countdown'
     this.game.countdownRemaining = COUNTDOWN_SECONDS
-    this.countdownRemaining = COUNTDOWN_SECONDS
 
     this.persistState()
     await this.updateRoomRegistry()
@@ -699,7 +816,6 @@ export class GameRoom extends DurableObject<Env> {
 
   private async cancelCountdown(reason: string) {
     if (!this.game) return
-    this.countdownRemaining = null
     this.game.status = 'waiting'
     this.game.countdownRemaining = null
     await this.ctx.storage.deleteAlarm()
@@ -708,17 +824,34 @@ export class GameRoom extends DurableObject<Env> {
     this.persistState()
   }
 
+  private internalRequest(url: string, init?: RequestInit): Request {
+    const headers = new Headers(init?.headers)
+    if (this.currentRequestId) headers.set(REQUEST_ID_HEADER, this.currentRequestId)
+    return new Request(url, { ...init, headers })
+  }
+
   private async updateRoomRegistry() {
     if (!this.game) return
     const matchmaker = this.env.MATCHMAKER.get(this.env.MATCHMAKER.idFromName('global'))
-    await matchmaker.fetch(new Request('https://internal/register', {
-      method: 'POST',
-      body: JSON.stringify({
-        roomCode: this.game.roomCode,
-        playerCount: Object.keys(this.game.players).length,
-        status: this.game.status,
+    await matchmaker.fetch(
+      this.internalRequest('https://internal/register', {
+        method: 'POST',
+        body: JSON.stringify({
+          roomCode: this.game.roomCode,
+          playerCount: Object.keys(this.game.players).length,
+          status: this.game.status,
+        }),
+      }),
+    )
+  }
+
+  private fireAndForget(label: string, task: Promise<unknown>): void {
+    task.catch((err) => {
+      this.log('async_task_failed', {
+        task: label,
+        message: err instanceof Error ? err.message : String(err),
       })
-    }))
+    })
   }
 
   private async startGame() {
@@ -735,7 +868,6 @@ export class GameRoom extends DurableObject<Env> {
     // Start in wipe_hold phase (skip exit for game start)
     this.game.status = 'wipe_hold'
     this.game.countdownRemaining = null
-    this.countdownRemaining = null
     this.game.maxLives = scaled.lives
     this.game.lives = scaled.lives
     // Reset per-match fields that earlier versions of startGame() forgot.
@@ -763,9 +895,7 @@ export class GameRoom extends DurableObject<Env> {
     // Note: alienShootingDisabled is set via GAME_STATE_DEFAULTS in state-defaults.ts
 
     // Initialize barriers only - aliens created at wipe_hold→wipe_reveal transition
-    this.game.entities = [
-      ...this.createBarriers(playerCount),
-    ]
+    this.game.entities = [...this.createBarriers(playerCount)]
 
     this.broadcast({ type: 'event', name: 'game_start', data: undefined })
     this.broadcastFullState()
@@ -793,22 +923,33 @@ export class GameRoom extends DurableObject<Env> {
     // for any logEvent() reached during this alarm pass.
     this.currentRequestId = getRequestId()
 
-    // Handle countdown
-    if (this.countdownRemaining !== null && this.countdownRemaining > 0) {
-      this.countdownRemaining--
-      if (this.game) this.game.countdownRemaining = this.countdownRemaining
+    const closedUnauthenticated = this.closeStaleUnauthenticatedSockets()
+    if (closedUnauthenticated > 0) {
+      this.log('ws_unauth_timeout', { closedCount: closedUnauthenticated })
+    }
 
-      if (this.countdownRemaining === 0) {
-        this.countdownRemaining = null
+    // Handle countdown. Persisted GameState is the source of truth so a
+    // hibernated/evicted DO can resume countdown after constructor rehydration.
+    if (
+      this.game?.status === 'countdown' &&
+      this.game.countdownRemaining !== null &&
+      this.game.countdownRemaining > 0
+    ) {
+      this.game.countdownRemaining--
+
+      if (this.game.countdownRemaining === 0) {
+        this.game.countdownRemaining = null
+        this.persistState()
         this.log('countdown_tick', { count: 0, transitioningToGame: true })
         await this.startGame()
       } else {
         // Wide event per countdown tick — 3 lines per game, safe for Logpush
         // cost. Lets us observe countdown duration end-to-end and catch
         // "the countdown fired but the game never started" cases.
-        this.log('countdown_tick', { count: this.countdownRemaining, transitioningToGame: false })
-        this.broadcast({ type: 'event', name: 'countdown_tick', data: { count: this.countdownRemaining } })
+        this.log('countdown_tick', { count: this.game.countdownRemaining, transitioningToGame: false })
+        this.broadcast({ type: 'event', name: 'countdown_tick', data: { count: this.game.countdownRemaining } })
         this.broadcastFullState()
+        this.persistState()
         await this.ctx.storage.setAlarm(Date.now() + 1000)
       }
       return
@@ -817,6 +958,12 @@ export class GameRoom extends DurableObject<Env> {
     // Handle game tick (including wipe phases)
     const activeStatuses = ['playing', 'wipe_exit', 'wipe_hold', 'wipe_reveal']
     if (!this.game || !activeStatuses.includes(this.game.status)) {
+      // Keep the auth-timeout alarm alive only while unauthenticated sockets exist.
+      if (
+        this.ctx.getWebSockets().some((ws) => !(ws.deserializeAttachment() as WebSocketAttachment | null)?.playerId)
+      ) {
+        await this.ensureUnauthenticatedSocketAlarm()
+      }
       // Room cleanup if empty
       if (this.game && Object.keys(this.game.players).length === 0) {
         await this.cleanup()
@@ -876,16 +1023,13 @@ export class GameRoom extends DurableObject<Env> {
       // Reaping the last player during active play must end the game —
       // otherwise status=playing + playerCount=0 violates the
       // playing_with_zero_players invariant and the room never cleans up.
-      if (
-        Object.keys(this.game.players).length === 0 &&
-        activeStatuses.includes(this.game.status)
-      ) {
+      if (Object.keys(this.game.players).length === 0 && activeStatuses.includes(this.game.status)) {
         this.log('reap_emptied_room', { wasStatus: this.game.status })
         this.endGame('defeat')
         return
       }
       // Registry counts changed — refresh matchmaker asynchronously.
-      void this.updateRoomRegistry()
+      this.fireAndForget('update_room_registry', this.updateRoomRegistry())
     }
 
     // 1. Process queued input actions via reducer
@@ -932,7 +1076,7 @@ export class GameRoom extends DurableObject<Env> {
 
     // 5. Heartbeat: update registry every ~60s (1800 ticks at 30Hz)
     if (this.game.tick % 1800 === 0) {
-      void this.updateRoomRegistry()
+      this.fireAndForget('update_room_registry', this.updateRoomRegistry())
     }
 
     // Full state sync every tick
@@ -945,7 +1089,8 @@ export class GameRoom extends DurableObject<Env> {
     const data = JSON.stringify(syncMessage)
     // Use ctx.getWebSockets() for hibernatable WebSockets
     const webSockets = this.ctx.getWebSockets()
-    let sent = 0, failed = 0
+    let sent = 0,
+      failed = 0
     for (const ws of webSockets) {
       try {
         ws.send(data)
@@ -992,7 +1137,7 @@ export class GameRoom extends DurableObject<Env> {
     // Wide event: a wave was cleared and the next one is starting. Emitted
     // once per wave completion (nextWave is called from tick() on the
     // wave_complete reducer event).
-    const survivors = Object.values(this.game.players).filter(p => p.alive).length
+    const survivors = Object.values(this.game.players).filter((p) => p.alive).length
     this.log('wave_complete', {
       wave: completedWave,
       nextWave: this.game.wave,
@@ -1007,7 +1152,7 @@ export class GameRoom extends DurableObject<Env> {
     this.broadcast({ type: 'event', name: 'game_over', data: { result } })
     this.broadcastFullState()
     this.persistState()
-    void this.updateRoomRegistry()
+    this.fireAndForget('update_room_registry', this.updateRoomRegistry())
 
     // Wide event: the game ended. Captures outcome and per-player kill
     // distribution — the business context that matters for postmortems and
@@ -1024,18 +1169,13 @@ export class GameRoom extends DurableObject<Env> {
     })
 
     // Schedule cleanup alarm for 5 minutes
-    void this.ctx.storage.setAlarm(Date.now() + 5 * 60 * 1000)
+    this.fireAndForget('schedule_cleanup_alarm', this.ctx.storage.setAlarm(Date.now() + 5 * 60 * 1000))
   }
 
   private createAlienFormationWithIds(cols: number, rows: number) {
     if (!this.game) return []
     // Use shared createAlienFormation with custom ID generator
-    return createAlienFormation(
-      cols,
-      rows,
-      this.game.config.width,
-      () => this.generateEntityId()
-    )
+    return createAlienFormation(cols, rows, this.game.config.width, () => this.generateEntityId())
   }
 
   private createBarriers(playerCount: number): BarrierEntity[] {
@@ -1087,7 +1227,9 @@ export class GameRoom extends DurableObject<Env> {
   private broadcast(msg: ServerMessage) {
     const data = JSON.stringify(msg)
     for (const ws of this.ctx.getWebSockets()) {
-      try { ws.send(data) } catch {}
+      try {
+        ws.send(data)
+      } catch {}
     }
   }
 
@@ -1102,10 +1244,12 @@ export class GameRoom extends DurableObject<Env> {
   private async cleanup() {
     if (this.game) {
       const matchmaker = this.env.MATCHMAKER.get(this.env.MATCHMAKER.idFromName('global'))
-      await matchmaker.fetch(new Request('https://internal/unregister', {
-        method: 'POST',
-        body: JSON.stringify({ roomCode: this.game.roomCode })
-      }))
+      await matchmaker.fetch(
+        this.internalRequest('https://internal/unregister', {
+          method: 'POST',
+          body: JSON.stringify({ roomCode: this.game.roomCode }),
+        }),
+      )
     }
     await this.ctx.storage.deleteAlarm()
     this.ctx.storage.sql.exec('DELETE FROM game_state')

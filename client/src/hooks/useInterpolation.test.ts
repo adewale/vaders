@@ -16,7 +16,6 @@ import {
   toRenderPosition,
   batchUpdateEntities,
   lerpPosition,
-  type RenderPosition,
 } from '../animation/interpolation'
 import type { EntityUpdate } from './useInterpolation'
 
@@ -313,9 +312,9 @@ describe('Interpolation Factor', () => {
 describe('markTick', () => {
   test('updates the tick timestamp', () => {
     const manager = new InterpolationManager()
-    const before = performance.now()
+    const _before = performance.now()
     manager.startTick(1)
-    const after = performance.now()
+    const _after = performance.now()
 
     // The factor should be very small right after marking (close to 0)
     const factor = manager.getInterpolationFactor()
@@ -363,8 +362,8 @@ describe('toRenderPosition Through Hook Interface', () => {
 
   test('hasSubCellOffset threshold is 0.1', () => {
     expect(toRenderPosition(10.05, 20.05).hasSubCellOffset).toBe(false) // Both < 0.1
-    expect(toRenderPosition(10.15, 20.0).hasSubCellOffset).toBe(true)   // subX > 0.1
-    expect(toRenderPosition(10.0, 20.15).hasSubCellOffset).toBe(true)   // subY > 0.1
+    expect(toRenderPosition(10.15, 20.0).hasSubCellOffset).toBe(true) // subX > 0.1
+    expect(toRenderPosition(10.0, 20.15).hasSubCellOffset).toBe(true) // subY > 0.1
   })
 })
 
@@ -474,8 +473,8 @@ describe('Multiple Entities Interpolation', () => {
     manager.interpolate(33) // Complete first tick
 
     // Tick 2: move in different directions
-    manager.updateEntity('p1', 10, 0, 2)  // Move right
-    manager.updateEntity('p2', 90, 100, 2)  // Move left
+    manager.updateEntity('p1', 10, 0, 2) // Move right
+    manager.updateEntity('p2', 90, 100, 2) // Move left
     manager.startTick(2)
 
     // Interpolate at midpoint
@@ -484,7 +483,7 @@ describe('Multiple Entities Interpolation', () => {
     const pos1 = manager.getVisualPosition('p1')
     const pos2 = manager.getVisualPosition('p2')
 
-    expect(pos1!.x).toBeCloseTo(5, 0)   // Midpoint 0..10
-    expect(pos2!.x).toBeCloseTo(95, 0)  // Midpoint 100..90
+    expect(pos1!.x).toBeCloseTo(5, 0) // Midpoint 0..10
+    expect(pos2!.x).toBeCloseTo(95, 0) // Midpoint 100..90
   })
 })

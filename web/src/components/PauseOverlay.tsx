@@ -26,10 +26,13 @@ export function PauseOverlay() {
   if (!visible) return null
 
   return (
-    <div
+    <button
+      type="button"
       data-testid="pause-overlay"
       onClick={() => setVisible(false)}
       style={{
+        border: 0,
+        padding: 0,
         position: 'fixed',
         inset: 0,
         background: 'rgba(0, 0, 0, 0.6)',
@@ -43,7 +46,7 @@ export function PauseOverlay() {
         fontSize: 24,
       }}
     >
-      <p>Paused — click to resume</p>
-    </div>
+      <span>Paused — click to resume</span>
+    </button>
   )
 }

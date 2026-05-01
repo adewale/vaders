@@ -111,7 +111,7 @@ export function GameScreen({ state, playerId, prevState = null }: GameScreenProp
       <span data-testid="score" style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}>
         SCORE: {state.score}
       </span>
-      <HintsBar role="game" hints={GAME_HINTS} />
+      <HintsBar screen="game" hints={GAME_HINTS} />
     </div>
   )
 }

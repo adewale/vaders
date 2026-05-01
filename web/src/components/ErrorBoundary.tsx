@@ -103,9 +103,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
         >
           Something went wrong
         </h2>
-        <p style={{ marginTop: 12 }}>
-          The {name} screen crashed. This is a bug — please reload the page.
-        </p>
+        <p style={{ marginTop: 12 }}>The {name} screen crashed. This is a bug — please reload the page.</p>
         <div style={{ marginTop: 16, display: 'flex', gap: 12, alignItems: 'center' }}>
           <button
             type="button"
@@ -128,10 +126,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
             build {BUILD_INFO.commitHash}
           </span>
         </div>
-        <details
-          data-testid="error-boundary-details"
-          style={{ marginTop: 16, fontSize: 13, color: '#ffbbbb' }}
-        >
+        <details data-testid="error-boundary-details" style={{ marginTop: 16, fontSize: 13, color: '#ffbbbb' }}>
           <summary style={{ cursor: 'pointer' }}>Error details</summary>
           <pre
             style={{

@@ -83,7 +83,7 @@ export const DEFAULT_ENTRANCE_CONFIG: EntranceConfig = {
 /**
  * Calculate stagger order for rain pattern (column-first)
  */
-function rainStaggerOrder(row: number, col: number, cols: number): number {
+function rainStaggerOrder(row: number, col: number, _cols: number): number {
   // Column-first: aliens in the same column start together,
   // then next column starts, creating a "rain" effect
   return col * 0.8 + row * 0.2

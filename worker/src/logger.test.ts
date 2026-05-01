@@ -15,7 +15,7 @@ describe('logEvent', () => {
   afterEach(() => {
     consoleLogSpy.mockRestore()
     // Clean up any CF_REGION we stub between tests
-    delete (globalThis as { CF_REGION?: string }).CF_REGION
+    ;(globalThis as { CF_REGION?: string }).CF_REGION = undefined
   })
 
   it('emits a single line to console.log', () => {
@@ -116,7 +116,9 @@ describe('logEvent', () => {
     // Ensure at least a millisecond has elapsed — spin a tight loop rather
     // than relying on fake timers (we want real Date behavior here).
     const start = Date.now()
-    while (Date.now() - start < 2) { /* spin */ }
+    while (Date.now() - start < 2) {
+      /* spin */
+    }
     logEvent('second', { n: 2 })
     const after = JSON.parse(consoleLogSpy.mock.calls[1][0] as string).timestamp as string
 

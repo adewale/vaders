@@ -143,9 +143,9 @@ describe('shake jitter determinism (no Math.random per rAF)', () => {
       fc.property(
         fc.integer({ min: 1, max: 20 }),
         fc.oneof(
-          fc.integer({ min: -1_000_000, max: -1 }),        // negative
+          fc.integer({ min: -1_000_000, max: -1 }), // negative
           fc.integer({ min: 1_000_000, max: 1_000_000_000 }), // very large
-          fc.constantFrom(0, 1, -1, Number.MAX_SAFE_INTEGER),  // boundary literals
+          fc.constantFrom(0, 1, -1, Number.MAX_SAFE_INTEGER), // boundary literals
         ),
         (intensity, tick) => {
           resetEffects()

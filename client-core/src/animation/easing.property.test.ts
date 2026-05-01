@@ -145,7 +145,7 @@ describe('clamp (property-based)', () => {
 
   it('is identity when value is already in range', () => {
     fc.assert(
-      fc.property(arbFinite, arbFinite, arbFinite, (v, x, y) => {
+      fc.property(arbFinite, arbFinite, arbFinite, (_v, x, y) => {
         const min = Math.min(x, y)
         const max = Math.max(x, y)
         // Pick a value guaranteed to be in range

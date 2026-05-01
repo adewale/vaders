@@ -189,17 +189,14 @@ describe('navigateTo', () => {
     // this; a PBT over arbitrary paths catches the class.
     const fc = await import('fast-check')
     await fc.assert(
-      fc.asyncProperty(
-        fc.stringMatching(/^\/(?:room\/[A-Z0-9]{6}|solo|\?matchmake=true|)?$/),
-        async (path) => {
-          window.history.replaceState(null, '', path || '/')
-          pushSpy.mockClear()
-          replaceSpy.mockClear()
-          navigateTo(path || '/')
-          // Same URL → zero pushes, exactly one replace.
-          return pushSpy.mock.calls.length === 0 && replaceSpy.mock.calls.length === 1
-        },
-      ),
+      fc.asyncProperty(fc.stringMatching(/^\/(?:room\/[A-Z0-9]{6}|solo|\?matchmake=true|)?$/), async (path) => {
+        window.history.replaceState(null, '', path || '/')
+        pushSpy.mockClear()
+        replaceSpy.mockClear()
+        navigateTo(path || '/')
+        // Same URL → zero pushes, exactly one replace.
+        return pushSpy.mock.calls.length === 0 && replaceSpy.mock.calls.length === 1
+      }),
       { numRuns: 40 },
     )
   })
@@ -210,19 +207,15 @@ describe('navigateTo', () => {
     // genuine forward navigation.
     const fc = await import('fast-check')
     await fc.assert(
-      fc.asyncProperty(
-        fc.stringMatching(/^\/[a-z]{3,6}$/),
-        fc.stringMatching(/^\/[a-z]{3,6}$/),
-        async (from, to) => {
-          if (from === to) return true // same-URL case covered by sibling PBT
-          window.history.replaceState(null, '', from)
-          pushSpy.mockClear()
-          replaceSpy.mockClear()
-          navigateTo(to)
-          // Different URL, default push path.
-          return pushSpy.mock.calls.length === 1 && replaceSpy.mock.calls.length === 0
-        },
-      ),
+      fc.asyncProperty(fc.stringMatching(/^\/[a-z]{3,6}$/), fc.stringMatching(/^\/[a-z]{3,6}$/), async (from, to) => {
+        if (from === to) return true // same-URL case covered by sibling PBT
+        window.history.replaceState(null, '', from)
+        pushSpy.mockClear()
+        replaceSpy.mockClear()
+        navigateTo(to)
+        // Different URL, default push path.
+        return pushSpy.mock.calls.length === 1 && replaceSpy.mock.calls.length === 0
+      }),
       { numRuns: 40 },
     )
   })

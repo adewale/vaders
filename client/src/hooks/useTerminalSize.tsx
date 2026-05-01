@@ -59,18 +59,15 @@ function calculateSize(width: number, height: number): TerminalSize {
 
 export function TerminalSizeProvider({ children }: { children: ReactNode }) {
   const renderer = useRenderer()
-  const [size, setSize] = useState<TerminalSize>(() =>
-    calculateSize(renderer.width, renderer.height)
-  )
+  const [size, setSize] = useState<TerminalSize>(() => calculateSize(renderer.width, renderer.height))
 
   useEffect(() => {
     // Update size when terminal resizes
     const checkSize = () => {
       const newSize = calculateSize(renderer.width, renderer.height)
-      setSize(prev => {
+      setSize((prev) => {
         // Only update if something changed
-        if (prev.terminalWidth !== newSize.terminalWidth ||
-            prev.terminalHeight !== newSize.terminalHeight) {
+        if (prev.terminalWidth !== newSize.terminalWidth || prev.terminalHeight !== newSize.terminalHeight) {
           return newSize
         }
         return prev
@@ -84,9 +81,5 @@ export function TerminalSizeProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(interval)
   }, [renderer])
 
-  return (
-    <TerminalSizeContext.Provider value={size}>
-      {children}
-    </TerminalSizeContext.Provider>
-  )
+  return <TerminalSizeContext.Provider value={size}>{children}</TerminalSizeContext.Provider>
 }

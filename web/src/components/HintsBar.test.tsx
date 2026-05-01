@@ -9,7 +9,7 @@ describe('HintsBar', () => {
   it('renders each [key, desc] pair as visible text', () => {
     render(
       <HintsBar
-        role="lobby"
+        screen="lobby"
         hints={[
           ['ENTER', 'Ready'],
           ['ESC', 'Leave'],
@@ -28,13 +28,13 @@ describe('HintsBar', () => {
   })
 
   it('exposes data-testid="hints-bar" and the correct data-role', () => {
-    render(<HintsBar role="game-over" hints={[['R', 'Play Again']]} />)
+    render(<HintsBar screen="game-over" hints={[['R', 'Play Again']]} />)
     const bar = screen.getByTestId('hints-bar')
     expect(bar.getAttribute('data-role')).toBe('game-over')
   })
 
   it('returns null when hints is empty (nothing to render)', () => {
-    const { container } = render(<HintsBar role="lobby" hints={[]} />)
+    const { container } = render(<HintsBar screen="lobby" hints={[]} />)
     expect(screen.queryByTestId('hints-bar')).toBeNull()
     expect(container.firstChild).toBeNull()
   })
@@ -42,7 +42,7 @@ describe('HintsBar', () => {
   it('renders hints in the order given by the input array', () => {
     render(
       <HintsBar
-        role="lobby"
+        screen="lobby"
         hints={[
           ['A', 'first'],
           ['B', 'second'],
@@ -74,7 +74,7 @@ describe('HintsBar', () => {
 
     fc.assert(
       fc.property(fc.array(fc.tuple(tokenArb, tokenArb), { minLength: 0, maxLength: 8 }), (hints) => {
-        const { unmount } = render(<HintsBar role="lobby" hints={hints} />)
+        const { unmount } = render(<HintsBar screen="lobby" hints={hints} />)
         try {
           if (hints.length === 0) {
             expect(screen.queryByTestId('hints-bar')).toBeNull()

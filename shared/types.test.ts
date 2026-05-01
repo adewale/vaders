@@ -153,12 +153,7 @@ describe('Entity Filter Helpers', () => {
 
   describe('getAliens', () => {
     test('returns only alien entities', () => {
-      const entities: Entity[] = [
-        createAlien('a1'),
-        createBullet('b1'),
-        createAlien('a2'),
-        createBarrier('bar1'),
-      ]
+      const entities: Entity[] = [createAlien('a1'), createBullet('b1'), createAlien('a2'), createBarrier('bar1')]
       const aliens = getAliens(entities)
       expect(aliens.length).toBe(2)
       expect(aliens[0].id).toBe('a1')
@@ -174,11 +169,7 @@ describe('Entity Filter Helpers', () => {
 
   describe('getBullets', () => {
     test('returns only bullet entities', () => {
-      const entities: Entity[] = [
-        createAlien('a1'),
-        createBullet('b1'),
-        createBullet('b2'),
-      ]
+      const entities: Entity[] = [createAlien('a1'), createBullet('b1'), createBullet('b2')]
       const bullets = getBullets(entities)
       expect(bullets.length).toBe(2)
       expect(bullets[0].id).toBe('b1')
@@ -194,11 +185,7 @@ describe('Entity Filter Helpers', () => {
 
   describe('getBarriers', () => {
     test('returns only barrier entities', () => {
-      const entities: Entity[] = [
-        createBarrier('bar1'),
-        createAlien('a1'),
-        createBarrier('bar2'),
-      ]
+      const entities: Entity[] = [createBarrier('bar1'), createAlien('a1'), createBarrier('bar2')]
       const barriers = getBarriers(entities)
       expect(barriers.length).toBe(2)
       expect(barriers[0].id).toBe('bar1')
@@ -214,11 +201,7 @@ describe('Entity Filter Helpers', () => {
 
   describe('getUFOs', () => {
     test('returns only UFO entities', () => {
-      const entities: Entity[] = [
-        createUFO('u1'),
-        createAlien('a1'),
-        createUFO('u2'),
-      ]
+      const entities: Entity[] = [createUFO('u1'), createAlien('a1'), createUFO('u2')]
       const ufos = getUFOs(entities)
       expect(ufos.length).toBe(2)
       expect(ufos[0].id).toBe('u1')
@@ -268,7 +251,7 @@ describe('seededRandom', () => {
         expect(value).toBeGreaterThanOrEqual(0)
         expect(value).toBeLessThan(1)
         expect(typeof value).toBe('number')
-      })
+      }),
     )
   })
 
@@ -290,7 +273,7 @@ describe('seededRandom', () => {
         expect(seq1).toEqual(seq2)
         expect(seq1.length).toBe(n)
         expect(state1.rngSeed).toBe(state2.rngSeed)
-      })
+      }),
     )
   })
 
@@ -311,7 +294,7 @@ describe('seededRandom', () => {
 
         expect(seedAfterSecond).not.toBe(seedAfterFirst)
         expect(seedAfterSecond).not.toBe(seedBefore)
-      })
+      }),
     )
   })
 
@@ -334,7 +317,7 @@ describe('seededRandom', () => {
           expect(v).toBeGreaterThanOrEqual(0)
           expect(v).toBeLessThan(1)
         }
-      })
+      }),
     )
   })
 
@@ -361,7 +344,7 @@ describe('seededRandom', () => {
         expect(below).toBeGreaterThan(n * 0.3)
         expect(above).toBeGreaterThan(n * 0.3)
         expect(below + above).toBe(n)
-      })
+      }),
     )
   })
 })
@@ -372,8 +355,8 @@ describe('createBarrierSegments', () => {
   test('returns exactly 9 segments (5 top + 4 bottom, gap at center)', () => {
     const segments = createBarrierSegments()
     expect(segments.length).toBe(9)
-    const topRow = segments.filter(s => s.offsetY === 0)
-    const bottomRow = segments.filter(s => s.offsetY === 1)
+    const topRow = segments.filter((s) => s.offsetY === 0)
+    const bottomRow = segments.filter((s) => s.offsetY === 1)
     expect(topRow.length).toBe(5)
     expect(bottomRow.length).toBe(4)
   })
@@ -384,22 +367,22 @@ describe('createBarrierSegments', () => {
     for (const seg of segments) {
       expect(seg.health).toBe(4)
     }
-    expect(segments.every(s => s.health === 4)).toBe(true)
+    expect(segments.every((s) => s.health === 4)).toBe(true)
   })
 
   test('no segment has the center-bottom position (offsetX=2, offsetY=1)', () => {
     const segments = createBarrierSegments()
-    const centerBottom = segments.filter(s => s.offsetX === 2 && s.offsetY === 1)
+    const centerBottom = segments.filter((s) => s.offsetX === 2 && s.offsetY === 1)
     expect(centerBottom.length).toBe(0)
     // Verify center-top IS present (positive check)
-    const centerTop = segments.filter(s => s.offsetX === 2 && s.offsetY === 0)
+    const centerTop = segments.filter((s) => s.offsetX === 2 && s.offsetY === 0)
     expect(centerTop.length).toBe(1)
     expect(centerTop[0].health).toBe(4)
   })
 
   test('segments cover expected positions (check offsetX/offsetY values)', () => {
     const segments = createBarrierSegments()
-    const positions = segments.map(s => `${s.offsetX},${s.offsetY}`)
+    const positions = segments.map((s) => `${s.offsetX},${s.offsetY}`)
     // Top row: all 5 columns
     expect(positions).toContain('0,0')
     expect(positions).toContain('1,0')
@@ -448,37 +431,37 @@ describe('createAlienFormation', () => {
       expect(alien.alive).toBe(true)
       expect(alien.entering).toBe(false)
     }
-    expect(aliens.every(a => a.alive && !a.entering)).toBe(true)
+    expect(aliens.every((a) => a.alive && !a.entering)).toBe(true)
   })
 
   test('alien types follow FORMATION_ROWS pattern (row 0=squid, 1-2=crab, 3-4=octopus, beyond=octopus)', () => {
     const aliens = createAlienFormation(11, 6)
-    const row0 = aliens.filter(a => a.row === 0)
-    const row1 = aliens.filter(a => a.row === 1)
-    const row2 = aliens.filter(a => a.row === 2)
-    const row3 = aliens.filter(a => a.row === 3)
-    const row4 = aliens.filter(a => a.row === 4)
-    const row5 = aliens.filter(a => a.row === 5)
+    const row0 = aliens.filter((a) => a.row === 0)
+    const row1 = aliens.filter((a) => a.row === 1)
+    const row2 = aliens.filter((a) => a.row === 2)
+    const row3 = aliens.filter((a) => a.row === 3)
+    const row4 = aliens.filter((a) => a.row === 4)
+    const row5 = aliens.filter((a) => a.row === 5)
 
-    expect(row0.every(a => a.type === 'squid')).toBe(true)
-    expect(row1.every(a => a.type === 'crab')).toBe(true)
-    expect(row2.every(a => a.type === 'crab')).toBe(true)
-    expect(row3.every(a => a.type === 'octopus')).toBe(true)
-    expect(row4.every(a => a.type === 'octopus')).toBe(true)
+    expect(row0.every((a) => a.type === 'squid')).toBe(true)
+    expect(row1.every((a) => a.type === 'crab')).toBe(true)
+    expect(row2.every((a) => a.type === 'crab')).toBe(true)
+    expect(row3.every((a) => a.type === 'octopus')).toBe(true)
+    expect(row4.every((a) => a.type === 'octopus')).toBe(true)
     // Row beyond FORMATION_ROWS defaults to octopus
-    expect(row5.every(a => a.type === 'octopus')).toBe(true)
+    expect(row5.every((a) => a.type === 'octopus')).toBe(true)
     expect(row5.length).toBe(11)
   })
 
   test('points match ALIEN_REGISTRY for each type', () => {
     const aliens = createAlienFormation(11, 5)
-    const squids = aliens.filter(a => a.type === 'squid')
-    const crabs = aliens.filter(a => a.type === 'crab')
-    const octopi = aliens.filter(a => a.type === 'octopus')
+    const squids = aliens.filter((a) => a.type === 'squid')
+    const crabs = aliens.filter((a) => a.type === 'crab')
+    const octopi = aliens.filter((a) => a.type === 'octopus')
 
-    expect(squids.every(a => a.points === ALIEN_REGISTRY.squid.points)).toBe(true)
-    expect(crabs.every(a => a.points === ALIEN_REGISTRY.crab.points)).toBe(true)
-    expect(octopi.every(a => a.points === ALIEN_REGISTRY.octopus.points)).toBe(true)
+    expect(squids.every((a) => a.points === ALIEN_REGISTRY.squid.points)).toBe(true)
+    expect(crabs.every((a) => a.points === ALIEN_REGISTRY.crab.points)).toBe(true)
+    expect(octopi.every((a) => a.points === ALIEN_REGISTRY.octopus.points)).toBe(true)
     // Verify exact values too
     expect(squids[0].points).toBe(30)
     expect(crabs[0].points).toBe(20)
@@ -487,7 +470,7 @@ describe('createAlienFormation', () => {
 
   test('formation is horizontally centered on screen (symmetric around screenWidth/2)', () => {
     const aliens = createAlienFormation(11, 5, STANDARD_WIDTH)
-    const xs = aliens.map(a => a.x)
+    const xs = aliens.map((a) => a.x)
     const minX = Math.min(...xs)
     const maxX = Math.max(...xs)
     // The rightmost alien's right edge
@@ -503,7 +486,7 @@ describe('createAlienFormation', () => {
 
   test('all IDs are unique', () => {
     const aliens = createAlienFormation(11, 5)
-    const ids = aliens.map(a => a.id)
+    const ids = aliens.map((a) => a.id)
     const uniqueIds = new Set(ids)
     expect(uniqueIds.size).toBe(ids.length)
     expect(uniqueIds.size).toBe(55)
@@ -518,28 +501,24 @@ describe('createAlienFormation', () => {
     expect(aliens[0].id).toBe('custom-100')
     expect(aliens[5].id).toBe('custom-105')
     // Verify all IDs use the custom prefix
-    expect(aliens.every(a => a.id.startsWith('custom-'))).toBe(true)
+    expect(aliens.every((a) => a.id.startsWith('custom-'))).toBe(true)
   })
 
   test('property: for any valid cols/rows, all aliens have x >= 0 and fit within screen width', () => {
     fc.assert(
-      fc.property(
-        fc.integer({ min: 1, max: 15 }),
-        fc.integer({ min: 1, max: 10 }),
-        (cols, rows) => {
-          // Screen must be wide enough to contain the grid:
-          // gridWidth = (cols - 1) * 9 + 7
-          const gridWidth = (cols - 1) * LAYOUT.ALIEN_COL_SPACING + LAYOUT.ALIEN_WIDTH
-          const screenWidth = gridWidth + 20 // 10px margin each side
-          const aliens = createAlienFormation(cols, rows, screenWidth)
-          expect(aliens.length).toBe(cols * rows)
-          for (const alien of aliens) {
-            expect(alien.x).toBeGreaterThanOrEqual(0)
-            expect(alien.x + LAYOUT.ALIEN_WIDTH).toBeLessThanOrEqual(screenWidth)
-          }
+      fc.property(fc.integer({ min: 1, max: 15 }), fc.integer({ min: 1, max: 10 }), (cols, rows) => {
+        // Screen must be wide enough to contain the grid:
+        // gridWidth = (cols - 1) * 9 + 7
+        const gridWidth = (cols - 1) * LAYOUT.ALIEN_COL_SPACING + LAYOUT.ALIEN_WIDTH
+        const screenWidth = gridWidth + 20 // 10px margin each side
+        const aliens = createAlienFormation(cols, rows, screenWidth)
+        expect(aliens.length).toBe(cols * rows)
+        for (const alien of aliens) {
+          expect(alien.x).toBeGreaterThanOrEqual(0)
+          expect(alien.x + LAYOUT.ALIEN_WIDTH).toBeLessThanOrEqual(screenWidth)
         }
-      ),
-      { numRuns: 100 }
+      }),
+      { numRuns: 100 },
     )
   })
 })
@@ -565,7 +544,7 @@ describe('constrainPlayerX properties', () => {
           expect(result).toBeGreaterThanOrEqual(Math.min(x, LAYOUT.PLAYER_MAX_X))
           expect(typeof result).toBe('number')
         }
-      })
+      }),
     )
   })
 
@@ -580,7 +559,7 @@ describe('constrainPlayerX properties', () => {
 
         // Both results remain within valid bounds
         expect(atMin).toBeGreaterThanOrEqual(LAYOUT.PLAYER_MIN_X)
-      })
+      }),
     )
   })
 
@@ -595,7 +574,7 @@ describe('constrainPlayerX properties', () => {
         const movedLeft = constrainPlayerX(x, 'left', speed)
         expect(movedLeft).toBeLessThanOrEqual(x)
         expect(movedLeft).toBeGreaterThanOrEqual(LAYOUT.PLAYER_MIN_X)
-      })
+      }),
     )
   })
 
@@ -608,7 +587,7 @@ describe('constrainPlayerX properties', () => {
         expect(left).toBe(x)
         expect(right).toBe(x)
         expect(left).toBe(right)
-      })
+      }),
     )
   })
 })
@@ -616,7 +595,7 @@ describe('constrainPlayerX properties', () => {
 // ─── applyPlayerInput Property-Based Tests ──────────────────────────────────
 
 describe('applyPlayerInput properties', () => {
-  const posArb = fc.integer({ min: -10, max: 130 })
+  const _posArb = fc.integer({ min: -10, max: 130 })
   const speedArb = fc.integer({ min: 0, max: 20 })
   const inBoundsArb = fc.integer({ min: LAYOUT.PLAYER_MIN_X, max: LAYOUT.PLAYER_MAX_X })
 
@@ -628,7 +607,7 @@ describe('applyPlayerInput properties', () => {
         expect(result).toBeGreaterThanOrEqual(LAYOUT.PLAYER_MIN_X)
         expect(result).toBeLessThanOrEqual(LAYOUT.PLAYER_MAX_X)
         expect(typeof result).toBe('number')
-      })
+      }),
     )
   })
 
@@ -639,7 +618,7 @@ describe('applyPlayerInput properties', () => {
         expect(result).toBe(x)
         expect(result).toBeGreaterThanOrEqual(LAYOUT.PLAYER_MIN_X)
         expect(result).toBeLessThanOrEqual(LAYOUT.PLAYER_MAX_X)
-      })
+      }),
     )
   })
 
@@ -653,7 +632,7 @@ describe('applyPlayerInput properties', () => {
         expect(result).toBe(x)
         expect(result).toBeGreaterThanOrEqual(LAYOUT.PLAYER_MIN_X)
         expect(result).toBeLessThanOrEqual(LAYOUT.PLAYER_MAX_X)
-      })
+      }),
     )
   })
 
@@ -672,7 +651,7 @@ describe('applyPlayerInput properties', () => {
           expect(result).toBeLessThanOrEqual(LAYOUT.PLAYER_MAX_X)
           expect(typeof result).toBe('number')
         }
-      })
+      }),
     )
   })
 })

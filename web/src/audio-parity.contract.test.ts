@@ -54,8 +54,7 @@ function read(rel: string): string {
 function extractPlayedSounds(source: string): Set<string> {
   const out = new Set<string>()
   const re = /\.play\s*\(\s*['"]([a-z_][a-z0-9_]*)['"]\s*[,)]/gi
-  let m
-  while ((m = re.exec(source)) !== null) out.add(m[1])
+  for (let m = re.exec(source); m !== null; m = re.exec(source)) out.add(m[1])
   return out
 }
 
@@ -67,8 +66,7 @@ function extractTriggerSounds(source: string): Set<string> {
   const out = new Set<string>()
   // `sounds.push('X')` or `sounds.push("X")`
   const re = /\bsounds\.push\s*\(\s*['"]([a-z_][a-z0-9_]*)['"]\s*\)/gi
-  let m
-  while ((m = re.exec(source)) !== null) out.add(m[1])
+  for (let m = re.exec(source); m !== null; m = re.exec(source)) out.add(m[1])
   return out
 }
 
@@ -85,8 +83,7 @@ function extractWebSoundEventUnion(source: string): Set<string> {
   if (!match) return out
   const body = match[1]
   const re = /['"]([a-z_][a-z0-9_]*)['"]/gi
-  let m
-  while ((m = re.exec(body)) !== null) out.add(m[1])
+  for (let m = re.exec(body); m !== null; m = re.exec(body)) out.add(m[1])
   return out
 }
 
@@ -135,9 +132,7 @@ describe('cross-frontend audio parity', () => {
     // `WebSoundEvent` union OR a raw string. The union IS the declared
     // contract; anything played by the TUI that's missing from the union
     // is unambiguous drift.
-    const missing = [...tuiSounds].filter(
-      (s) => !webSoundEvents.has(s) && !(s in TUI_ONLY_SOUNDS),
-    )
+    const missing = [...tuiSounds].filter((s) => !webSoundEvents.has(s) && !(s in TUI_ONLY_SOUNDS))
     expect(missing).toEqual([])
   })
 
@@ -147,9 +142,7 @@ describe('cross-frontend audio parity', () => {
     // input-handling layer. Assert that every TUI sound is reachable via
     // at least one of: App.tsx direct call, detectAudioTriggers emission,
     // or the adapter's own internal scheduling (music, countdown).
-    const unreachable = [...tuiSounds].filter(
-      (s) => !webReachable.has(s) && !(s in TUI_ONLY_SOUNDS),
-    )
+    const unreachable = [...tuiSounds].filter((s) => !webReachable.has(s) && !(s in TUI_ONLY_SOUNDS))
     expect(unreachable).toEqual([])
   })
 

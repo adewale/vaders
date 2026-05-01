@@ -87,11 +87,7 @@ function walkProduction(root: string): string[] {
       if (ent === 'node_modules' || ent === 'dist' || ent === 'testing') continue
       const s = statSync(full)
       if (s.isDirectory()) recurse(full)
-      else if (
-        /\.(ts|tsx)$/.test(ent) &&
-        !/\.test\.(ts|tsx)$/.test(ent) &&
-        !/\.contract\.test\.(ts|tsx)$/.test(ent)
-      ) {
+      else if (/\.(ts|tsx)$/.test(ent) && !/\.test\.(ts|tsx)$/.test(ent) && !/\.contract\.test\.(ts|tsx)$/.test(ent)) {
         files.push(full)
       }
     }
@@ -152,9 +148,7 @@ describe('GameState field-surface coverage', () => {
   })
 
   it('every GameState field is read by the web OR classified as server-only', () => {
-    const orphans = [...gameStateFields].filter(
-      (f) => !reads.has(f) && !(f in GAMESTATE_SERVER_ONLY_FIELDS),
-    )
+    const orphans = [...gameStateFields].filter((f) => !reads.has(f) && !(f in GAMESTATE_SERVER_ONLY_FIELDS))
     expect(orphans).toEqual([])
   })
 

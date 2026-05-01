@@ -37,11 +37,11 @@ import { getScaledConfig } from './scaling'
 // ─── Game Actions ─────────────────────────────────────────────────────────────
 
 export type GameAction =
-  | { type: 'TICK' }  // Fixed cadence, no deltaTime needed
+  | { type: 'TICK' } // Fixed cadence, no deltaTime needed
   | { type: 'PLAYER_JOIN'; player: Player }
   | { type: 'PLAYER_LEAVE'; playerId: string }
   | { type: 'PLAYER_INPUT'; playerId: string; input: InputState }
-  | { type: 'PLAYER_MOVE'; playerId: string; direction: 'left' | 'right' }  // Discrete movement (one step)
+  | { type: 'PLAYER_MOVE'; playerId: string; direction: 'left' | 'right' } // Discrete movement (one step)
   | { type: 'PLAYER_SHOOT'; playerId: string }
   | { type: 'PLAYER_READY'; playerId: string }
   | { type: 'PLAYER_UNREADY'; playerId: string }
@@ -54,9 +54,9 @@ export type GameAction =
 
 export interface ReducerResult {
   state: GameState
-  events: ServerEvent[]      // Events to broadcast to clients
-  persist: boolean           // Whether to persist state
-  scheduleAlarm?: number     // Schedule DO alarm (ms from now)
+  events: ServerEvent[] // Events to broadcast to clients
+  persist: boolean // Whether to persist state
+  scheduleAlarm?: number // Schedule DO alarm (ms from now)
 }
 
 // ─── State Machine ────────────────────────────────────────────────────────────
@@ -169,12 +169,10 @@ function playerJoinReducer(state: GameState, player: Player): ReducerResult {
 function playerLeaveReducer(state: GameState, playerId: string): ReducerResult {
   const next = structuredClone(state)
   delete next.players[playerId]
-  next.readyPlayerIds = next.readyPlayerIds.filter(id => id !== playerId)
+  next.readyPlayerIds = next.readyPlayerIds.filter((id) => id !== playerId)
 
   // Clean up bullets belonging to the departing player (A3: orphaned bullet cleanup)
-  next.entities = next.entities.filter(e =>
-    e.kind !== 'bullet' || e.ownerId !== playerId
-  )
+  next.entities = next.entities.filter((e) => e.kind !== 'bullet' || e.ownerId !== playerId)
 
   const playerCount = Object.keys(next.players).length
   if (playerCount === 1) {
@@ -233,7 +231,7 @@ function moveReducer(state: GameState, playerId: string, direction: 'left' | 'ri
 
 function shootReducer(state: GameState, playerId: string): ReducerResult {
   const player = state.players[playerId]
-  if (!player || !player.alive) return { state, events: [], persist: false }
+  if (!player?.alive) return { state, events: [], persist: false }
 
   // Check cooldown
   if (state.tick - player.lastShotTick < state.config.playerCooldownTicks) {
@@ -249,11 +247,11 @@ function shootReducer(state: GameState, playerId: string): ReducerResult {
   // So bullet.x = player.x places the bullet at the visual center
   const bullet: BulletEntity = {
     kind: 'bullet',
-    id: `b_${next.tick}_${playerId}`,  // Unique bullet ID
-    x: player.x,  // player.x IS the center, no offset needed
+    id: `b_${next.tick}_${playerId}`, // Unique bullet ID
+    x: player.x, // player.x IS the center, no offset needed
     y: LAYOUT.PLAYER_Y - LAYOUT.BULLET_SPAWN_OFFSET,
     ownerId: playerId,
-    dy: -1,  // Moving up
+    dy: -1, // Moving up
   }
 
   next.entities.push(bullet)
@@ -282,7 +280,7 @@ function unreadyReducer(state: GameState, playerId: string): ReducerResult {
   if (!state.readyPlayerIds.includes(playerId)) return { state, events: [], persist: false }
 
   const next = structuredClone(state)
-  next.readyPlayerIds = next.readyPlayerIds.filter(id => id !== playerId)
+  next.readyPlayerIds = next.readyPlayerIds.filter((id) => id !== playerId)
 
   return {
     state: next,
@@ -297,7 +295,7 @@ function startSoloReducer(state: GameState): ReducerResult {
   }
 
   const next = structuredClone(state)
-  next.status = 'wipe_hold'  // Skip exit, go straight to hold for game start
+  next.status = 'wipe_hold' // Skip exit, go straight to hold for game start
   next.mode = 'solo'
   next.maxLives = 3
   next.lives = 3
@@ -473,7 +471,7 @@ function tickReducer(state: GameState): ReducerResult {
   const barriers = getBarriers(next.entities)
 
   if (next.tick % scaled.alienMoveIntervalTicks === 0) {
-    const liveAliens = aliens.filter(a => a.alive)
+    const liveAliens = aliens.filter((a) => a.alive)
 
     // Check if we need to change direction
     let hitWall = false
@@ -517,12 +515,11 @@ function tickReducer(state: GameState): ReducerResult {
           const segRight = segX + HITBOX.BARRIER_SEGMENT_WIDTH
           const segBottom = segY + HITBOX.BARRIER_SEGMENT_HEIGHT
 
-          if (alien.x < segRight && alienRight > segX &&
-              alien.y < segBottom && alienBottom > segY) {
+          if (alien.x < segRight && alienRight > segX && alien.y < segBottom && alienBottom > segY) {
             // Alien destroys the barrier segment completely
             seg.health = 0
             hitBarrier = true
-            break  // B4: aliens only damage one segment at a time
+            break // B4: aliens only damage one segment at a time
           }
         }
       }
@@ -556,14 +553,14 @@ function tickReducer(state: GameState): ReducerResult {
 
   // Bullet-alien collisions
   for (const bullet of bullets) {
-    if (bullet.dy !== -1) continue  // Only player bullets hit aliens
+    if (bullet.dy !== -1) continue // Only player bullets hit aliens
 
     for (const alien of aliens) {
       if (!alien.alive) continue
 
       if (checkAlienHit(bullet.x, bullet.y, alien.x, alien.y)) {
         alien.alive = false
-        bullet.y = -100  // Mark for removal
+        bullet.y = -100 // Mark for removal
         consumedBullets.add(bullet.id)
 
         // Award points and track kill
@@ -590,7 +587,7 @@ function tickReducer(state: GameState): ReducerResult {
   // Bullet-UFO collisions
   const currentUfos = getUFOs(next.entities)
   for (const bullet of bullets) {
-    if (bullet.dy !== -1) continue  // Only player bullets hit UFOs
+    if (bullet.dy !== -1) continue // Only player bullets hit UFOs
     if (consumedBullets.has(bullet.id)) continue
 
     for (const ufo of currentUfos) {
@@ -598,7 +595,7 @@ function tickReducer(state: GameState): ReducerResult {
 
       if (checkUfoHit(bullet.x, bullet.y, ufo.x, ufo.y)) {
         ufo.alive = false
-        bullet.y = -100  // Mark for removal
+        bullet.y = -100 // Mark for removal
         consumedBullets.add(bullet.id)
 
         // Award mystery points
@@ -619,7 +616,7 @@ function tickReducer(state: GameState): ReducerResult {
 
   // Bullet-player collisions (alien bullets)
   for (const bullet of bullets) {
-    if (bullet.dy !== 1) continue  // Only alien bullets hit players
+    if (bullet.dy !== 1) continue // Only alien bullets hit players
     if (consumedBullets.has(bullet.id)) continue
 
     for (const player of Object.values(next.players)) {
@@ -627,7 +624,7 @@ function tickReducer(state: GameState): ReducerResult {
       if (player.invulnerableUntilTick !== null && next.tick < player.invulnerableUntilTick) continue
 
       if (checkPlayerHit(bullet.x, bullet.y, player.x, LAYOUT.PLAYER_Y)) {
-        bullet.y = 100  // Mark for removal
+        bullet.y = 100 // Mark for removal
         consumedBullets.add(bullet.id)
         player.alive = false
         player.lives--
@@ -663,7 +660,7 @@ function tickReducer(state: GameState): ReducerResult {
 
         if (checkBarrierSegmentHit(bullet.x, bullet.y, segX, segY)) {
           seg.health = Math.max(0, seg.health - 1) as 0 | 1 | 2 | 3 | 4
-          bullet.y = bullet.dy === -1 ? -100 : 100  // Mark for removal
+          bullet.y = bullet.dy === -1 ? -100 : 100 // Mark for removal
           consumedBullets.add(bullet.id)
           break
         }
@@ -672,15 +669,13 @@ function tickReducer(state: GameState): ReducerResult {
   }
 
   // Remove off-screen and destroyed bullets
-  next.entities = next.entities.filter(e =>
-    e.kind !== 'bullet' || (e.y > 0 && e.y < next.config.height)
-  )
+  next.entities = next.entities.filter((e) => e.kind !== 'bullet' || (e.y > 0 && e.y < next.config.height))
 
   // 5. Alien shooting (seeded RNG) - skip if aliens are entering, disabled, or all players dead
   // Note: uses `aliens` from step 2 (already moved this tick)
-  const liveAliens = aliens.filter(a => a.alive)
-  const aliensEntering = liveAliens.some(a => a.entering)
-  const allPlayersDead = Object.values(next.players).every(p => !p.alive)
+  const liveAliens = aliens.filter((a) => a.alive)
+  const aliensEntering = liveAliens.some((a) => a.entering)
+  const allPlayersDead = Object.values(next.players).every((p) => !p.alive)
 
   if (!aliensEntering && !next.alienShootingDisabled && !allPlayersDead) {
     // Find bottom-row aliens (can shoot)
@@ -704,10 +699,10 @@ function tickReducer(state: GameState): ReducerResult {
         const bullet: BulletEntity = {
           kind: 'bullet',
           id: `ab_${next.tick}_${alien.id}`,
-          x: alien.x + Math.floor(LAYOUT.ALIEN_WIDTH / 2),  // Left edge + offset = center
-          y: alien.y + HITBOX.ALIEN_HEIGHT,  // Below alien sprite
-          ownerId: null,  // Alien bullet
-          dy: 1,  // Moving down
+          x: alien.x + Math.floor(LAYOUT.ALIEN_WIDTH / 2), // Left edge + offset = center
+          y: alien.y + HITBOX.ALIEN_HEIGHT, // Below alien sprite
+          ownerId: null, // Alien bullet
+          dy: 1, // Moving down
         }
         next.entities.push(bullet)
       }
@@ -717,11 +712,11 @@ function tickReducer(state: GameState): ReducerResult {
   // 6. UFO spawning and movement
   // Note: UFO collision was already checked in step 4
   const ufos = getUFOs(next.entities)
-  const activeUfo = ufos.find(u => u.alive)
+  const activeUfo = ufos.find((u) => u.alive)
 
   // Move existing UFO
   if (activeUfo) {
-    activeUfo.x += activeUfo.direction * 1  // UFO moves 1 cell per tick
+    activeUfo.x += activeUfo.direction * 1 // UFO moves 1 cell per tick
     // Remove if off-screen
     if (activeUfo.x < -3 || activeUfo.x > next.config.width + 3) {
       activeUfo.alive = false
@@ -730,7 +725,7 @@ function tickReducer(state: GameState): ReducerResult {
 
   // Spawn new UFO (only if none active, ~0.5% chance per tick = roughly every 6-7 seconds)
   if (!activeUfo && seededRandom(next) < UFO_SPAWN_PROBABILITY) {
-    const direction = seededRandom(next) < 0.5 ? 1 : -1 as 1 | -1
+    const direction = seededRandom(next) < 0.5 ? 1 : (-1 as 1 | -1)
     const startX = direction === 1 ? -3 : next.config.width + 3
     const mysteryPoints = [50, 100, 150, 200, 300][Math.floor(seededRandom(next) * 5)]
 
@@ -748,20 +743,20 @@ function tickReducer(state: GameState): ReducerResult {
   }
 
   // Remove dead UFOs
-  next.entities = next.entities.filter(e => e.kind !== 'ufo' || e.alive)
+  next.entities = next.entities.filter((e) => e.kind !== 'ufo' || e.alive)
 
   // Remove dead aliens (cleanup to prevent memory leak)
-  next.entities = next.entities.filter(e => e.kind !== 'alien' || e.alive)
+  next.entities = next.entities.filter((e) => e.kind !== 'alien' || e.alive)
 
   // 7. Check end conditions
   // Note: invasion game-over is checked in step 2 (alien movement)
-  const allLiveAliens = getAliens(next.entities).filter(a => a.alive)
+  const allLiveAliens = getAliens(next.entities).filter((a) => a.alive)
   const allAliensKilled = allLiveAliens.length === 0
 
   // Check if any enemy reached bottom
-  const aliensReachedBottom = allLiveAliens.some(a => a.y >= LAYOUT.GAME_OVER_Y)
+  const aliensReachedBottom = allLiveAliens.some((a) => a.y >= LAYOUT.GAME_OVER_Y)
   // Game over when all players are dead AND have no lives remaining
-  const allPlayersOutOfLives = Object.values(next.players).every(p => !p.alive && p.lives <= 0)
+  const allPlayersOutOfLives = Object.values(next.players).every((p) => !p.alive && p.lives <= 0)
 
   if (allAliensKilled) {
     events.push({ type: 'event', name: 'wave_complete', data: { wave: next.wave } })
@@ -776,6 +771,6 @@ function tickReducer(state: GameState): ReducerResult {
   return {
     state: next,
     events,
-    persist: false,  // Only persist on key transitions
+    persist: false, // Only persist on key transitions
   }
 }

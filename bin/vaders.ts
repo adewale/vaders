@@ -5,7 +5,7 @@
 import { spawn, type Subprocess } from 'bun'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
-import { createWriteStream, type WriteStream } from 'fs'
+import { createWriteStream } from 'fs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const projectRoot = join(__dirname, '..')
@@ -21,7 +21,7 @@ const localMode = args.includes('--local')
 const helpMode = args.includes('--help') || args.includes('-h')
 
 // Remove our own flags from client args
-const clientArgs = args.filter(arg => arg !== '--local')
+const clientArgs = args.filter((arg) => arg !== '--local')
 
 if (helpMode) {
   console.log(`
@@ -73,9 +73,9 @@ async function waitForServer(url: string, timeoutMs: number): Promise<boolean> {
   const start = Date.now()
   while (Date.now() - start < timeoutMs) {
     try {
-      const res = await fetch(url + '/health', { signal: AbortSignal.timeout(1000) })
+      const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(1000) })
       if (res.ok) {
-        const data = await res.json() as { game?: string }
+        const data = (await res.json()) as { game?: string }
         if (data.game === 'vaders') return true
       }
     } catch {
@@ -91,10 +91,10 @@ async function findExistingServer(startPort: number, maxAttempts: number): Promi
     const port = startPort + i
     const url = `http://localhost:${port}`
     try {
-      const res = await fetch(url + '/health', { signal: AbortSignal.timeout(500) })
+      const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(500) })
       if (res.ok) {
         // Verify it's actually a Vaders server
-        const data = await res.json() as { game?: string }
+        const data = (await res.json()) as { game?: string }
         if (data.game === 'vaders') {
           return url
         }
@@ -109,7 +109,7 @@ async function findExistingServer(startPort: number, maxAttempts: number): Promi
 async function main() {
   let workerProcess: Subprocess | null = null
   let workerUrl = ''
-  let isServerOwner = false  // Did we start the server?
+  let isServerOwner = false // Did we start the server?
 
   // Start the worker if in local mode
   if (localMode) {
@@ -220,7 +220,7 @@ async function main() {
   }
 }
 
-main().catch(err => {
+main().catch((err) => {
   console.error('Failed to start Vaders:', err)
   process.exit(1)
 })

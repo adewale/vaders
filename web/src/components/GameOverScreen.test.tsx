@@ -197,7 +197,7 @@ function normaliseColor(value: string | undefined | null): string | null {
     const parts = rgb[1].split(',').map((s) => Number.parseInt(s.trim(), 10))
     const [r, g, b] = parts
     const hex = (n: number) => n.toString(16).padStart(2, '0')
-    return '#' + hex(r) + hex(g) + hex(b)
+    return `#${hex(r)}${hex(g)}${hex(b)}`
   }
   return trimmed
 }

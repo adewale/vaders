@@ -3,13 +3,7 @@
 
 import { describe, test, expect } from 'bun:test'
 import { getGameOverMenuItemCount } from './GameOverScreen'
-import type {
-  GameState,
-  Player,
-  PlayerSlot,
-  AlienEntity,
-  Entity,
-} from '../../../shared/types'
+import type { GameState, Player, PlayerSlot, AlienEntity } from '../../../shared/types'
 import { DEFAULT_CONFIG, getAliens } from '../../../shared/types'
 
 // ─── Test Helpers ─────────────────────────────────────────────────────────────
@@ -105,7 +99,7 @@ describe('Victory Detection', () => {
     })
 
     const aliens = getAliens(state.entities)
-    const victory = aliens.every(a => !a.alive)
+    const victory = aliens.every((a) => !a.alive)
     expect(victory).toBe(true)
   })
 
@@ -119,27 +113,24 @@ describe('Victory Detection', () => {
     })
 
     const aliens = getAliens(state.entities)
-    const victory = aliens.every(a => !a.alive)
+    const victory = aliens.every((a) => !a.alive)
     expect(victory).toBe(false)
   })
 
   test('not victory when all aliens are alive', () => {
     const state = createMockGameState({
-      entities: [
-        createMockAlien({ id: 'a1', alive: true }),
-        createMockAlien({ id: 'a2', alive: true }),
-      ],
+      entities: [createMockAlien({ id: 'a1', alive: true }), createMockAlien({ id: 'a2', alive: true })],
     })
 
     const aliens = getAliens(state.entities)
-    const victory = aliens.every(a => !a.alive)
+    const victory = aliens.every((a) => !a.alive)
     expect(victory).toBe(false)
   })
 
   test('victory when no aliens exist (empty entities)', () => {
     const state = createMockGameState({ entities: [] })
     const aliens = getAliens(state.entities)
-    const victory = aliens.every(a => !a.alive)
+    const victory = aliens.every((a) => !a.alive)
     // every() on empty array returns true
     expect(victory).toBe(true)
   })
@@ -151,9 +142,9 @@ describe('Player Ranking by Kills', () => {
   test('players are sorted by kills descending', () => {
     const state = createMockGameState({
       players: {
-        'p1': createMockPlayer({ id: 'p1', name: 'Alice', kills: 10 }),
-        'p2': createMockPlayer({ id: 'p2', name: 'Bob', kills: 25 }),
-        'p3': createMockPlayer({ id: 'p3', name: 'Charlie', kills: 15 }),
+        p1: createMockPlayer({ id: 'p1', name: 'Alice', kills: 10 }),
+        p2: createMockPlayer({ id: 'p2', name: 'Bob', kills: 25 }),
+        p3: createMockPlayer({ id: 'p3', name: 'Charlie', kills: 15 }),
       },
     })
 
@@ -166,8 +157,8 @@ describe('Player Ranking by Kills', () => {
   test('players with equal kills maintain relative order', () => {
     const state = createMockGameState({
       players: {
-        'p1': createMockPlayer({ id: 'p1', name: 'Alice', kills: 10 }),
-        'p2': createMockPlayer({ id: 'p2', name: 'Bob', kills: 10 }),
+        p1: createMockPlayer({ id: 'p1', name: 'Alice', kills: 10 }),
+        p2: createMockPlayer({ id: 'p2', name: 'Bob', kills: 10 }),
       },
     })
 
@@ -181,7 +172,7 @@ describe('Player Ranking by Kills', () => {
   test('single player is always first in ranking', () => {
     const state = createMockGameState({
       players: {
-        'p1': createMockPlayer({ id: 'p1', name: 'Solo', kills: 42 }),
+        p1: createMockPlayer({ id: 'p1', name: 'Solo', kills: 42 }),
       },
     })
 
@@ -194,8 +185,8 @@ describe('Player Ranking by Kills', () => {
   test('player with 0 kills is ranked last', () => {
     const state = createMockGameState({
       players: {
-        'p1': createMockPlayer({ id: 'p1', name: 'Active', kills: 5 }),
-        'p2': createMockPlayer({ id: 'p2', name: 'Inactive', kills: 0 }),
+        p1: createMockPlayer({ id: 'p1', name: 'Active', kills: 5 }),
+        p2: createMockPlayer({ id: 'p2', name: 'Inactive', kills: 0 }),
       },
     })
 
@@ -207,10 +198,10 @@ describe('Player Ranking by Kills', () => {
   test('4 players ranked correctly', () => {
     const state = createMockGameState({
       players: {
-        'p1': createMockPlayer({ id: 'p1', name: 'P1', slot: 1, kills: 20 }),
-        'p2': createMockPlayer({ id: 'p2', name: 'P2', slot: 2, kills: 35 }),
-        'p3': createMockPlayer({ id: 'p3', name: 'P3', slot: 3, kills: 5 }),
-        'p4': createMockPlayer({ id: 'p4', name: 'P4', slot: 4, kills: 28 }),
+        p1: createMockPlayer({ id: 'p1', name: 'P1', slot: 1, kills: 20 }),
+        p2: createMockPlayer({ id: 'p2', name: 'P2', slot: 2, kills: 35 }),
+        p3: createMockPlayer({ id: 'p3', name: 'P3', slot: 3, kills: 5 }),
+        p4: createMockPlayer({ id: 'p4', name: 'P4', slot: 4, kills: 28 }),
       },
     })
 

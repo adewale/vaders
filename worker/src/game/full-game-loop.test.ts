@@ -2,9 +2,9 @@
 // Integration tests for full game loop: spawn, shoot, wave clear, wave progression, game over
 
 import { describe, it, expect } from 'vitest'
-import { gameReducer, type GameAction } from './reducer'
-import type { GameState, AlienEntity, BulletEntity } from '../../../shared/types'
-import { LAYOUT, DEFAULT_CONFIG, WIPE_TIMING, COUNTDOWN_SECONDS, getAliens, getBullets, getBarriers } from '../../../shared/types'
+import { gameReducer } from './reducer'
+import type { GameState } from '../../../shared/types'
+import { LAYOUT, DEFAULT_CONFIG, WIPE_TIMING, COUNTDOWN_SECONDS, getAliens, getBullets } from '../../../shared/types'
 import {
   createTestGameState,
   createTestPlayer,
@@ -13,7 +13,6 @@ import {
   createTestPlayingState,
   createTestGameStateWithPlayer,
   createTestGameStateWithPlayers,
-  createTestAlienFormation,
   hasEvent,
   getEventData,
 } from '../test-utils'
@@ -119,7 +118,7 @@ describe('Full Game Loop: Solo Game', () => {
     expect(current.score).toBe(30)
 
     // Verify alien is dead (dead aliens get removed by reducer)
-    const liveAliens = getAliens(current.entities).filter(a => a.alive)
+    const liveAliens = getAliens(current.entities).filter((a) => a.alive)
     expect(liveAliens.length).toBe(0)
 
     // Verify kill count on player
@@ -213,7 +212,7 @@ describe('Full Game Loop: Solo Game', () => {
 
   it('alien invasion triggers game over when aliens reach player level', () => {
     const { state, players } = createTestPlayingState(1)
-    const player = players[0]
+    const _player = players[0]
 
     // Place alien at invasion Y level - just above the threshold
     const alien = createTestAlien('invader', 20, LAYOUT.PLAYER_Y - LAYOUT.ALIEN_HEIGHT, {
@@ -260,7 +259,7 @@ describe('Full Game Loop: Co-op Game', () => {
     const { state, players } = createTestGameStateWithPlayers(2)
 
     // Both players ready up
-    let current = state
+    const current = state
     for (const p of players) {
       current.readyPlayerIds.push(p.id)
     }
@@ -298,7 +297,7 @@ describe('Full Game Loop: Co-op Game', () => {
   it('player leave during countdown removes player but reducer does not change status (shell handles cancellation)', () => {
     const { state, players } = createTestGameStateWithPlayers(2, { status: 'countdown' })
     state.countdownRemaining = 2
-    state.readyPlayerIds = players.map(p => p.id)
+    state.readyPlayerIds = players.map((p) => p.id)
 
     const leaveResult = gameReducer(state, { type: 'PLAYER_LEAVE', playerId: players[1].id })
     // The reducer only removes the player - the GameRoom shell is responsible
@@ -357,7 +356,9 @@ describe('Wave Progression', () => {
 
     // Create just one alien right above player
     const alien = createTestAlien('last-alien', player.x, LAYOUT.PLAYER_Y - 4, {
-      row: 0, col: 0, points: 10,
+      row: 0,
+      col: 0,
+      points: 10,
     })
     state.entities = [alien]
     state.alienShootingDisabled = true
@@ -386,11 +387,15 @@ describe('Wave Progression', () => {
     // Place two aliens at same height, different x positions
     // (so bullet only hits one at a time)
     const alien1 = createTestAlien('a1', player.x, LAYOUT.PLAYER_Y - 4, {
-      row: 0, col: 0, points: 10,
+      row: 0,
+      col: 0,
+      points: 10,
     })
     // Second alien at same column but further up
     const alien2 = createTestAlien('a2', player.x, LAYOUT.PLAYER_Y - 8, {
-      row: 1, col: 0, points: 20,
+      row: 1,
+      col: 0,
+      points: 20,
     })
     state.entities = [alien1, alien2]
     state.alienShootingDisabled = true
@@ -420,7 +425,7 @@ describe('Wave Progression', () => {
 
     // During the first kill loop, alien movement may have shifted alien2's x position.
     // Re-align the player to be directly under the surviving alien so the bullet hits.
-    const survivingAlien = getAliens(current.entities).find(a => a.alive)
+    const survivingAlien = getAliens(current.entities).find((a) => a.alive)
     expect(survivingAlien).toBeDefined()
     current.players[player.id].x = survivingAlien!.x
 
@@ -549,7 +554,7 @@ describe('Wipe Phase Transitions', () => {
     })
 
     // Tick through all three phases
-    let current = state
+    const current = state
 
     // Exit phase
     const { state: afterExit } = runTicks(current, WIPE_TIMING.EXIT_TICKS)
@@ -617,7 +622,7 @@ describe('Bullet-Player Collisions', () => {
       player.x,
       LAYOUT.PLAYER_Y - 2, // Just above player
       null, // alien bullet
-      1     // moving down
+      1, // moving down
     )
     state.entities = [
       createTestAlien('a1', 20, 5), // Keep an alien alive so game doesn't end

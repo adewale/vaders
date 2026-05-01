@@ -18,12 +18,7 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { render, cleanup } from '@testing-library/react'
 import { GameScreen } from './GameScreen'
-import {
-  buildDrawCommands,
-  resetEffects,
-  _getMatchStateForTests,
-  _RESET_MATCH_STATE,
-} from '../renderer/canvasRenderer'
+import { buildDrawCommands, resetEffects, _getMatchStateForTests, _RESET_MATCH_STATE } from '../renderer/canvasRenderer'
 import { createDefaultGameState } from '../../../shared/state-defaults'
 import type { AlienEntity, GameState } from '../../../shared/types'
 

@@ -21,20 +21,26 @@ import { GAME_STATE_DEFAULTS } from '../../shared/state-defaults'
  */
 export function createTestPlayer(overrides?: Partial<Player>): Player {
   const slot = (overrides?.slot ?? 1) as PlayerSlot
-  return {
-    id: overrides?.id ?? crypto.randomUUID(),
-    name: overrides?.name ?? 'TestPlayer',
-    x: overrides?.x ?? Math.floor(DEFAULT_CONFIG.width / 2),
+  const player = {
+    id: crypto.randomUUID(),
+    name: 'TestPlayer',
+    x: Math.floor(DEFAULT_CONFIG.width / 2),
     slot,
     color: PLAYER_COLORS[slot],
-    lastShotTick: overrides?.lastShotTick ?? 0,
-    alive: overrides?.alive ?? true,
-    lives: overrides?.lives ?? 3,
-    respawnAtTick: overrides?.respawnAtTick ?? null,
-    invulnerableUntilTick: overrides?.invulnerableUntilTick ?? null,
-    kills: overrides?.kills ?? 0,
-    inputState: overrides?.inputState ?? { left: false, right: false },
+    lastShotTick: 0,
+    alive: true,
+    lives: 3,
+    respawnAtTick: null,
+    invulnerableUntilTick: null,
+    kills: 0,
+    lastActiveTick: 0,
+    inputState: { left: false, right: false },
     ...overrides,
+  }
+  return {
+    ...player,
+    // Normalise optional/legacy test overrides so Player's required field is never undefined.
+    lastActiveTick: player.lastActiveTick ?? 0,
   }
 }
 
@@ -55,12 +61,7 @@ export function createTestGameState(overrides?: Partial<GameState>): GameState {
 /**
  * Creates a test alien entity
  */
-export function createTestAlien(
-  id: string,
-  x: number,
-  y: number,
-  overrides?: Partial<AlienEntity>
-): AlienEntity {
+export function createTestAlien(id: string, x: number, y: number, overrides?: Partial<AlienEntity>): AlienEntity {
   return {
     kind: 'alien',
     id,
@@ -79,13 +80,7 @@ export function createTestAlien(
 /**
  * Creates a test bullet entity
  */
-export function createTestBullet(
-  id: string,
-  x: number,
-  y: number,
-  ownerId: string | null,
-  dy: -1 | 1
-): BulletEntity {
+export function createTestBullet(id: string, x: number, y: number, ownerId: string | null, dy: -1 | 1): BulletEntity {
   return {
     kind: 'bullet',
     id,
@@ -99,11 +94,7 @@ export function createTestBullet(
 /**
  * Creates a test barrier entity
  */
-export function createTestBarrier(
-  id: string,
-  x: number,
-  segments?: BarrierSegment[]
-): BarrierEntity {
+export function createTestBarrier(id: string, x: number, segments?: BarrierSegment[]): BarrierEntity {
   return {
     kind: 'barrier',
     id,
@@ -121,11 +112,7 @@ export function createTestBarrier(
 /**
  * Creates a test UFO entity
  */
-export function createTestUFO(
-  id: string,
-  x: number,
-  overrides?: Partial<UFOEntity>
-): UFOEntity {
+export function createTestUFO(id: string, x: number, overrides?: Partial<UFOEntity>): UFOEntity {
   return {
     kind: 'ufo',
     id,
@@ -143,7 +130,7 @@ export function createTestUFO(
  */
 export function createTestGameStateWithPlayer(
   playerOverrides?: Partial<Player>,
-  stateOverrides?: Partial<GameState>
+  stateOverrides?: Partial<GameState>,
 ): { state: GameState; player: Player } {
   const player = createTestPlayer(playerOverrides)
   const state = createTestGameState({
@@ -159,7 +146,7 @@ export function createTestGameStateWithPlayer(
  */
 export function createTestGameStateWithPlayers(
   count: number,
-  stateOverrides?: Partial<GameState>
+  stateOverrides?: Partial<GameState>,
 ): { state: GameState; players: Player[] } {
   const players: Player[] = []
   const playersRecord: Record<string, Player> = {}
@@ -194,7 +181,7 @@ export function createTestPlayingState(
     aliens?: AlienEntity[]
     bullets?: BulletEntity[]
     barriers?: BarrierEntity[]
-  }
+  },
 ): { state: GameState; players: Player[] } {
   const { state, players } = createTestGameStateWithPlayers(playerCount)
 
@@ -205,11 +192,7 @@ export function createTestPlayingState(
     createTestAlien('alien-3', 40, 5),
   ]
 
-  const entities: Entity[] = [
-    ...aliens,
-    ...(options?.bullets ?? []),
-    ...(options?.barriers ?? []),
-  ]
+  const entities: Entity[] = [...aliens, ...(options?.bullets ?? []), ...(options?.barriers ?? [])]
 
   state.status = 'playing'
   state.entities = entities
@@ -226,7 +209,7 @@ export function createTestAlienFormation(
   cols: number = 11,
   rows: number = 5,
   startX: number = 10,
-  startY: number = LAYOUT.ALIEN_START_Y
+  startY: number = LAYOUT.ALIEN_START_Y,
 ): AlienEntity[] {
   const aliens: AlienEntity[] = []
   const types: ClassicAlienType[] = ['squid', 'crab', 'crab', 'octopus', 'octopus']
@@ -286,28 +269,18 @@ export function createMockDurableObjectState(): {
 /**
  * Helper to check if an event was emitted
  */
-export function hasEvent(
-  events: unknown[],
-  name: string
-): boolean {
-  return events.some(e =>
-    typeof e === 'object' && e !== null &&
-    'type' in e && e.type === 'event' &&
-    'name' in e && e.name === name
+export function hasEvent(events: unknown[], name: string): boolean {
+  return events.some(
+    (e) => typeof e === 'object' && e !== null && 'type' in e && e.type === 'event' && 'name' in e && e.name === name,
   )
 }
 
 /**
  * Helper to get event data
  */
-export function getEventData<T = unknown>(
-  events: unknown[],
-  name: string
-): T | undefined {
-  const event = events.find(e =>
-    typeof e === 'object' && e !== null &&
-    'type' in e && e.type === 'event' &&
-    'name' in e && e.name === name
+export function getEventData<T = unknown>(events: unknown[], name: string): T | undefined {
+  const event = events.find(
+    (e) => typeof e === 'object' && e !== null && 'type' in e && e.type === 'event' && 'name' in e && e.name === name,
   )
   if (event && typeof event === 'object' && 'data' in event) {
     return event.data as T

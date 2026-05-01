@@ -20,7 +20,7 @@
 //   - Constructor-rehydration: restart with persisted rooms rebuilds the
 //     same set of findable rooms.
 
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, vi } from 'vitest'
 import fc from 'fast-check'
 import { Matchmaker } from './Matchmaker'
 
@@ -39,9 +39,7 @@ interface MockMatchmakerState {
   _storage: Map<string, unknown>
 }
 
-function createMockMatchmakerState(
-  existing?: Map<string, unknown>,
-): MockMatchmakerState {
+function createMockMatchmakerState(existing?: Map<string, unknown>): MockMatchmakerState {
   const storage = existing ?? new Map<string, unknown>()
   return {
     storage: {
@@ -73,9 +71,7 @@ class FakeClock {
   }
 
   install(): void {
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
-    const self = this
-    Date.now = () => self.current
+    Date.now = () => this.current
   }
 
   uninstall(): void {
@@ -108,18 +104,15 @@ async function freshRuntime(): Promise<MatchmakerRuntime> {
   const state = createMockMatchmakerState()
   const instance = new Matchmaker(state as unknown as DurableObjectState)
   // Allow blockConcurrencyWhile microtask to resolve.
-  await new Promise(resolve => setTimeout(resolve, 0))
+  await new Promise((resolve) => setTimeout(resolve, 0))
   return { instance, state, clock }
 }
 
 /** Rehydrate from the given storage — simulates a DO cold-start after crash. */
-async function rehydrateRuntime(
-  storage: Map<string, unknown>,
-  clock: FakeClock,
-): Promise<MatchmakerRuntime> {
+async function rehydrateRuntime(storage: Map<string, unknown>, clock: FakeClock): Promise<MatchmakerRuntime> {
   const state = createMockMatchmakerState(storage)
   const instance = new Matchmaker(state as unknown as DurableObjectState)
-  await new Promise(resolve => setTimeout(resolve, 0))
+  await new Promise((resolve) => setTimeout(resolve, 0))
   return { instance, state, clock }
 }
 
@@ -127,12 +120,7 @@ async function rehydrateRuntime(
 // Matchmaker protocol helpers
 // ============================================================================
 
-async function mmRegister(
-  rt: MatchmakerRuntime,
-  roomCode: string,
-  playerCount: number,
-  status: string,
-): Promise<void> {
+async function mmRegister(rt: MatchmakerRuntime, roomCode: string, playerCount: number, status: string): Promise<void> {
   await rt.instance.fetch(
     new Request('https://internal/register', {
       method: 'POST',
@@ -152,7 +140,7 @@ async function mmUnregister(rt: MatchmakerRuntime, roomCode: string): Promise<vo
 
 async function mmFind(rt: MatchmakerRuntime): Promise<string | null> {
   const response = await rt.instance.fetch(new Request('https://internal/find'))
-  const body = await response.json() as { roomCode: string | null }
+  const body = (await response.json()) as { roomCode: string | null }
   return body.roomCode
 }
 
@@ -160,11 +148,9 @@ async function mmInfo(
   rt: MatchmakerRuntime,
   roomCode: string,
 ): Promise<{ playerCount: number; status: string; updatedAt: number } | null> {
-  const response = await rt.instance.fetch(
-    new Request(`https://internal/info/${roomCode}`),
-  )
+  const response = await rt.instance.fetch(new Request(`https://internal/info/${roomCode}`))
   if (response.status !== 200) return null
-  return await response.json() as { playerCount: number; status: string; updatedAt: number }
+  return (await response.json()) as { playerCount: number; status: string; updatedAt: number }
 }
 
 // ============================================================================
@@ -214,9 +200,7 @@ interface FindViolation {
 }
 
 /** Run /find once and assert the returned value does not violate open criteria. */
-async function assertFindSatisfiesOpenCriteria(
-  rt: MatchmakerRuntime,
-): Promise<FindViolation[]> {
+async function assertFindSatisfiesOpenCriteria(rt: MatchmakerRuntime): Promise<FindViolation[]> {
   const violations: FindViolation[] = []
   const code = await mmFind(rt)
   if (code === null) return violations
@@ -291,18 +275,16 @@ const registerCommandArb = fc
     }
   })
 
-const unregisterCommandArb = fc
-  .integer({ min: 0, max: ROOM_CODE_POOL.length - 1 })
-  .map((roomIdx): MMCommand => {
-    const code = ROOM_CODE_POOL[roomIdx]
-    return {
-      run: async (rt, model) => {
-        await mmUnregister(rt, code)
-        model.applyUnregister(code)
-      },
-      toString: () => `Unregister(${code})`,
-    }
-  })
+const unregisterCommandArb = fc.integer({ min: 0, max: ROOM_CODE_POOL.length - 1 }).map((roomIdx): MMCommand => {
+  const code = ROOM_CODE_POOL[roomIdx]
+  return {
+    run: async (rt, model) => {
+      await mmUnregister(rt, code)
+      model.applyUnregister(code)
+    },
+    toString: () => `Unregister(${code})`,
+  }
+})
 
 const findCommandArb: fc.Arbitrary<MMCommand> = fc.constant<MMCommand>({
   run: async () => {
@@ -315,12 +297,14 @@ const findCommandArb: fc.Arbitrary<MMCommand> = fc.constant<MMCommand>({
 
 const advanceClockCommandArb = fc
   .integer({ min: 1_000, max: 10 * 60 * 1000 }) // 1s … 10min — hits both sides of STALE
-  .map((ms): MMCommand => ({
-    run: async (rt, _model) => {
-      rt.clock.advance(ms)
-    },
-    toString: () => `AdvanceClock(${ms}ms)`,
-  }))
+  .map(
+    (ms): MMCommand => ({
+      run: async (rt, _model) => {
+        rt.clock.advance(ms)
+      },
+      toString: () => `AdvanceClock(${ms}ms)`,
+    }),
+  )
 
 const commandArb = fc.oneof(
   { weight: 5, arbitrary: registerCommandArb },
@@ -336,28 +320,25 @@ const commandArb = fc.oneof(
 describe('PBT Matchmaking: /find respects open criteria', () => {
   it('never returns a room that violates open criteria, across arbitrary histories', async () => {
     await fc.assert(
-      fc.asyncProperty(
-        fc.array(commandArb, { minLength: 1, maxLength: 40 }),
-        async (commands) => {
-          const rt = await freshRuntime()
-          try {
-            const model = new MatchmakerModel()
-            for (const cmd of commands) {
-              await cmd.run(rt, model)
-              const violations = await assertFindSatisfiesOpenCriteria(rt)
-              if (violations.length > 0) {
-                const v = violations[0]
-                throw new Error(
-                  `Invariant violated after [${commands.map(c => c.toString()).join(', ')}]: ` +
+      fc.asyncProperty(fc.array(commandArb, { minLength: 1, maxLength: 40 }), async (commands) => {
+        const rt = await freshRuntime()
+        try {
+          const model = new MatchmakerModel()
+          for (const cmd of commands) {
+            await cmd.run(rt, model)
+            const violations = await assertFindSatisfiesOpenCriteria(rt)
+            if (violations.length > 0) {
+              const v = violations[0]
+              throw new Error(
+                `Invariant violated after [${commands.map((c) => c.toString()).join(', ')}]: ` +
                   `${v.name} — ${v.details}`,
-                )
-              }
+              )
             }
-          } finally {
-            rt.clock.uninstall()
           }
-        },
-      ),
+        } finally {
+          rt.clock.uninstall()
+        }
+      }),
       { numRuns: 50 },
     )
   }, 120_000)
@@ -380,8 +361,7 @@ describe('PBT Matchmaking: /find respects open criteria', () => {
             const found = await mmFind(rt)
             if (found === target) {
               throw new Error(
-                `Zero-player room ${target} was returned by /find after ` +
-                `register(${target},waiting,0)`,
+                `Zero-player room ${target} was returned by /find after ` + `register(${target},waiting,0)`,
               )
             }
           } finally {
@@ -409,10 +389,7 @@ describe('PBT Matchmaking: /find respects open criteria', () => {
             await mmRegister(rt, target, 4, 'waiting')
             const found = await mmFind(rt)
             if (found === target) {
-              throw new Error(
-                `Full room ${target} was returned by /find after ` +
-                `register(${target},waiting,4)`,
-              )
+              throw new Error(`Full room ${target} was returned by /find after ` + `register(${target},waiting,4)`)
             }
           } finally {
             rt.clock.uninstall()
@@ -444,8 +421,7 @@ describe('PBT Matchmaking: /find respects open criteria', () => {
             const found = await mmFind(rt)
             if (found === target) {
               throw new Error(
-                `Non-waiting room ${target} (status=${status}, ` +
-                `playerCount=${playerCount}) returned by /find`,
+                `Non-waiting room ${target} (status=${status}, ` + `playerCount=${playerCount}) returned by /find`,
               )
             }
           } finally {
@@ -471,33 +447,30 @@ describe('PBT Matchmaking: /find idempotence', () => {
     // the pruned view — idempotent *after* stabilisation, which is what we
     // assert.
     await fc.assert(
-      fc.asyncProperty(
-        fc.array(commandArb, { minLength: 1, maxLength: 40 }),
-        async (commands) => {
-          const rt = await freshRuntime()
-          try {
-            const model = new MatchmakerModel()
-            for (const cmd of commands) {
-              await cmd.run(rt, model)
-            }
-            const first = await mmFind(rt)
-            const second = await mmFind(rt)
-            // Note: /find can legitimately DIFFER across calls even without
-            // any command between them if openRooms iteration order isn't
-            // stable. Matchmaker uses a Set — JS insertion order is stable.
-            // So we assert strict equality: a change between calls indicates
-            // the underlying Set observed a mutation we didn't drive.
-            if (first !== second) {
-              throw new Error(
-                `/find idempotence broken: first=${first}, second=${second} ` +
-                `after [${commands.map(c => c.toString()).join(', ')}]`,
-              )
-            }
-          } finally {
-            rt.clock.uninstall()
+      fc.asyncProperty(fc.array(commandArb, { minLength: 1, maxLength: 40 }), async (commands) => {
+        const rt = await freshRuntime()
+        try {
+          const model = new MatchmakerModel()
+          for (const cmd of commands) {
+            await cmd.run(rt, model)
           }
-        },
-      ),
+          const first = await mmFind(rt)
+          const second = await mmFind(rt)
+          // Note: /find can legitimately DIFFER across calls even without
+          // any command between them if openRooms iteration order isn't
+          // stable. Matchmaker uses a Set — JS insertion order is stable.
+          // So we assert strict equality: a change between calls indicates
+          // the underlying Set observed a mutation we didn't drive.
+          if (first !== second) {
+            throw new Error(
+              `/find idempotence broken: first=${first}, second=${second} ` +
+                `after [${commands.map((c) => c.toString()).join(', ')}]`,
+            )
+          }
+        } finally {
+          rt.clock.uninstall()
+        }
+      }),
       { numRuns: 50 },
     )
   }, 120_000)
@@ -530,9 +503,7 @@ describe('PBT Matchmaking: unregister semantics', () => {
             for (let i = 0; i < 3; i++) {
               const found = await mmFind(rt)
               if (found === target) {
-                throw new Error(
-                  `Unregistered room ${target} returned by /find (iteration ${i})`,
-                )
+                throw new Error(`Unregistered room ${target} returned by /find (iteration ${i})`)
               }
             }
           } finally {
@@ -552,62 +523,55 @@ describe('PBT Matchmaking: unregister semantics', () => {
 describe('PBT Matchmaking: rehydration consistency', () => {
   it('after restart, the set of findable rooms matches the persisted-open set', async () => {
     await fc.assert(
-      fc.asyncProperty(
-        fc.array(commandArb, { minLength: 1, maxLength: 30 }),
-        async (commands) => {
-          const rt = await freshRuntime()
-          try {
-            const model = new MatchmakerModel()
-            for (const cmd of commands) {
-              await cmd.run(rt, model)
-            }
-            // Pre-rehydrate: drain /find repeatedly until stable (to normalize
-            // any stale-pruning). Order matters — /find mutates persisted
-            // storage via put('rooms', …) on the miss path.
-            const preFirst = await mmFind(rt)
-            const preSecond = await mmFind(rt)
-            const prePool = new Set<string>()
-            if (preFirst) prePool.add(preFirst)
-            if (preSecond) prePool.add(preSecond)
-
-            // Snapshot storage, then rehydrate with same clock.
-            const storageClone = new Map<string, unknown>()
-            // Deep-ish clone: Matchmaker stores one key 'rooms' → record.
-            for (const [k, v] of rt.state._storage) {
-              storageClone.set(k, JSON.parse(JSON.stringify(v)))
-            }
-
-            const rehydrated = await rehydrateRuntime(storageClone, rt.clock)
-            // /find from rehydrated instance — must be in prePool OR null
-            // (if the pre-rehydration didn't cycle through all options).
-            const postFound = await mmFind(rehydrated)
-            if (postFound !== null) {
-              // The returned room must satisfy open criteria *and* must have
-              // been in the pre-rehydration pool.
-              const info = await mmInfo(rehydrated, postFound)
-              if (!info) {
-                throw new Error(
-                  `Rehydrated /find returned ${postFound} but /info was 404`,
-                )
-              }
-              if (info.status !== 'waiting' || info.playerCount <= 0 || info.playerCount >= 4) {
-                throw new Error(
-                  `Rehydrated /find returned ${postFound} violating open criteria: ` +
-                  `status=${info.status}, playerCount=${info.playerCount}`,
-                )
-              }
-              // It MUST have been registered — not an invention of rehydration.
-              if (!model.rooms.has(postFound)) {
-                throw new Error(
-                  `Rehydrated /find returned ${postFound} never registered in model`,
-                )
-              }
-            }
-          } finally {
-            rt.clock.uninstall()
+      fc.asyncProperty(fc.array(commandArb, { minLength: 1, maxLength: 30 }), async (commands) => {
+        const rt = await freshRuntime()
+        try {
+          const model = new MatchmakerModel()
+          for (const cmd of commands) {
+            await cmd.run(rt, model)
           }
-        },
-      ),
+          // Pre-rehydrate: drain /find repeatedly until stable (to normalize
+          // any stale-pruning). Order matters — /find mutates persisted
+          // storage via put('rooms', …) on the miss path.
+          const preFirst = await mmFind(rt)
+          const preSecond = await mmFind(rt)
+          const prePool = new Set<string>()
+          if (preFirst) prePool.add(preFirst)
+          if (preSecond) prePool.add(preSecond)
+
+          // Snapshot storage, then rehydrate with same clock.
+          const storageClone = new Map<string, unknown>()
+          // Deep-ish clone: Matchmaker stores one key 'rooms' → record.
+          for (const [k, v] of rt.state._storage) {
+            storageClone.set(k, JSON.parse(JSON.stringify(v)))
+          }
+
+          const rehydrated = await rehydrateRuntime(storageClone, rt.clock)
+          // /find from rehydrated instance — must be in prePool OR null
+          // (if the pre-rehydration didn't cycle through all options).
+          const postFound = await mmFind(rehydrated)
+          if (postFound !== null) {
+            // The returned room must satisfy open criteria *and* must have
+            // been in the pre-rehydration pool.
+            const info = await mmInfo(rehydrated, postFound)
+            if (!info) {
+              throw new Error(`Rehydrated /find returned ${postFound} but /info was 404`)
+            }
+            if (info.status !== 'waiting' || info.playerCount <= 0 || info.playerCount >= 4) {
+              throw new Error(
+                `Rehydrated /find returned ${postFound} violating open criteria: ` +
+                  `status=${info.status}, playerCount=${info.playerCount}`,
+              )
+            }
+            // It MUST have been registered — not an invention of rehydration.
+            if (!model.rooms.has(postFound)) {
+              throw new Error(`Rehydrated /find returned ${postFound} never registered in model`)
+            }
+          }
+        } finally {
+          rt.clock.uninstall()
+        }
+      }),
       { numRuns: 50 },
     )
   }, 120_000)

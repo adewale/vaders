@@ -15,13 +15,14 @@ export interface InputState {
 
 export type ClientMessage =
   | { type: 'join'; name: string }
+  | { type: 'rejoin'; token: string }
   | { type: 'ready' }
   | { type: 'unready' }
   | { type: 'start_solo' }
-  | { type: 'forfeit' }                                // End game early (go to game_over)
-  | { type: 'input'; held: InputState }               // Held-state networking (no seq needed)
-  | { type: 'move'; direction: 'left' | 'right' }     // Discrete movement (one step per message)
-  | { type: 'shoot' }                                  // Discrete action (rate-limited server-side)
+  | { type: 'forfeit' } // End game early (go to game_over)
+  | { type: 'input'; held: InputState } // Held-state networking (no seq needed)
+  | { type: 'move'; direction: 'left' | 'right' } // Discrete movement (one step per message)
+  | { type: 'shoot' } // Discrete action (rate-limited server-side)
   | { type: 'ping' }
 
 // ─── Server → Client Messages ─────────────────────────────────────────────────
@@ -37,14 +38,18 @@ export type ServerEvent =
   | { type: 'event'; name: 'countdown_cancelled'; data: { reason: string } }
   | { type: 'event'; name: 'game_start'; data?: undefined }
   | { type: 'event'; name: 'alien_killed'; data: { alienId: string; playerId: string | null } }
-  | { type: 'event'; name: 'score_awarded'; data: { playerId: string | null; points: number; source: 'alien' | 'ufo' | 'wave_bonus' } }
+  | {
+      type: 'event'
+      name: 'score_awarded'
+      data: { playerId: string | null; points: number; source: 'alien' | 'ufo' | 'wave_bonus' }
+    }
   | { type: 'event'; name: 'wave_complete'; data: { wave: number } }
   | { type: 'event'; name: 'game_over'; data: { result: 'victory' | 'defeat' } }
   | { type: 'event'; name: 'invasion'; data?: undefined }
   | { type: 'event'; name: 'ufo_spawn'; data: { x: number } }
 
 export type ServerMessage =
-  | { type: 'sync'; state: GameState; playerId?: string; config?: GameConfig }
+  | { type: 'sync'; state: GameState; playerId?: string; rejoinToken?: string; config?: GameConfig }
   | ServerEvent
   | { type: 'pong'; serverTime: number }
   | { type: 'error'; code: ErrorCode; message: string }
@@ -58,10 +63,11 @@ export type ServerMessage =
 // ─── Error Codes ──────────────────────────────────────────────────────────────
 
 export type ErrorCode =
-  | 'room_full'              // 4 players already in room
-  | 'game_in_progress'       // Can't join mid-game
-  | 'invalid_room'           // Room code doesn't exist
-  | 'invalid_message'        // Malformed WebSocket message
-  | 'already_joined'         // Player already has a session in this room
-  | 'rate_limited'           // Too many requests
-  | 'countdown_in_progress'  // Can't join during countdown
+  | 'room_full' // 4 players already in room
+  | 'game_in_progress' // Can't join mid-game
+  | 'invalid_room' // Room code doesn't exist
+  | 'invalid_message' // Malformed WebSocket message
+  | 'already_joined' // Player already has a session in this room
+  | 'invalid_rejoin' // Rejoin token is missing, expired, or unknown
+  | 'rate_limited' // Too many requests
+  | 'countdown_in_progress' // Can't join during countdown

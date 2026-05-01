@@ -459,7 +459,7 @@ describe('WebAudioAdapter', () => {
   describe('loadSamples', () => {
     afterEach(() => {
       // @ts-expect-error clean up global
-      delete globalThis.fetch
+      globalThis.fetch = undefined
     })
 
     it('loadSamples fetches all sound files', async () => {
@@ -617,7 +617,7 @@ describe('WebAudioAdapter', () => {
 
       adapter.stopMusic()
       // @ts-expect-error
-      delete globalThis.fetch
+      globalThis.fetch = undefined
     })
   })
 })

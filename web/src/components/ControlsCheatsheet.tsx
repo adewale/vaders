@@ -76,7 +76,6 @@ export function ControlsCheatsheet() {
   return (
     <div
       data-testid="controls-cheatsheet"
-      onClick={() => setOpen(false)}
       style={{
         position: 'fixed',
         inset: 0,
@@ -90,9 +89,22 @@ export function ControlsCheatsheet() {
         color: '#fff',
       }}
     >
-      <div
-        onClick={(e) => e.stopPropagation()}
+      <button
+        type="button"
+        aria-label="Close controls"
+        onClick={() => setOpen(false)}
         style={{
+          position: 'absolute',
+          inset: 0,
+          border: 0,
+          padding: 0,
+          background: 'transparent',
+          cursor: 'pointer',
+        }}
+      />
+      <div
+        style={{
+          position: 'relative',
           background: '#111',
           border: '1px solid #0ff',
           padding: 24,

@@ -6,7 +6,15 @@
 // logic directly since React hooks can't be unit tested without a renderer.
 
 import { describe, test, expect } from 'bun:test'
-import type { GameState, AlienEntity, BarrierEntity, BarrierSegment, Player, Entity, UFOEntity } from '../../../shared/types'
+import type {
+  GameState,
+  AlienEntity,
+  BarrierEntity,
+  BarrierSegment,
+  Player,
+  Entity,
+  UFOEntity,
+} from '../../../shared/types'
 import { LAYOUT, getAliens, getBarriers, getUFOs } from '../../../shared/types'
 import type { ServerEvent } from '../../../shared/protocol'
 import { DissolveSystem } from '../animation/dissolve'
@@ -113,49 +121,27 @@ function makeUFO(overrides: Partial<UFOEntity> = {}): UFOEntity {
   }
 }
 
-function detectAlienKill(
-  event: ServerEvent,
-  prevState: GameState,
-  system: DissolveSystem,
-): boolean {
+function detectAlienKill(event: ServerEvent, prevState: GameState, system: DissolveSystem): boolean {
   if (event.name !== 'alien_killed') return false
   const data = event.data as { alienId: string; playerId: string | null }
   const aliens = getAliens(prevState.entities)
-  const alien = aliens.find(a => a.id === data.alienId)
+  const alien = aliens.find((a) => a.id === data.alienId)
   // Only dissolve top-row aliens (squid type)
   if (!alien || alien.type !== 'squid') return false
   const color = COLORS.alien[alien.type] ?? '#ffffff'
-  return system.spawn(
-    alien.x,
-    alien.y,
-    SPRITE_SIZE.alien.width,
-    SPRITE_SIZE.alien.height,
-    color,
-    'dissolve',
-  )
+  return system.spawn(alien.x, alien.y, SPRITE_SIZE.alien.width, SPRITE_SIZE.alien.height, color, 'dissolve')
 }
 
-function detectUFODeath(
-  currentState: GameState,
-  prevState: GameState,
-  system: DissolveSystem,
-): number {
+function detectUFODeath(currentState: GameState, prevState: GameState, system: DissolveSystem): number {
   const prevUfos = getUFOs(prevState.entities)
   const currentUfos = getUFOs(currentState.entities)
   let spawned = 0
 
   for (const prevUfo of prevUfos) {
     if (!prevUfo.alive) continue
-    const currentUfo = currentUfos.find(u => u.id === prevUfo.id)
-    if (!currentUfo || !currentUfo.alive) {
-      if (system.spawn(
-        prevUfo.x,
-        prevUfo.y,
-        SPRITE_SIZE.ufo.width,
-        SPRITE_SIZE.ufo.height,
-        '#ff00ff',
-        'dissolve',
-      )) {
+    const currentUfo = currentUfos.find((u) => u.id === prevUfo.id)
+    if (!currentUfo?.alive) {
+      if (system.spawn(prevUfo.x, prevUfo.y, SPRITE_SIZE.ufo.width, SPRITE_SIZE.ufo.height, '#ff00ff', 'dissolve')) {
         spawned++
       }
     }
@@ -164,38 +150,23 @@ function detectUFODeath(
   return spawned
 }
 
-function detectPlayerDeath(
-  event: ServerEvent,
-  prevState: GameState,
-  system: DissolveSystem,
-): boolean {
+function detectPlayerDeath(event: ServerEvent, prevState: GameState, system: DissolveSystem): boolean {
   if (event.name !== 'player_died') return false
   const data = event.data as { playerId: string }
   const player = prevState.players[data.playerId]
   if (!player) return false
   const color = getPlayerColor(player.slot)
   const spriteX = player.x - Math.floor(SPRITE_SIZE.player.width / 2)
-  return system.spawn(
-    spriteX,
-    LAYOUT.PLAYER_Y,
-    SPRITE_SIZE.player.width,
-    SPRITE_SIZE.player.height,
-    color,
-    'dissolve',
-  )
+  return system.spawn(spriteX, LAYOUT.PLAYER_Y, SPRITE_SIZE.player.width, SPRITE_SIZE.player.height, color, 'dissolve')
 }
 
-function detectBarrierDamage(
-  currentState: GameState,
-  prevState: GameState,
-  system: DissolveSystem,
-): number {
+function detectBarrierDamage(currentState: GameState, prevState: GameState, system: DissolveSystem): number {
   const currentBarriers = getBarriers(currentState.entities)
   const prevBarriers = getBarriers(prevState.entities)
   let spawned = 0
 
   for (const barrier of currentBarriers) {
-    const prevBarrier = prevBarriers.find(b => b.id === barrier.id)
+    const prevBarrier = prevBarriers.find((b) => b.id === barrier.id)
     if (!prevBarrier) continue
 
     for (let i = 0; i < barrier.segments.length; i++) {
@@ -468,7 +439,7 @@ describe('barrier damage detection', () => {
     })
     const currBarrier = makeBarrier({
       segments: [
-        makeBarrierSegment({ offsetX: 0, offsetY: 0, health: 3 }),  // Damaged!
+        makeBarrierSegment({ offsetX: 0, offsetY: 0, health: 3 }), // Damaged!
         makeBarrierSegment({ offsetX: 1, offsetY: 0, health: 4 }),
       ],
     })
@@ -485,15 +456,11 @@ describe('barrier damage detection', () => {
     const system = new DissolveSystem({}, seededRandom())
     const prevBarrier = makeBarrier({
       x: 40,
-      segments: [
-        makeBarrierSegment({ offsetX: 1, offsetY: 1, health: 4 }),
-      ],
+      segments: [makeBarrierSegment({ offsetX: 1, offsetY: 1, health: 4 })],
     })
     const currBarrier = makeBarrier({
       x: 40,
-      segments: [
-        makeBarrierSegment({ offsetX: 1, offsetY: 1, health: 2 }),
-      ],
+      segments: [makeBarrierSegment({ offsetX: 1, offsetY: 1, health: 2 })],
     })
 
     const prevState = makeGameState({ entities: [prevBarrier] as Entity[] })
@@ -590,7 +557,7 @@ describe('barrier damage detection', () => {
       segments: [
         makeBarrierSegment({ offsetX: 0, offsetY: 0, health: 3 }),
         makeBarrierSegment({ offsetX: 1, offsetY: 0, health: 2 }),
-        makeBarrierSegment({ offsetX: 0, offsetY: 1, health: 3 }),  // Unchanged
+        makeBarrierSegment({ offsetX: 0, offsetY: 1, health: 3 }), // Unchanged
       ],
     })
 

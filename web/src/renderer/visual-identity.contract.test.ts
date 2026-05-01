@@ -29,14 +29,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import fc from 'fast-check'
 import { buildDrawCommands, resetEffects, type DrawCommand } from './canvasRenderer'
-import type {
-  AlienEntity,
-  BulletEntity,
-  GameState,
-  Player,
-  PlayerSlot,
-  UFOEntity,
-} from '../../../shared/types'
+import type { AlienEntity, BulletEntity, PlayerSlot, UFOEntity } from '../../../shared/types'
 import { coopState, coopPlayer, coopBullet, coopDeathPair } from '../testing/coopFixture'
 
 beforeEach(() => resetEffects())
@@ -53,10 +46,10 @@ function collectColours(commands: DrawCommand[], kindPrefixes: string[]): Set<st
     const kind = (cmd as { kind?: string }).kind
     if (!kind || !kindPrefixes.some((p) => kind.startsWith(p))) continue
     if ('fill' in cmd && typeof (cmd as { fill?: string }).fill === 'string') {
-      out.add(((cmd as { fill: string }).fill).toLowerCase())
+      out.add((cmd as { fill: string }).fill.toLowerCase())
     }
     if ('color' in cmd && typeof (cmd as { color?: string }).color === 'string') {
-      out.add(((cmd as { color: string }).color).toLowerCase())
+      out.add((cmd as { color: string }).color.toLowerCase())
     }
     if (cmd.type === 'radial') {
       for (const stop of cmd.stops) out.add(stop.color.toLowerCase())
@@ -92,19 +85,10 @@ function hasExplosionAround(
   for (const cmd of commands) {
     const kind = (cmd as { kind?: string }).kind
     if (!kind?.startsWith('explosion-')) continue
-    const cx =
-      cmd.type === 'radial' ? cmd.cx :
-      cmd.type === 'circle' ? cmd.cx :
-      'x' in cmd ? cmd.x : null
-    const cy =
-      cmd.type === 'radial' ? cmd.cy :
-      cmd.type === 'circle' ? cmd.cy :
-      'y' in cmd ? cmd.y : null
+    const cx = cmd.type === 'radial' ? cmd.cx : cmd.type === 'circle' ? cmd.cx : 'x' in cmd ? cmd.x : null
+    const cy = cmd.type === 'radial' ? cmd.cy : cmd.type === 'circle' ? cmd.cy : 'y' in cmd ? cmd.y : null
     if (cx == null || cy == null) continue
-    if (
-      Math.abs(cx - cxPx) <= toleranceCells * CELL_W &&
-      Math.abs(cy - cyPx) <= toleranceCells * CELL_H
-    ) {
+    if (Math.abs(cx - cxPx) <= toleranceCells * CELL_W && Math.abs(cy - cyPx) <= toleranceCells * CELL_H) {
       return true
     }
   }
@@ -131,23 +115,19 @@ const SLOT_THREADED_BULLET_LAYERS = [
 describe('Contract A — slot-identity conservation', () => {
   it('bullet decoration layers differ across any pair of slots', () => {
     fc.assert(
-      fc.property(
-        fc.constantFrom<PlayerSlot>(1, 2, 3, 4),
-        fc.constantFrom<PlayerSlot>(1, 2, 3, 4),
-        (slotA, slotB) => {
-          if (slotA === slotB) return true // skip same-slot pairs
-          const a = renderBulletColours(slotA, SLOT_THREADED_BULLET_LAYERS)
-          const b = renderBulletColours(slotB, SLOT_THREADED_BULLET_LAYERS)
-          // The SETS of colours produced by slot A and slot B must not be
-          // identical. If they are, slot identity isn't threading through.
-          if (a.size === 0 || b.size === 0) return true // tolerate no bullets
-          // Symmetric difference must be non-empty — at least one colour
-          // unique to one side.
-          const aOnly = [...a].filter((c) => !b.has(c))
-          const bOnly = [...b].filter((c) => !a.has(c))
-          return aOnly.length + bOnly.length > 0
-        },
-      ),
+      fc.property(fc.constantFrom<PlayerSlot>(1, 2, 3, 4), fc.constantFrom<PlayerSlot>(1, 2, 3, 4), (slotA, slotB) => {
+        if (slotA === slotB) return true // skip same-slot pairs
+        const a = renderBulletColours(slotA, SLOT_THREADED_BULLET_LAYERS)
+        const b = renderBulletColours(slotB, SLOT_THREADED_BULLET_LAYERS)
+        // The SETS of colours produced by slot A and slot B must not be
+        // identical. If they are, slot identity isn't threading through.
+        if (a.size === 0 || b.size === 0) return true // tolerate no bullets
+        // Symmetric difference must be non-empty — at least one colour
+        // unique to one side.
+        const aOnly = [...a].filter((c) => !b.has(c))
+        const bOnly = [...b].filter((c) => !a.has(c))
+        return aOnly.length + bOnly.length > 0
+      }),
       { numRuns: 20 },
     )
   })
@@ -183,24 +163,20 @@ describe('Contract A — slot-identity conservation', () => {
 describe('Contract B — local-player discriminability', () => {
   it('with ≥2 players and a known playerId, a local-only draw command is present', () => {
     fc.assert(
-      fc.property(
-        fc.constantFrom<2 | 3 | 4>(2, 3, 4),
-        fc.integer({ min: 1, max: 4 }),
-        (playerCount, localSlotRaw) => {
-          const localSlot = Math.min(localSlotRaw, playerCount) as PlayerSlot
-          const state = coopState(playerCount)
-          const playerId = `player-${localSlot}`
-          const commands = buildDrawCommands(state, playerId, null, 1, 1)
-          // Find at least one command keyed specifically to "local" identity.
-          // The canonical marker is `hud-player-legend-local-marker`, but the
-          // contract leaves room for additional markers (e.g., a mini-badge
-          // over the local ship) — any `*-local-*` kind counts.
-          return commands.some((c) => {
-            const k = (c as { kind?: string }).kind
-            return typeof k === 'string' && k.includes('local')
-          })
-        },
-      ),
+      fc.property(fc.constantFrom<2 | 3 | 4>(2, 3, 4), fc.integer({ min: 1, max: 4 }), (playerCount, localSlotRaw) => {
+        const localSlot = Math.min(localSlotRaw, playerCount) as PlayerSlot
+        const state = coopState(playerCount)
+        const playerId = `player-${localSlot}`
+        const commands = buildDrawCommands(state, playerId, null, 1, 1)
+        // Find at least one command keyed specifically to "local" identity.
+        // The canonical marker is `hud-player-legend-local-marker`, but the
+        // contract leaves room for additional markers (e.g., a mini-badge
+        // over the local ship) — any `*-local-*` kind counts.
+        return commands.some((c) => {
+          const k = (c as { kind?: string }).kind
+          return typeof k === 'string' && k.includes('local')
+        })
+      }),
       { numRuns: 12 },
     )
   })
@@ -215,9 +191,8 @@ describe('Contract B — local-player discriminability', () => {
     state.players = { 'player-1': state.players['player-1'] }
     state.mode = 'solo'
     const commands = buildDrawCommands(state, 'player-1', null, 1, 1)
-    const hasLocalMarker = commands.some((c) =>
-      typeof (c as { kind?: string }).kind === 'string' &&
-      (c as { kind: string }).kind.includes('local'),
+    const hasLocalMarker = commands.some(
+      (c) => typeof (c as { kind?: string }).kind === 'string' && (c as { kind: string }).kind.includes('local'),
     )
     expect(hasLocalMarker).toBe(false)
   })
@@ -225,9 +200,8 @@ describe('Contract B — local-player discriminability', () => {
   it('playerId = null suppresses the local marker', () => {
     const state = coopState(3)
     const commands = buildDrawCommands(state, null, null, 1, 1)
-    const hasLocalMarker = commands.some((c) =>
-      typeof (c as { kind?: string }).kind === 'string' &&
-      (c as { kind: string }).kind.includes('local'),
+    const hasLocalMarker = commands.some(
+      (c) => typeof (c as { kind?: string }).kind === 'string' && (c as { kind: string }).kind.includes('local'),
     )
     expect(hasLocalMarker).toBe(false)
   })
@@ -302,9 +276,8 @@ describe('Contract C — death-animation parity', () => {
     // No deaths in this frame — explosions may be present from earlier
     // deaths in a real session, but with resetEffects() in beforeEach the
     // accumulator is empty, so this frame emits none.
-    const explosionCount = commands.filter((c) =>
-      typeof (c as { kind?: string }).kind === 'string' &&
-      ((c as { kind: string }).kind).startsWith('explosion-'),
+    const explosionCount = commands.filter(
+      (c) => typeof (c as { kind?: string }).kind === 'string' && (c as { kind: string }).kind.startsWith('explosion-'),
     ).length
     expect(explosionCount).toBe(0)
   })

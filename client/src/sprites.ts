@@ -13,17 +13,17 @@ import { COLORS } from '../../client-core/src/sprites/colors'
 export { COLORS, GRADIENT_COLORS, getPlayerColor } from '../../client-core/src/sprites/colors'
 
 // Import terminal capabilities for sprite selection and color conversion
-import { getTerminalCapabilities, convertColorForTerminal, convertColorObject, supportsBraille } from './terminal'
+import { getTerminalCapabilities, convertColorObject, supportsBraille } from './terminal'
 import type { TerminalCapabilities } from './terminal'
 
 // ─── Braille Bitmap Converter ───────────────────────────────────────────────────
 
 const BRAILLE_BASE = 0x2800
 const BRAILLE_DOTS: number[][] = [
-  [0x01, 0x08],  // row 0: dot1, dot4
-  [0x02, 0x10],  // row 1: dot2, dot5
-  [0x04, 0x20],  // row 2: dot3, dot6
-  [0x40, 0x80],  // row 3: dot7, dot8
+  [0x01, 0x08], // row 0: dot1, dot4
+  [0x02, 0x10], // row 1: dot2, dot5
+  [0x04, 0x20], // row 2: dot3, dot6
+  [0x40, 0x80], // row 3: dot7, dot8
 ]
 
 /** Convert a 4-row × 2-col boolean grid to a single braille character */
@@ -120,19 +120,18 @@ export const SPRITES = {
 
   // Bullets (1 char)
   bullet: {
-    player: '║',   // Moving up (thicker for visibility)
-    alien: '▼',    // Moving down
+    player: '║', // Moving up (thicker for visibility)
+    alien: '▼', // Moving down
   },
 
   // Barrier states (based on health) - braille pixel art, 3x2
   barrier: {
-    4: ['⣿⣿⣿', '⣿⣿⣿'],  // Full health - solid
-    3: ['⣾⣿⡿', '⡿⣿⣿'],  // 3/4 health - edge erosion
-    2: ['⣞⣿⡵', '⢞⣯⢟'],  // 2/4 health - holes forming
-    1: ['⠔⡩⢂', '⠌⠔⡐'],  // 1/4 health - sparse, crumbling
-    0: ['⠀⠀⠀', '⠀⠀⠀'],  // Destroyed - empty braille
+    4: ['⣿⣿⣿', '⣿⣿⣿'], // Full health - solid
+    3: ['⣾⣿⡿', '⡿⣿⣿'], // 3/4 health - edge erosion
+    2: ['⣞⣿⡵', '⢞⣯⢟'], // 2/4 health - holes forming
+    1: ['⠔⡩⢂', '⠌⠔⡐'], // 1/4 health - sparse, crumbling
+    0: ['⠀⠀⠀', '⠀⠀⠀'], // Destroyed - empty braille
   },
-
 } as const
 
 // SPRITE_SIZE, GRADIENT_COLORS, COLORS, getPlayerColor are re-exported from client-core
@@ -218,12 +217,7 @@ export const BRAILLE_SPINNER_FRAMES = [
 ] as const
 
 /** ASCII fallback spinner — 4 frames, classic twirl */
-export const ASCII_SPINNER_FRAMES = [
-  '-',
-  '\\',
-  '|',
-  '/',
-] as const
+export const ASCII_SPINNER_FRAMES = ['-', '\\', '|', '/'] as const
 
 /**
  * Get spinner frames appropriate for the current terminal.

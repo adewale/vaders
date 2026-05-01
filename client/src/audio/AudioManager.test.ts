@@ -1,7 +1,7 @@
 // client/src/audio/AudioManager.test.ts
 // Unit tests for AudioManager - debounce, mute, platform detection, and playback
 
-import { describe, test, expect, beforeEach, afterEach, mock, spyOn } from 'bun:test'
+import { describe, test, expect } from 'bun:test'
 import type { SoundName } from './sounds'
 import { SOUND_FILES, BELL_PATTERNS } from './sounds'
 

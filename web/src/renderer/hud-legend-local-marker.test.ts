@@ -142,14 +142,8 @@ describe('bug #4: local player legend marker', () => {
     // Both badges exist; only slot-2 gets the marker (asserted above).
     // Critically, slot-1 badge kind is still 'hud-player-legend-1' — no
     // stripped/replaced contract.
-    const badge1 = cmds.find(
-      (c) =>
-        'kind' in c && (c as { kind?: string }).kind === 'hud-player-legend-1',
-    )
-    const badge2 = cmds.find(
-      (c) =>
-        'kind' in c && (c as { kind?: string }).kind === 'hud-player-legend-2',
-    )
+    const badge1 = cmds.find((c) => 'kind' in c && (c as { kind?: string }).kind === 'hud-player-legend-1')
+    const badge2 = cmds.find((c) => 'kind' in c && (c as { kind?: string }).kind === 'hud-player-legend-2')
     expect(badge1).toBeDefined()
     expect(badge2).toBeDefined()
   })

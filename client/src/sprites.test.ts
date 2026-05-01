@@ -28,7 +28,7 @@ function getDisplayWidth(str: string): number {
 /**
  * Verify all lines in a sprite array have the same width
  */
-function verifySpriteLineWidths(sprite: readonly string[], name: string): void {
+function verifySpriteLineWidths(sprite: readonly string[], _name: string): void {
   if (sprite.length === 0) return
 
   const firstWidth = getDisplayWidth(sprite[0])
@@ -45,7 +45,7 @@ function verifySpriteMatchesDimensions(
   sprite: readonly string[],
   expectedWidth: number,
   expectedHeight: number,
-  name: string
+  _name: string,
 ): void {
   // Check height
   expect(sprite.length).toBe(expectedHeight)
@@ -86,7 +86,6 @@ describe('Sprite Line Width Consistency', () => {
         verifySpriteLineWidths(sprite, `barrier_${health}`)
       }
     })
-
   })
 
   describe('ASCII sprites', () => {
@@ -115,7 +114,6 @@ describe('Sprite Line Width Consistency', () => {
         verifySpriteLineWidths(sprite, `ascii_barrier_${health}`)
       }
     })
-
   })
 })
 
@@ -139,12 +137,7 @@ describe('Sprite Dimensions Match LAYOUT Constants', () => {
   })
 
   test('player sprite actual dimensions match SPRITE_SIZE', () => {
-    verifySpriteMatchesDimensions(
-      SPRITES.player.a,
-      SPRITE_SIZE.player.width,
-      SPRITE_SIZE.player.height,
-      'player'
-    )
+    verifySpriteMatchesDimensions(SPRITES.player.a, SPRITE_SIZE.player.width, SPRITE_SIZE.player.height, 'player')
   })
 
   test('alien sprites actual dimensions match SPRITE_SIZE', () => {
@@ -153,28 +146,24 @@ describe('Sprite Dimensions Match LAYOUT Constants', () => {
         (sprite as any).a,
         SPRITE_SIZE.alien.width,
         SPRITE_SIZE.alien.height,
-        `alien_${type}`
+        `alien_${type}`,
       )
     }
   })
 
   test('UFO sprite actual dimensions match SPRITE_SIZE', () => {
-    verifySpriteMatchesDimensions(
-      SPRITES.ufo.a,
-      SPRITE_SIZE.ufo.width,
-      SPRITE_SIZE.ufo.height,
-      'ufo'
-    )
+    verifySpriteMatchesDimensions(SPRITES.ufo.a, SPRITE_SIZE.ufo.width, SPRITE_SIZE.ufo.height, 'ufo')
   })
 
   test('barrier sprites actual dimensions match SPRITE_SIZE', () => {
     for (const [health, sprite] of Object.entries(SPRITES.barrier)) {
-      if (health !== '0') { // Skip destroyed state check
+      if (health !== '0') {
+        // Skip destroyed state check
         verifySpriteMatchesDimensions(
           sprite,
           SPRITE_SIZE.barrier.width,
           SPRITE_SIZE.barrier.height,
-          `barrier_${health}`
+          `barrier_${health}`,
         )
       }
     }
@@ -217,7 +206,6 @@ describe('ASCII and Unicode Sprite Dimension Parity', () => {
       expect(getDisplayWidth(ascii[0])).toBe(getDisplayWidth(unicode[0]))
     }
   })
-
 })
 
 // ─── Bullet Spawn Position Tests ──────────────────────────────────────────────
@@ -332,26 +320,26 @@ describe('Coordinate System Contract', () => {
       // This documents how GameScreen.tsx renders players:
       // const spriteX = player.x - Math.floor(SPRITE_SIZE.player.width / 2)
       const playerX = 50
-      const spriteWidth = SPRITE_SIZE.player.width  // 7
-      const expectedLeftEdge = playerX - Math.floor(spriteWidth / 2)  // 50 - 3 = 47
+      const spriteWidth = SPRITE_SIZE.player.width // 7
+      const expectedLeftEdge = playerX - Math.floor(spriteWidth / 2) // 50 - 3 = 47
 
       expect(expectedLeftEdge).toBe(47)
     })
 
     test('sprite right edge = player.x + floor(SPRITE_WIDTH / 2)', () => {
       const playerX = 50
-      const spriteWidth = SPRITE_SIZE.player.width  // 7
-      const leftEdge = playerX - Math.floor(spriteWidth / 2)  // 47
-      const rightEdge = leftEdge + spriteWidth - 1  // 47 + 7 - 1 = 53
+      const spriteWidth = SPRITE_SIZE.player.width // 7
+      const leftEdge = playerX - Math.floor(spriteWidth / 2) // 47
+      const rightEdge = leftEdge + spriteWidth - 1 // 47 + 7 - 1 = 53
 
       expect(rightEdge).toBe(53)
     })
 
     test('visual center of rendered sprite equals player.x', () => {
       const playerX = 50
-      const spriteWidth = SPRITE_SIZE.player.width  // 7
-      const leftEdge = playerX - Math.floor(spriteWidth / 2)  // 47
-      const visualCenter = leftEdge + Math.floor(spriteWidth / 2)  // 47 + 3 = 50
+      const spriteWidth = SPRITE_SIZE.player.width // 7
+      const leftEdge = playerX - Math.floor(spriteWidth / 2) // 47
+      const visualCenter = leftEdge + Math.floor(spriteWidth / 2) // 47 + 3 = 50
 
       expect(visualCenter).toBe(playerX)
     })
@@ -363,7 +351,7 @@ describe('Coordinate System Contract', () => {
       // bullet.x must equal the visual center of the sprite
       // Since visual center = player.x (see tests above), bullet.x must = player.x
       const playerX = 50
-      const visualCenter = playerX  // Because player.x IS the center
+      const visualCenter = playerX // Because player.x IS the center
 
       // This is the CORRECT formula for bullet spawn:
       const correctBulletX = playerX
@@ -372,17 +360,17 @@ describe('Coordinate System Contract', () => {
       const incorrectBulletX = playerX + Math.floor(SPRITE_SIZE.player.width / 2)
 
       expect(correctBulletX).toBe(visualCenter)
-      expect(incorrectBulletX).not.toBe(visualCenter)  // This would be off by 3!
+      expect(incorrectBulletX).not.toBe(visualCenter) // This would be off by 3!
     })
 
     test('adding SPRITE_WIDTH/2 offset causes bullet to appear at right edge', () => {
       const playerX = 50
-      const spriteWidth = SPRITE_SIZE.player.width  // 7
-      const leftEdge = playerX - Math.floor(spriteWidth / 2)  // 47
-      const rightEdge = leftEdge + spriteWidth - 1  // 53
+      const spriteWidth = SPRITE_SIZE.player.width // 7
+      const leftEdge = playerX - Math.floor(spriteWidth / 2) // 47
+      const rightEdge = leftEdge + spriteWidth - 1 // 53
 
       // If you incorrectly add an offset:
-      const wrongBulletX = playerX + Math.floor(spriteWidth / 2)  // 50 + 3 = 53
+      const wrongBulletX = playerX + Math.floor(spriteWidth / 2) // 50 + 3 = 53
 
       // The bullet appears at the RIGHT EDGE, not center!
       expect(wrongBulletX).toBe(rightEdge)
@@ -400,9 +388,9 @@ describe('Coordinate System Contract', () => {
 
       // Verify the center column is equidistant from edges
       const width = 7
-      const centerOffset = Math.floor(width / 2)  // 3
-      const leftDist = centerOffset  // 3 columns from left
-      const rightDist = width - 1 - centerOffset  // 7 - 1 - 3 = 3 columns from right
+      const centerOffset = Math.floor(width / 2) // 3
+      const leftDist = centerOffset // 3 columns from left
+      const rightDist = width - 1 - centerOffset // 7 - 1 - 3 = 3 columns from right
 
       expect(leftDist).toBe(rightDist)
     })
@@ -415,7 +403,7 @@ describe('Coordinate System Contract', () => {
       // So alien.x should also represent center
       const alienX = 30
       const alienCenter = alienX
-      const alienBulletX = alienX  // Should be the same for centered bullets
+      const alienBulletX = alienX // Should be the same for centered bullets
 
       expect(alienBulletX).toBe(alienCenter)
     })
@@ -454,7 +442,7 @@ describe('Visual Alignment Contract', () => {
     // There is NO offset applied during bullet rendering.
     // So bullet.x IS the screen column where the bullet appears.
     const bulletX = 50
-    const renderColumn = bulletX  // Direct, no transformation
+    const renderColumn = bulletX // Direct, no transformation
 
     expect(renderColumn).toBe(bulletX)
   })
@@ -466,7 +454,7 @@ describe('Visual Alignment Contract', () => {
     //
     // For bullet to appear at visual center: bullet.x = player.x
     const playerX = 55
-    const visualCenter = playerX  // Because player.x IS the center
+    const visualCenter = playerX // Because player.x IS the center
 
     // Correct bullet spawn
     const bulletX = playerX
@@ -478,16 +466,16 @@ describe('Visual Alignment Contract', () => {
 
   test('PREVENT: wrong formula causes 3-column offset to the right', () => {
     const playerX = 55
-    const spriteWidth = SPRITE_SIZE.player.width  // 7
+    const spriteWidth = SPRITE_SIZE.player.width // 7
 
     // The WRONG formula (treating player.x as left edge):
-    const wrongBulletX = playerX + Math.floor(spriteWidth / 2)  // 55 + 3 = 58
+    const wrongBulletX = playerX + Math.floor(spriteWidth / 2) // 55 + 3 = 58
 
     // The CORRECT formula:
-    const correctBulletX = playerX  // 55
+    const correctBulletX = playerX // 55
 
     // The error magnitude
-    const offsetError = wrongBulletX - correctBulletX  // 3
+    const offsetError = wrongBulletX - correctBulletX // 3
 
     expect(offsetError).toBe(3)
 
@@ -518,7 +506,7 @@ describe('Braille Spinner Frames', () => {
     for (const frame of BRAILLE_SPINNER_FRAMES) {
       const code = frame.charCodeAt(0)
       expect(code).toBeGreaterThanOrEqual(0x2800)
-      expect(code).toBeLessThanOrEqual(0x28FF)
+      expect(code).toBeLessThanOrEqual(0x28ff)
     }
   })
 

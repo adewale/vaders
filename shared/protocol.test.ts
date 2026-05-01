@@ -5,21 +5,8 @@
 // and real messages constructed by GameRoom match the expected protocol definitions.
 
 import { describe, test, expect } from 'bun:test'
-import type {
-  ClientMessage,
-  ServerMessage,
-  ServerEvent,
-  ErrorCode,
-  InputState,
-} from './protocol'
-import type {
-  Player,
-  PlayerSlot,
-  PlayerColor,
-  GameState,
-  GameConfig,
-  GameEvent,
-} from './types'
+import type { ClientMessage, ServerMessage, ServerEvent, ErrorCode, InputState } from './protocol'
+import type { Player, PlayerSlot, PlayerColor, GameState, GameConfig, GameEvent } from './types'
 import { DEFAULT_CONFIG, PLAYER_COLORS } from './types'
 import { createDefaultGameState } from './state-defaults'
 
@@ -153,10 +140,21 @@ function validateServerEvent(msg: unknown): string | null {
   if (typeof obj.name !== 'string') return 'ServerEvent must have a string "name" field'
 
   const validEventNames: GameEvent[] = [
-    'player_joined', 'player_left', 'player_ready', 'player_unready',
-    'player_died', 'player_respawned', 'countdown_tick', 'countdown_cancelled',
-    'game_start', 'alien_killed', 'score_awarded', 'wave_complete',
-    'game_over', 'invasion', 'ufo_spawn',
+    'player_joined',
+    'player_left',
+    'player_ready',
+    'player_unready',
+    'player_died',
+    'player_respawned',
+    'countdown_tick',
+    'countdown_cancelled',
+    'game_start',
+    'alien_killed',
+    'score_awarded',
+    'wave_complete',
+    'game_over',
+    'invasion',
+    'ufo_spawn',
   ]
 
   if (!validEventNames.includes(obj.name as GameEvent)) {
@@ -232,8 +230,15 @@ describe('ClientMessage Validation', () => {
 
   describe('type discriminator covers all cases', () => {
     const ALL_CLIENT_MESSAGE_TYPES = [
-      'join', 'ready', 'unready', 'start_solo', 'forfeit',
-      'input', 'move', 'shoot', 'ping',
+      'join',
+      'ready',
+      'unready',
+      'start_solo',
+      'forfeit',
+      'input',
+      'move',
+      'shoot',
+      'ping',
     ] as const
 
     test('there are exactly 9 client message types', () => {
@@ -1078,10 +1083,21 @@ describe('Runtime Validation Helpers', () => {
   describe('validateServerEvent', () => {
     test('returns null for all valid event names', () => {
       const ALL_EVENT_NAMES: GameEvent[] = [
-        'player_joined', 'player_left', 'player_ready', 'player_unready',
-        'player_died', 'player_respawned', 'countdown_tick', 'countdown_cancelled',
-        'game_start', 'alien_killed', 'score_awarded', 'wave_complete',
-        'game_over', 'invasion', 'ufo_spawn',
+        'player_joined',
+        'player_left',
+        'player_ready',
+        'player_unready',
+        'player_died',
+        'player_respawned',
+        'countdown_tick',
+        'countdown_cancelled',
+        'game_start',
+        'alien_killed',
+        'score_awarded',
+        'wave_complete',
+        'game_over',
+        'invasion',
+        'ufo_spawn',
       ]
       for (const name of ALL_EVENT_NAMES) {
         const event = { type: 'event', name }
@@ -1142,19 +1158,18 @@ describe('GameEvent type alignment with ServerEvent', () => {
   })
 
   test('events can be categorized by gameplay phase', () => {
-    const lobbyEvents: GameEvent[] = [
-      'player_joined', 'player_left', 'player_ready', 'player_unready',
-    ]
-    const transitionEvents: GameEvent[] = [
-      'countdown_tick', 'countdown_cancelled', 'game_start',
-    ]
+    const lobbyEvents: GameEvent[] = ['player_joined', 'player_left', 'player_ready', 'player_unready']
+    const transitionEvents: GameEvent[] = ['countdown_tick', 'countdown_cancelled', 'game_start']
     const gameplayEvents: GameEvent[] = [
-      'alien_killed', 'score_awarded', 'player_died', 'player_respawned',
-      'wave_complete', 'invasion', 'ufo_spawn',
+      'alien_killed',
+      'score_awarded',
+      'player_died',
+      'player_respawned',
+      'wave_complete',
+      'invasion',
+      'ufo_spawn',
     ]
-    const endEvents: GameEvent[] = [
-      'game_over',
-    ]
+    const endEvents: GameEvent[] = ['game_over']
 
     const allCategorized = [...lobbyEvents, ...transitionEvents, ...gameplayEvents, ...endEvents]
     const allCategorizedSet = new Set(allCategorized)
@@ -1179,10 +1194,7 @@ describe('Protocol Completeness', () => {
   })
 
   test('ClientMessage union has exactly 9 type variants', () => {
-    const clientMessageTypes = [
-      'join', 'ready', 'unready', 'start_solo', 'forfeit',
-      'input', 'move', 'shoot', 'ping',
-    ]
+    const clientMessageTypes = ['join', 'ready', 'unready', 'start_solo', 'forfeit', 'input', 'move', 'shoot', 'ping']
     expect(clientMessageTypes.length).toBe(9)
   })
 
@@ -1191,13 +1203,14 @@ describe('Protocol Completeness', () => {
     // Plus forfeit which is in the protocol
     const documentedTypes = ['join', 'ready', 'unready', 'start_solo', 'input', 'move', 'shoot', 'ping']
     for (const type of documentedTypes) {
-      const msg = type === 'join'
-        ? { type, name: 'test' }
-        : type === 'input'
-          ? { type, held: { left: false, right: false } }
-          : type === 'move'
-            ? { type, direction: 'left' }
-            : { type }
+      const msg =
+        type === 'join'
+          ? { type, name: 'test' }
+          : type === 'input'
+            ? { type, held: { left: false, right: false } }
+            : type === 'move'
+              ? { type, direction: 'left' }
+              : { type }
       expect(validateClientMessage(msg)).toBeNull()
     }
   })
@@ -1283,7 +1296,7 @@ describe('Message Serialization Patterns', () => {
 
   test('full GameState survives JSON serialization in sync messages', () => {
     const state = createTestGameState()
-    state.players['p1'] = createTestPlayer({ id: 'p1' })
+    state.players.p1 = createTestPlayer({ id: 'p1' })
     const msg: ServerMessage = { type: 'sync', state }
     const serialized = JSON.stringify(msg)
     const parsed = JSON.parse(serialized)

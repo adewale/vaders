@@ -161,7 +161,7 @@ describe('userConfig', () => {
 
       const config = getUserConfigFromPath(TEST_CONFIG_PATH)
       expect(config.audioMuted).toBe(false) // Updated
-      expect(config.musicMuted).toBe(true)  // Preserved
+      expect(config.musicMuted).toBe(true) // Preserved
     })
 
     test('multiple sequential writes are all persisted', () => {
@@ -207,11 +207,15 @@ describe('userConfig', () => {
 
     test('ignores extra fields in config file', () => {
       mkdirSync(TEST_DIR, { recursive: true })
-      writeFileSync(TEST_CONFIG_PATH, JSON.stringify({
-        audioMuted: true,
-        musicMuted: false,
-        extraField: 'should be ignored in logic but present in object',
-      }), 'utf-8')
+      writeFileSync(
+        TEST_CONFIG_PATH,
+        JSON.stringify({
+          audioMuted: true,
+          musicMuted: false,
+          extraField: 'should be ignored in logic but present in object',
+        }),
+        'utf-8',
+      )
 
       const config = getUserConfigFromPath(TEST_CONFIG_PATH)
       expect(config.audioMuted).toBe(true)

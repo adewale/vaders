@@ -37,7 +37,7 @@ export function normalizeKey(event: KeyEvent): VadersKey | null {
     return { type: 'char', char: event.sequence }
   }
 
-  return null  // Ignore unrecognized keys
+  return null // Ignore unrecognized keys
 }
 
 // ─── TUI-specific held keys tracker ──────────────────────────────────────────

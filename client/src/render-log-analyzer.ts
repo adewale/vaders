@@ -72,7 +72,7 @@ function analyzeForFlash(entries: RenderLogEntry[]): FlashAnalysis {
   const statusSequence: string[] = []
 
   let prevStatus: string | undefined
-  let prevType: string | undefined
+  let _prevType: string | undefined
 
   for (let i = 0; i < entries.length; i++) {
     const entry = entries[i]
@@ -83,39 +83,34 @@ function analyzeForFlash(entries: RenderLogEntry[]): FlashAnalysis {
 
     // Check for flash: GameScreen rendering during wipe_hold
     if (entry.type === 'GAME_SCREEN' && entry.status === 'wipe_hold') {
-      violations.push(
-        `Flash detected: GameScreen rendered during wipe_hold at entry ${i}`
-      )
+      violations.push(`Flash detected: GameScreen rendered during wipe_hold at entry ${i}`)
     }
 
     // Check for unexpected transition
     if (prevStatus === 'waiting' && entry.status === 'wipe_hold') {
       // This is the critical transition - should render wipe_hold_screen, not game
       if (entry.type === 'GAME_SCREEN') {
-        violations.push(
-          `Flash detected: GameScreen rendered immediately after waiting->wipe_hold`
-        )
+        violations.push(`Flash detected: GameScreen rendered immediately after waiting->wipe_hold`)
       }
     }
 
     // Check for missing wipe_hold screen
     if (entry.status === 'wipe_hold' && entry.type !== 'WIPE_HOLD' && entry.type !== 'APP_RENDER') {
-      violations.push(
-        `Warning: wipe_hold status but unexpected render type: ${entry.type}`
-      )
+      violations.push(`Warning: wipe_hold status but unexpected render type: ${entry.type}`)
     }
 
     prevStatus = entry.status
-    prevType = entry.type
+    _prevType = entry.type
   }
 
   return {
     totalRenders: entries.length,
     statusSequence: [...new Set(statusSequence)], // Unique statuses
     violations,
-    summary: violations.length === 0
-      ? '✓ No flash violations detected'
-      : `✗ Found ${violations.length} potential flash issue(s)`,
+    summary:
+      violations.length === 0
+        ? '✓ No flash violations detected'
+        : `✗ Found ${violations.length} potential flash issue(s)`,
   }
 }
 
@@ -144,7 +139,7 @@ async function main() {
         }
       }
     }
-  } catch (err) {
+  } catch (_err) {
     // Stream closed
   }
 

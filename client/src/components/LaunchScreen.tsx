@@ -23,7 +23,7 @@ interface LaunchScreenProps {
 }
 
 const MENU_ITEMS = ['solo', 'create', 'join', 'matchmake'] as const
-type MenuItem = typeof MENU_ITEMS[number]
+type MenuItem = (typeof MENU_ITEMS)[number]
 
 export function LaunchScreen({
   onStartSolo,
@@ -59,88 +59,91 @@ export function LaunchScreen({
     }
   }, [selectedIndex, onStartSolo, onCreateRoom, onMatchmake])
 
-  const handleKeyInput = useCallback((event: Parameters<Parameters<typeof useKeyboard>[0]>[0]) => {
-    // Only process key press events, not releases or repeats
-    if (event.eventType !== 'press' || event.repeated) return
+  const handleKeyInput = useCallback(
+    (event: Parameters<Parameters<typeof useKeyboard>[0]>[0]) => {
+      // Only process key press events, not releases or repeats
+      if (event.eventType !== 'press' || event.repeated) return
 
-    const key = normalizeKey(event)
-    if (!key) return
+      const key = normalizeKey(event)
+      if (!key) return
 
-    // Audio toggles (available from any screen state)
-    if (key.type === 'key' && key.key === 'm') {
-      const muted = AudioManager.getInstance().toggleMute()
-      setIsMuted(muted)
-      return
-    }
-    if (key.type === 'key' && key.key === 'n') {
-      const musicMuted = MusicManager.getInstance().toggleMute()
-      setIsMusicMuted(musicMuted)
-      return
-    }
-
-    // Join mode: typing room code
-    if (joinMode) {
-      if (key.type === 'key' && key.key === 'escape') {
-        setJoinMode(false)
-        setRoomCode('')
+      // Audio toggles (available from any screen state)
+      if (key.type === 'key' && key.key === 'm') {
+        const muted = AudioManager.getInstance().toggleMute()
+        setIsMuted(muted)
         return
       }
-      if (key.type === 'key' && key.key === 'enter' && roomCode.length === 6) {
-        onJoinRoom(roomCode)
+      if (key.type === 'key' && key.key === 'n') {
+        const musicMuted = MusicManager.getInstance().toggleMute()
+        setIsMusicMuted(musicMuted)
         return
       }
-      if (event.name === 'backspace') {
-        setRoomCode(prev => prev.slice(0, -1))
+
+      // Join mode: typing room code
+      if (joinMode) {
+        if (key.type === 'key' && key.key === 'escape') {
+          setJoinMode(false)
+          setRoomCode('')
+          return
+        }
+        if (key.type === 'key' && key.key === 'enter' && roomCode.length === 6) {
+          onJoinRoom(roomCode)
+          return
+        }
+        if (event.name === 'backspace') {
+          setRoomCode((prev) => prev.slice(0, -1))
+          return
+        }
+        if (key.type === 'char' && /^[a-zA-Z0-9]$/.test(key.char) && roomCode.length < 6) {
+          setRoomCode((prev) => prev + key.char.toUpperCase())
+        }
         return
       }
-      if (key.type === 'char' && /^[a-zA-Z0-9]$/.test(key.char) && roomCode.length < 6) {
-        setRoomCode(prev => prev + key.char.toUpperCase())
-      }
-      return
-    }
 
-    // Arrow key navigation
-    if (key.type === 'key') {
-      switch (key.key) {
-        case 'up':
-          setSelectedIndex(i => (i - 1 + MENU_ITEMS.length) % MENU_ITEMS.length)
-          return
-        case 'down':
-          setSelectedIndex(i => (i + 1) % MENU_ITEMS.length)
-          return
-        case 'enter':
-        case 'space':
-          handleSelect()
-          return
-        case 'q':
-          renderer.destroy()
-          process.exit(0)
+      // Arrow key navigation
+      if (key.type === 'key') {
+        switch (key.key) {
+          case 'up':
+            setSelectedIndex((i) => (i - 1 + MENU_ITEMS.length) % MENU_ITEMS.length)
+            return
+          case 'down':
+            setSelectedIndex((i) => (i + 1) % MENU_ITEMS.length)
+            return
+          case 'enter':
+          case 'space':
+            handleSelect()
+            return
+          case 'q':
+            renderer.destroy()
+            process.exit(0)
+        }
       }
-    }
 
-    // Hotkey shortcuts
-    if (key.type === 'char') {
-      switch (key.char) {
-        case '1':
-          onStartSolo()
-          break
-        case '2':
-          onCreateRoom()
-          break
-        case '3':
-          setJoinMode(true)
-          break
-        case '4':
-          onMatchmake()
-          break
-        case 'q':
-        case 'Q':
-          renderer.destroy()
-          process.exit(0)
-          break
+      // Hotkey shortcuts
+      if (key.type === 'char') {
+        switch (key.char) {
+          case '1':
+            onStartSolo()
+            break
+          case '2':
+            onCreateRoom()
+            break
+          case '3':
+            setJoinMode(true)
+            break
+          case '4':
+            onMatchmake()
+            break
+          case 'q':
+          case 'Q':
+            renderer.destroy()
+            process.exit(0)
+            break
+        }
       }
-    }
-  }, [joinMode, roomCode, onStartSolo, onCreateRoom, onJoinRoom, onMatchmake, renderer, handleSelect])
+    },
+    [joinMode, roomCode, onStartSolo, onCreateRoom, onJoinRoom, onMatchmake, renderer, handleSelect],
+  )
 
   useKeyboard(handleKeyInput)
 
@@ -151,73 +154,81 @@ export function LaunchScreen({
     // Outer box fills terminal, inner box is centered game area
     <box width={terminalWidth} height={terminalHeight} justifyContent="center" alignItems="center">
       <box flexDirection="column" width={gameWidth} height={gameHeight} paddingLeft={1} paddingRight={1}>
-      <box height={1} />
-      <Logo />
-      <box height={1} />
+        <box height={1} />
+        <Logo />
+        <box height={1} />
 
-      <box flexDirection="column" borderStyle="single" borderColor={COLORS.ui.border} paddingLeft={1} paddingRight={1}>
-        <MenuItemRow
-          hotkey="1"
-          label="SOLO GAME"
-          desc="Start immediately, 3 lives"
-          selected={selectedIndex === 0}
-          richColor={richColor}
-        />
-        <MenuItemRow
-          hotkey="2"
-          label="CREATE ROOM"
-          desc="Get room code to share with friends"
-          selected={selectedIndex === 1}
-          richColor={richColor}
-        />
-        {joinMode ? (
-          <box>
-            <text fg={COLORS.ui.selected}>▶</text>
-            <text fg={COLORS.ui.hotkey}>[3]</text>
-            <box width={1} />
-            <text fg={COLORS.ui.selectedText}>JOIN ROOM  </text>
-            <text fg={COLORS.ui.unselected}>Enter code: [</text>
-            <text fg={COLORS.ui.success}>{roomCode.padEnd(6, '_')}</text>
-            <text fg={COLORS.ui.unselected}>] (ESC to cancel)</text>
-          </box>
-        ) : (
+        <box
+          flexDirection="column"
+          borderStyle="single"
+          borderColor={COLORS.ui.border}
+          paddingLeft={1}
+          paddingRight={1}
+        >
           <MenuItemRow
-            hotkey="3"
-            label="JOIN ROOM"
-            desc="Enter a room code"
-            selected={selectedIndex === 2}
+            hotkey="1"
+            label="SOLO GAME"
+            desc="Start immediately, 3 lives"
+            selected={selectedIndex === 0}
             richColor={richColor}
           />
-        )}
-        <MenuItemRow
-          hotkey="4"
-          label="MATCHMAKING"
-          desc="Auto-join an open game"
-          selected={selectedIndex === 3}
-          richColor={richColor}
-        />
-      </box>
+          <MenuItemRow
+            hotkey="2"
+            label="CREATE ROOM"
+            desc="Get room code to share with friends"
+            selected={selectedIndex === 1}
+            richColor={richColor}
+          />
+          {joinMode ? (
+            <box>
+              <text fg={COLORS.ui.selected}>▶</text>
+              <text fg={COLORS.ui.hotkey}>[3]</text>
+              <box width={1} />
+              <text fg={COLORS.ui.selectedText}>JOIN ROOM </text>
+              <text fg={COLORS.ui.unselected}>Enter code: [</text>
+              <text fg={COLORS.ui.success}>{roomCode.padEnd(6, '_')}</text>
+              <text fg={COLORS.ui.unselected}>] (ESC to cancel)</text>
+            </box>
+          ) : (
+            <MenuItemRow
+              hotkey="3"
+              label="JOIN ROOM"
+              desc="Enter a room code"
+              selected={selectedIndex === 2}
+              richColor={richColor}
+            />
+          )}
+          <MenuItemRow
+            hotkey="4"
+            label="MATCHMAKING"
+            desc="Auto-join an open game"
+            selected={selectedIndex === 3}
+            richColor={richColor}
+          />
+        </box>
 
-      <box height={1} />
-      <box paddingLeft={2}>
-        <text fg={COLORS.ui.unselected}>↑/↓ Navigate   ENTER Select   M SFX   N Music   Q Quit</text>
-        <box flexGrow={1} />
-        <text fg={isMuted ? COLORS.ui.dim : COLORS.ui.unselected}>{isMuted ? '[SFX OFF]' : '[SFX ON]'} </text>
-        <text fg={isMusicMuted ? COLORS.ui.dim : COLORS.ui.unselected}>{isMusicMuted ? '[MUSIC OFF]' : '[MUSIC ON]'} </text>
-        {MusicManager.getInstance().hasError() && <text fg={COLORS.ui.error}>[MUSIC ERR] </text>}
-      </box>
-      <box flexGrow={1} />
-      <box flexDirection="column">
-        <box>
-          <text fg={COLORS.ui.dim}>Server: {serverUrl}</text>
-          {logPath && <text fg={COLORS.ui.dim}>  Log: {logPath}</text>}
-        </box>
-        <box>
-          <text fg={COLORS.ui.dim}>v{version}</text>
+        <box height={1} />
+        <box paddingLeft={2}>
+          <text fg={COLORS.ui.unselected}>↑/↓ Navigate ENTER Select M SFX N Music Q Quit</text>
           <box flexGrow={1} />
-          <text fg={COLORS.ui.dim}>1-4 Players  OpenTUI + Bun</text>
+          <text fg={isMuted ? COLORS.ui.dim : COLORS.ui.unselected}>{isMuted ? '[SFX OFF]' : '[SFX ON]'} </text>
+          <text fg={isMusicMuted ? COLORS.ui.dim : COLORS.ui.unselected}>
+            {isMusicMuted ? '[MUSIC OFF]' : '[MUSIC ON]'}{' '}
+          </text>
+          {MusicManager.getInstance().hasError() && <text fg={COLORS.ui.error}>[MUSIC ERR] </text>}
         </box>
-      </box>
+        <box flexGrow={1} />
+        <box flexDirection="column">
+          <box>
+            <text fg={COLORS.ui.dim}>Server: {serverUrl}</text>
+            {logPath && <text fg={COLORS.ui.dim}> Log: {logPath}</text>}
+          </box>
+          <box>
+            <text fg={COLORS.ui.dim}>v{version}</text>
+            <box flexGrow={1} />
+            <text fg={COLORS.ui.dim}>1-4 Players OpenTUI + Bun</text>
+          </box>
+        </box>
       </box>
     </box>
   )
@@ -244,9 +255,12 @@ function MenuItemRow({
       <box width={1} />
       <text fg={selected ? COLORS.ui.selectedText : COLORS.ui.label} width={16}>
         {labelColors
-          ? label.split('').map((ch, i) => <span key={i} fg={labelColors[i]}>{ch}</span>)
-          : label
-        }
+          ? label.split('').map((ch, i) => (
+              <span key={i} fg={labelColors[i]}>
+                {ch}
+              </span>
+            ))
+          : label}
       </text>
       <text fg={COLORS.ui.unselected}>{desc}</text>
     </box>

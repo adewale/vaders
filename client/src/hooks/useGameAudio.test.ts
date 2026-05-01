@@ -47,37 +47,20 @@ describe('useGameAudio music start condition', () => {
   test('music starts during co-op game (actual server transition)', () => {
     // Actual co-op flow: waiting → countdown → wipe_hold → wipe_reveal → playing
     // This is what the server actually produces (confirmed in reducer.ts)
-    const sequence: GameStatus[] = [
-      'waiting',
-      'countdown',
-      'wipe_hold',
-      'wipe_reveal',
-      'playing',
-    ]
+    const sequence: GameStatus[] = ['waiting', 'countdown', 'wipe_hold', 'wipe_reveal', 'playing']
     expect(wouldMusicStart(sequence)).toBe(true)
   })
 
   test('music starts during solo game (actual server transition)', () => {
     // Actual solo flow: waiting → wipe_hold → wipe_reveal → playing
     // Solo skips countdown entirely (reducer.ts line 290)
-    const sequence: GameStatus[] = [
-      'waiting',
-      'wipe_hold',
-      'wipe_reveal',
-      'playing',
-    ]
+    const sequence: GameStatus[] = ['waiting', 'wipe_hold', 'wipe_reveal', 'playing']
     expect(wouldMusicStart(sequence)).toBe(true)
   })
 
   test('music starts on wave transition (wipe_exit → wipe_hold → wipe_reveal → playing)', () => {
     // Wave transitions: playing → wipe_exit → wipe_hold → wipe_reveal → playing
-    const sequence: GameStatus[] = [
-      'playing',
-      'wipe_exit',
-      'wipe_hold',
-      'wipe_reveal',
-      'playing',
-    ]
+    const sequence: GameStatus[] = ['playing', 'wipe_exit', 'wipe_hold', 'wipe_reveal', 'playing']
     expect(wouldMusicStart(sequence)).toBe(true)
   })
 })

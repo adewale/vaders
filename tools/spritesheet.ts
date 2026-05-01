@@ -8,28 +8,35 @@
 // ─── Production Imports ─────────────────────────────────────────────────────────
 
 import {
-  SPRITES, ASCII_SPRITES, COLORS, GRADIENT_COLORS, SPRITE_SIZE,
-  LOGO_ASCII, ASCII_LOGO, ALIEN_PARADE,
-  BRAILLE_SPINNER_FRAMES, ASCII_SPINNER_FRAMES,
-  type AnimatedSprite, getAnimationFrame, getPlayerColor,
+  SPRITES,
+  ASCII_SPRITES,
+  COLORS,
+  GRADIENT_COLORS,
+  SPRITE_SIZE,
+  LOGO_ASCII,
+  ASCII_LOGO,
+  ALIEN_PARADE,
+  BRAILLE_SPINNER_FRAMES,
+  ASCII_SPINNER_FRAMES,
+  type AnimatedSprite,
+  getPlayerColor,
 } from '../client/src/sprites'
 
-import {
-  LAYOUT, HITBOX, STANDARD_WIDTH, STANDARD_HEIGHT,
-  ALIEN_REGISTRY, type ClassicAlienType,
-} from '../shared/types'
+import { LAYOUT, HITBOX, STANDARD_WIDTH, STANDARD_HEIGHT, ALIEN_REGISTRY, type ClassicAlienType } from '../shared/types'
 
-import {
-  DIGIT_FONT, DIGIT_FONT_ASCII, DIGIT_HEIGHT, DIGIT_WIDTH, DIGIT_GAP,
-  composeDigits,
-} from '../client/src/digitFont'
+import { DIGIT_FONT, DIGIT_FONT_ASCII, DIGIT_WIDTH, DIGIT_GAP, composeDigits } from '../client/src/digitFont'
 
 import { GRADIENT_PRESETS, interpolateGradient, getWaveGradient } from '../client/src/gradient'
 import { getUFOColor } from '../client/src/effects'
 import { BRAILLE_DENSITY, MAX_DENSITY, WaveBorderAnimation, WAVE_COLORS } from '../client/src/animation/waveBorder'
 import {
-  DISSOLVE_ASCII_CHARS, DISSOLVE_BRAILLE, DissolveSystem,
-  DIRECTIONAL_DOTS, DEBRIS_MEDIUM, DEBRIS_HEAVY, TUMBLE_PATTERNS,
+  DISSOLVE_ASCII_CHARS,
+  DISSOLVE_BRAILLE,
+  DissolveSystem,
+  DIRECTIONAL_DOTS,
+  DEBRIS_MEDIUM,
+  DEBRIS_HEAVY,
+  TUMBLE_PATTERNS,
 } from '../client/src/animation/dissolve'
 import { CONFETTI_CHARS, CONFETTI_COLORS } from '../client/src/animation/confetti'
 import { HALF_BLOCKS } from '../client/src/animation/interpolation'
@@ -43,11 +50,7 @@ const DIM = `${ESC}[2m`
 
 function hexToRgb(hex: string): [number, number, number] {
   const h = hex.replace('#', '')
-  return [
-    parseInt(h.slice(0, 2), 16),
-    parseInt(h.slice(2, 4), 16),
-    parseInt(h.slice(4, 6), 16),
-  ]
+  return [Number.parseInt(h.slice(0, 2), 16), Number.parseInt(h.slice(2, 4), 16), Number.parseInt(h.slice(4, 6), 16)]
 }
 
 function fg(hex: string): string {
@@ -55,7 +58,7 @@ function fg(hex: string): string {
   return `${ESC}[38;2;${r};${g};${b}m`
 }
 
-function bg(hex: string): string {
+function _bg(hex: string): string {
   const [r, g, b] = hexToRgb(hex)
   return `${ESC}[48;2;${r};${g};${b}m`
 }
@@ -96,7 +99,7 @@ function visualPadEnd(str: string, width: number): string {
 
 /** Max visual width across lines */
 function maxVisualWidth(lines: string[]): number {
-  return Math.max(...lines.map(l => visualWidth(l)), 0)
+  return Math.max(...lines.map((l) => visualWidth(l)), 0)
 }
 
 /** Render a 2-line sprite with vertical gradient (bright top, dark bottom) */
@@ -116,16 +119,13 @@ function renderGradientLines(lines: readonly string[], gradient: { bright: strin
 }
 
 /** Print multiple items side-by-side with labels */
-function printSpriteRow(
-  items: { lines: string[]; label: string }[],
-  gap: number = 4,
-): void {
+function printSpriteRow(items: { lines: string[]; label: string }[], gap: number = 4): void {
   const gapStr = ' '.repeat(gap)
   const indent = '  '
 
   // Compute widths from raw lines (before any ANSI was added)
-  const widths = items.map(it => maxVisualWidth(it.lines))
-  const maxLines = Math.max(...items.map(it => it.lines.length))
+  const widths = items.map((it) => maxVisualWidth(it.lines))
+  const maxLines = Math.max(...items.map((it) => it.lines.length))
 
   // Labels
   let labelLine = indent
@@ -153,7 +153,9 @@ function renderHeader(): void {
   console.log()
   console.log(`${fg('#5555ff')}${'═'.repeat(SECTION_WIDTH)}${RST}`)
   console.log(`${BOLD}${fg('#00ffff')}  VADERS SPRITESHEET${RST}`)
-  console.log(`${DIM}${fg('#aaaaaa')}  Grid: ${STANDARD_WIDTH}x${STANDARD_HEIGHT}  Tick: 33ms (~30Hz)  Sprites: 7-wide braille${RST}`)
+  console.log(
+    `${DIM}${fg('#aaaaaa')}  Grid: ${STANDARD_WIDTH}x${STANDARD_HEIGHT}  Tick: 33ms (~30Hz)  Sprites: 7-wide braille${RST}`,
+  )
   console.log(`${fg('#5555ff')}${'═'.repeat(SECTION_WIDTH)}${RST}`)
 }
 
@@ -212,15 +214,18 @@ function renderAliens(): void {
 
     const gradA = renderGradientLines(sprite.a, gradient)
     const gradB = renderGradientLines(sprite.b, gradient)
-    const asciiA = sprite.a.map(l => `${fg(COLORS.alien[type])}${l}${RST}`) as unknown as string[]
+    const _asciiA = sprite.a.map((l) => `${fg(COLORS.alien[type])}${l}${RST}`) as unknown as string[]
 
     printSpriteRow([
       { lines: gradA, label: `${type} (A)` },
       { lines: gradB, label: `${type} (B)` },
-      { lines: asciiSprite.a.map(l => `${fg(COLORS.alien[type])}${l}${RST}`), label: 'ASCII (A)' },
+      { lines: asciiSprite.a.map((l) => `${fg(COLORS.alien[type])}${l}${RST}`), label: 'ASCII (A)' },
     ])
 
-    label(`  ${registry.points} pts  ${SPRITE_SIZE.alien.width}x${SPRITE_SIZE.alien.height} chars  row: ${type === 'squid' ? '0' : type === 'crab' ? '1-2' : '3-4'}`, '  ')
+    label(
+      `  ${registry.points} pts  ${SPRITE_SIZE.alien.width}x${SPRITE_SIZE.alien.height} chars  row: ${type === 'squid' ? '0' : type === 'crab' ? '1-2' : '3-4'}`,
+      '  ',
+    )
     console.log()
   }
 }
@@ -247,7 +252,10 @@ function renderPlayers(): void {
   console.log()
   for (const slot of [1, 2, 3, 4] as const) {
     const color = getPlayerColor(slot as 1 | 2 | 3 | 4)
-    label(`  P${slot}: ${color} (${colorNames[slot]})  ${SPRITE_SIZE.player.width}x${SPRITE_SIZE.player.height} chars`, '  ')
+    label(
+      `  P${slot}: ${color} (${colorNames[slot]})  ${SPRITE_SIZE.player.width}x${SPRITE_SIZE.player.height} chars`,
+      '  ',
+    )
   }
 }
 
@@ -263,7 +271,7 @@ function renderUFO(): void {
   printSpriteRow([
     { lines: gradA, label: 'Frame A' },
     { lines: gradB, label: 'Frame B' },
-    { lines: ASCII_SPRITES.ufo.a.map(l => `${fg('#ff55ff')}${l}${RST}`), label: 'ASCII (A)' },
+    { lines: ASCII_SPRITES.ufo.a.map((l) => `${fg('#ff55ff')}${l}${RST}`), label: 'ASCII (A)' },
   ])
 
   console.log()
@@ -275,10 +283,16 @@ function renderUFO(): void {
 function renderProjectiles(): void {
   section('PROJECTILES')
 
-  console.log(`  ${fg(COLORS.bullet.player)}${SPRITES.bullet.player}${RST}  Player bullet (${SPRITES.bullet.player})  ${DIM}${fg('#888888')}white, dy=-1 (up), 1 cell/tick${RST}`)
-  console.log(`  ${fg(COLORS.bullet.alien)}${SPRITES.bullet.alien}${RST}  Alien bullet  (${SPRITES.bullet.alien})  ${DIM}${fg('#888888')}red,   dy=+1 (down), 1 cell/tick${RST}`)
+  console.log(
+    `  ${fg(COLORS.bullet.player)}${SPRITES.bullet.player}${RST}  Player bullet (${SPRITES.bullet.player})  ${DIM}${fg('#888888')}white, dy=-1 (up), 1 cell/tick${RST}`,
+  )
+  console.log(
+    `  ${fg(COLORS.bullet.alien)}${SPRITES.bullet.alien}${RST}  Alien bullet  (${SPRITES.bullet.alien})  ${DIM}${fg('#888888')}red,   dy=+1 (down), 1 cell/tick${RST}`,
+  )
   console.log()
-  console.log(`  ${DIM}${fg('#888888')}ASCII fallback:  player=${ASCII_SPRITES.bullet.player}  alien=${ASCII_SPRITES.bullet.alien}${RST}`)
+  console.log(
+    `  ${DIM}${fg('#888888')}ASCII fallback:  player=${ASCII_SPRITES.bullet.player}  alien=${ASCII_SPRITES.bullet.alien}${RST}`,
+  )
 }
 
 // ─── Section 7: Barriers ───────────────────────────────────────────────────────
@@ -291,7 +305,7 @@ function renderBarriers(): void {
   const unicodeItems: { lines: string[]; label: string }[] = []
   for (const health of [4, 3, 2, 1, 0] as const) {
     const color = health === 0 ? '#333333' : COLORS.barrier[health as 1 | 2 | 3 | 4]
-    const lines = (SPRITES.barrier[health] as string[]).map(l => `${fg(color)}${l}${RST}`)
+    const lines = (SPRITES.barrier[health] as string[]).map((l) => `${fg(color)}${l}${RST}`)
     unicodeItems.push({ lines, label: `HP ${health}` })
   }
   printSpriteRow(unicodeItems)
@@ -303,7 +317,7 @@ function renderBarriers(): void {
   const asciiItems: { lines: string[]; label: string }[] = []
   for (const health of [4, 3, 2, 1, 0] as const) {
     const color = health === 0 ? '#333333' : COLORS.barrier[health as 1 | 2 | 3 | 4]
-    const lines = (ASCII_SPRITES.barrier[health] as string[]).map(l => `${fg(color)}${l}${RST}`)
+    const lines = (ASCII_SPRITES.barrier[health] as string[]).map((l) => `${fg(color)}${l}${RST}`)
     asciiItems.push({ lines, label: `HP ${health}` })
   }
   printSpriteRow(asciiItems)
@@ -317,10 +331,12 @@ function renderBarriers(): void {
     [1, 1, 0, 1, 1],
   ]
   for (const row of BARRIER_SHAPE) {
-    const rendered = row.map(v => v ? `${fg('#00ff00')}██${RST}` : `${DIM}${fg('#333333')}..${RST}`).join('')
+    const rendered = row.map((v) => (v ? `${fg('#00ff00')}██${RST}` : `${DIM}${fg('#333333')}..${RST}`)).join('')
     console.log(`  ${rendered}`)
   }
-  label(`Each segment: ${HITBOX.BARRIER_SEGMENT_WIDTH}x${HITBOX.BARRIER_SEGMENT_HEIGHT} chars  Barrier Y: ${LAYOUT.BARRIER_Y}`)
+  label(
+    `Each segment: ${HITBOX.BARRIER_SEGMENT_WIDTH}x${HITBOX.BARRIER_SEGMENT_HEIGHT} chars  Barrier Y: ${LAYOUT.BARRIER_Y}`,
+  )
 }
 
 // ─── Section 8: Wave Announce Screen ─────────────────────────────────────────
@@ -537,11 +553,14 @@ function renderDigits(): void {
   const gradient = interpolateGradient(GRADIENT_PRESETS.vaders, DIGIT_WIDTH)
 
   // Print digits in two rows (0-4, 5-9)
-  for (const range of [[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]]) {
+  for (const range of [
+    [0, 1, 2, 3, 4],
+    [5, 6, 7, 8, 9],
+  ]) {
     const items: { lines: string[]; label: string }[] = []
     for (const d of range) {
       const glyph = DIGIT_FONT[String(d)]
-      const coloredLines = glyph.map(line => {
+      const coloredLines = glyph.map((line) => {
         let result = ''
         for (let i = 0; i < line.length; i++) {
           const ch = line[i]
@@ -565,7 +584,7 @@ function renderDigits(): void {
   const asciiItems: { lines: string[]; label: string }[] = []
   for (let d = 0; d <= 4; d++) {
     const glyph = DIGIT_FONT_ASCII[String(d)]
-    const coloredLines = glyph.map(l => `${fg('#00ffff')}${l}${RST}`)
+    const coloredLines = glyph.map((l) => `${fg('#00ffff')}${l}${RST}`)
     asciiItems.push({ lines: coloredLines, label: String(d) })
   }
   printSpriteRow(asciiItems, 2)
@@ -714,16 +733,27 @@ function renderExplosions(): void {
 
   // Reset seed for player shrapnel
   seed = 42
-  const playerSystem = new DissolveSystem({
-    maxEffects: 1,
-    maxCellsPerEffect: 35,
-    screenWidth: frameWidth + 20,
-    screenHeight: frameHeight + 20,
-  }, seededRandom)
+  const playerSystem = new DissolveSystem(
+    {
+      maxEffects: 1,
+      maxCellsPerEffect: 35,
+      screenWidth: frameWidth + 20,
+      screenHeight: frameHeight + 20,
+    },
+    seededRandom,
+  )
 
   const spawnX = Math.floor(frameWidth / 2) - Math.floor(SPRITE_SIZE.player.width / 2)
   const spawnY = Math.floor(frameHeight / 2)
-  playerSystem.spawn(spawnX, spawnY, SPRITE_SIZE.player.width, SPRITE_SIZE.player.height, '#00ffff', 'shrapnel', SPRITES.player.a)
+  playerSystem.spawn(
+    spawnX,
+    spawnY,
+    SPRITE_SIZE.player.width,
+    SPRITE_SIZE.player.height,
+    '#00ffff',
+    'shrapnel',
+    SPRITES.player.a,
+  )
 
   const playerFrames: { chars: string[][]; colors: string[][] }[] = []
   let currentTick = 0
@@ -780,17 +810,28 @@ function renderExplosions(): void {
   console.log()
 
   seed = 42
-  const ufoSystem = new DissolveSystem({
-    maxEffects: 1,
-    maxCellsPerEffect: 35,
-    screenWidth: frameWidth + 20,
-    screenHeight: frameHeight + 20,
-  }, seededRandom)
+  const ufoSystem = new DissolveSystem(
+    {
+      maxEffects: 1,
+      maxCellsPerEffect: 35,
+      screenWidth: frameWidth + 20,
+      screenHeight: frameHeight + 20,
+    },
+    seededRandom,
+  )
 
   const ufoSpawnX = Math.floor(frameWidth / 2) - Math.floor(SPRITE_SIZE.ufo.width / 2)
   const ufoSpawnY = Math.floor(frameHeight / 2)
   const ufoColor = getUFOColor(37) // Sample tick — shows orange from the cycling palette
-  ufoSystem.spawn(ufoSpawnX, ufoSpawnY, SPRITE_SIZE.ufo.width, SPRITE_SIZE.ufo.height, ufoColor, 'ufo_explosion', SPRITES.ufo.a)
+  ufoSystem.spawn(
+    ufoSpawnX,
+    ufoSpawnY,
+    SPRITE_SIZE.ufo.width,
+    SPRITE_SIZE.ufo.height,
+    ufoColor,
+    'ufo_explosion',
+    SPRITES.ufo.a,
+  )
 
   const ufoFrames: { chars: string[][]; colors: string[][] }[] = []
   currentTick = 0
@@ -874,7 +915,9 @@ function renderColorPalette(): void {
   for (const type of ['squid', 'crab', 'octopus'] as const) {
     const flat = COLORS.alien[type]
     const grad = GRADIENT_COLORS.alien[type]
-    console.log(`  ${fg(flat)}████${RST}  ${DIM}${fg('#aaaaaa')}${flat}${RST}  ${fg('#cccccc')}${type}${RST}   ${DIM}${fg('#888888')}gradient:${RST} ${fg(grad.bright)}██${RST}${fg(grad.dark)}██${RST} ${DIM}${fg('#666666')}${grad.bright} → ${grad.dark}${RST}`)
+    console.log(
+      `  ${fg(flat)}████${RST}  ${DIM}${fg('#aaaaaa')}${flat}${RST}  ${fg('#cccccc')}${type}${RST}   ${DIM}${fg('#888888')}gradient:${RST} ${fg(grad.bright)}██${RST}${fg(grad.dark)}██${RST} ${DIM}${fg('#666666')}${grad.bright} → ${grad.dark}${RST}`,
+    )
   }
 
   console.log()
@@ -885,7 +928,9 @@ function renderColorPalette(): void {
     const flat = COLORS.player[slot]
     const grad = GRADIENT_COLORS.player[slot]
     const name = slot === 1 ? 'cyan' : slot === 2 ? 'orange' : slot === 3 ? 'magenta' : 'lime'
-    console.log(`  ${fg(flat)}████${RST}  ${DIM}${fg('#aaaaaa')}${flat}${RST}  ${fg('#cccccc')}P${slot} ${name}${RST}   ${DIM}${fg('#888888')}gradient:${RST} ${fg(grad.bright)}██${RST}${fg(grad.dark)}██${RST} ${DIM}${fg('#666666')}${grad.bright} → ${grad.dark}${RST}`)
+    console.log(
+      `  ${fg(flat)}████${RST}  ${DIM}${fg('#aaaaaa')}${flat}${RST}  ${fg('#cccccc')}P${slot} ${name}${RST}   ${DIM}${fg('#888888')}gradient:${RST} ${fg(grad.bright)}██${RST}${fg(grad.dark)}██${RST} ${DIM}${fg('#666666')}${grad.bright} → ${grad.dark}${RST}`,
+    )
   }
 
   console.log()
@@ -931,5 +976,7 @@ renderColorPalette()
 
 console.log()
 console.log(`${fg('#5555ff')}${'═'.repeat(SECTION_WIDTH)}${RST}`)
-console.log(`${DIM}${fg('#888888')}  End of spritesheet. Pipe to ${fg('#00ffff')}less -R${fg('#888888')} for scrolling.${RST}`)
+console.log(
+  `${DIM}${fg('#888888')}  End of spritesheet. Pipe to ${fg('#00ffff')}less -R${fg('#888888')} for scrolling.${RST}`,
+)
 console.log()

@@ -2,13 +2,7 @@
 // Unit tests for easing functions and lerp utilities
 
 import { describe, test, expect } from 'bun:test'
-import {
-  easeOutQuad,
-  easeOutBounce,
-  easeOutElastic,
-  lerp,
-  clamp,
-} from './easing'
+import { easeOutQuad, easeOutBounce, easeOutElastic, lerp, clamp } from './easing'
 
 describe('easeOutQuad', () => {
   test('returns 0 at t=0', () => {

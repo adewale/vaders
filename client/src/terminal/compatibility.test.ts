@@ -1,7 +1,7 @@
 // client/src/terminal/compatibility.test.ts
 // Unit tests for terminal compatibility layer
 
-import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
+import { describe, test, expect } from 'bun:test'
 import {
   detectTerminal,
   detectCapabilities,
@@ -19,16 +19,23 @@ import {
   getTerminalQuirks,
   supportsRichColor,
   supportsBraille,
-  type TerminalName,
   type TerminalCapabilities,
 } from './compatibility'
 
 // All terminal-related environment variables that need to be controlled
 const TERMINAL_ENV_KEYS = [
-  'TERM', 'TERM_PROGRAM', 'COLORTERM',
-  'KITTY_WINDOW_ID', 'ITERM_SESSION_ID', 'ALACRITTY_WINDOW_ID',
-  'VSCODE_INJECTION', 'TMUX', 'STY',
-  'LANG', 'LC_ALL', 'VADERS_ASCII',
+  'TERM',
+  'TERM_PROGRAM',
+  'COLORTERM',
+  'KITTY_WINDOW_ID',
+  'ITERM_SESSION_ID',
+  'ALACRITTY_WINDOW_ID',
+  'VSCODE_INJECTION',
+  'TMUX',
+  'STY',
+  'LANG',
+  'LC_ALL',
+  'VADERS_ASCII',
 ]
 
 // Helper to mock environment variables with full isolation
@@ -134,27 +141,39 @@ describe('detectTerminal', () => {
   })
 
   test('detects GNU Screen', () => {
-    withEnv({ STY: '12345.pts-0.hostname', TMUX: undefined, TERM_PROGRAM: undefined, KITTY_WINDOW_ID: undefined }, () => {
-      expect(detectTerminal()).toBe('screen')
-    })
+    withEnv(
+      { STY: '12345.pts-0.hostname', TMUX: undefined, TERM_PROGRAM: undefined, KITTY_WINDOW_ID: undefined },
+      () => {
+        expect(detectTerminal()).toBe('screen')
+      },
+    )
   })
 
   test('detects Linux console', () => {
-    withEnv({ TERM: 'linux', TERM_PROGRAM: undefined, KITTY_WINDOW_ID: undefined, TMUX: undefined, STY: undefined }, () => {
-      expect(detectTerminal()).toBe('linux-console')
-    })
+    withEnv(
+      { TERM: 'linux', TERM_PROGRAM: undefined, KITTY_WINDOW_ID: undefined, TMUX: undefined, STY: undefined },
+      () => {
+        expect(detectTerminal()).toBe('linux-console')
+      },
+    )
   })
 
   test('detects generic xterm', () => {
-    withEnv({ TERM: 'xterm-256color', TERM_PROGRAM: undefined, KITTY_WINDOW_ID: undefined, TMUX: undefined, STY: undefined }, () => {
-      expect(detectTerminal()).toBe('xterm')
-    })
+    withEnv(
+      { TERM: 'xterm-256color', TERM_PROGRAM: undefined, KITTY_WINDOW_ID: undefined, TMUX: undefined, STY: undefined },
+      () => {
+        expect(detectTerminal()).toBe('xterm')
+      },
+    )
   })
 
   test('returns unknown for unrecognized terminal', () => {
-    withEnv({ TERM: 'dumb', TERM_PROGRAM: undefined, KITTY_WINDOW_ID: undefined, TMUX: undefined, STY: undefined }, () => {
-      expect(detectTerminal()).toBe('unknown')
-    })
+    withEnv(
+      { TERM: 'dumb', TERM_PROGRAM: undefined, KITTY_WINDOW_ID: undefined, TMUX: undefined, STY: undefined },
+      () => {
+        expect(detectTerminal()).toBe('unknown')
+      },
+    )
   })
 })
 
@@ -202,10 +221,13 @@ describe('detectCapabilities', () => {
   })
 
   test('detects 256 color from TERM', () => {
-    withEnv({ TERM: 'xterm-256color', COLORTERM: undefined, TERM_PROGRAM: undefined, KITTY_WINDOW_ID: undefined }, () => {
-      const caps = detectCapabilities()
-      expect(caps.supports256Color).toBe(true)
-    })
+    withEnv(
+      { TERM: 'xterm-256color', COLORTERM: undefined, TERM_PROGRAM: undefined, KITTY_WINDOW_ID: undefined },
+      () => {
+        const caps = detectCapabilities()
+        expect(caps.supports256Color).toBe(true)
+      },
+    )
   })
 
   test('Kitty supports Kitty keyboard protocol', () => {
@@ -251,12 +273,20 @@ describe('getColorDepth', () => {
   })
 
   test('returns 256 when only 256 color supported', () => {
-    const caps = { supportsTrueColor: false, supports256Color: true, terminal: 'apple-terminal' } as TerminalCapabilities
+    const caps = {
+      supportsTrueColor: false,
+      supports256Color: true,
+      terminal: 'apple-terminal',
+    } as TerminalCapabilities
     expect(getColorDepth(caps)).toBe('256')
   })
 
   test('returns 16 for Linux console', () => {
-    const caps = { supportsTrueColor: false, supports256Color: false, terminal: 'linux-console' } as TerminalCapabilities
+    const caps = {
+      supportsTrueColor: false,
+      supports256Color: false,
+      terminal: 'linux-console',
+    } as TerminalCapabilities
     expect(getColorDepth(caps)).toBe('16')
   })
 })
@@ -456,13 +486,21 @@ describe('formatColor', () => {
   })
 
   test('formats 256 color escape sequence', () => {
-    const caps = { supportsTrueColor: false, supports256Color: true, terminal: 'apple-terminal' } as TerminalCapabilities
+    const caps = {
+      supportsTrueColor: false,
+      supports256Color: true,
+      terminal: 'apple-terminal',
+    } as TerminalCapabilities
     const seq = formatColor('#ff0000', caps)
     expect(seq).toMatch(/^\x1b\[38;5;\d+m$/)
   })
 
   test('formats 16 color escape sequence', () => {
-    const caps = { supportsTrueColor: false, supports256Color: false, terminal: 'linux-console' } as TerminalCapabilities
+    const caps = {
+      supportsTrueColor: false,
+      supports256Color: false,
+      terminal: 'linux-console',
+    } as TerminalCapabilities
     const seq = formatColor('#ff0000', caps)
     expect(seq).toMatch(/^\x1b\[\d+m$/)
   })
@@ -473,7 +511,7 @@ describe('getTerminalQuirks', () => {
     const caps = { terminal: 'apple-terminal', supportsUnicode: true, insideMultiplexer: false } as TerminalCapabilities
     const quirks = getTerminalQuirks(caps)
     expect(quirks.length).toBeGreaterThan(0)
-    expect(quirks.some(q => q.includes('true color'))).toBe(true)
+    expect(quirks.some((q) => q.includes('true color'))).toBe(true)
   })
 
   test('returns no quirks for Kitty', () => {
@@ -485,36 +523,36 @@ describe('getTerminalQuirks', () => {
   test('returns ASCII quirk when Unicode disabled', () => {
     const caps = { terminal: 'kitty', supportsUnicode: false, insideMultiplexer: false } as TerminalCapabilities
     const quirks = getTerminalQuirks(caps)
-    expect(quirks.some(q => q.includes('ASCII'))).toBe(true)
+    expect(quirks.some((q) => q.includes('ASCII'))).toBe(true)
   })
 
   test('returns multiplexer quirk when inside tmux', () => {
     const caps = { terminal: 'xterm', supportsUnicode: true, insideMultiplexer: true } as TerminalCapabilities
     const quirks = getTerminalQuirks(caps)
-    expect(quirks.some(q => q.includes('multiplexer'))).toBe(true)
+    expect(quirks.some((q) => q.includes('multiplexer'))).toBe(true)
   })
 
   test('returns quirks for Linux console', () => {
     const caps = { terminal: 'linux-console', supportsUnicode: false, insideMultiplexer: false } as TerminalCapabilities
     const quirks = getTerminalQuirks(caps)
-    expect(quirks.some(q => q.includes('16 colors'))).toBe(true)
-    expect(quirks.some(q => q.includes('Unicode'))).toBe(true)
+    expect(quirks.some((q) => q.includes('16 colors'))).toBe(true)
+    expect(quirks.some((q) => q.includes('Unicode'))).toBe(true)
     // Also triggers ASCII mode quirk
-    expect(quirks.some(q => q.includes('ASCII'))).toBe(true)
+    expect(quirks.some((q) => q.includes('ASCII'))).toBe(true)
   })
 
   test('returns quirks for iTerm2', () => {
     const caps = { terminal: 'iterm2', supportsUnicode: true, insideMultiplexer: false } as TerminalCapabilities
     const quirks = getTerminalQuirks(caps)
     expect(quirks.length).toBeGreaterThan(0)
-    expect(quirks.some(q => q.includes('emoji'))).toBe(true)
+    expect(quirks.some((q) => q.includes('emoji'))).toBe(true)
   })
 
   test('returns quirks for GNU Screen', () => {
     const caps = { terminal: 'screen', supportsUnicode: true, insideMultiplexer: true } as TerminalCapabilities
     const quirks = getTerminalQuirks(caps)
-    expect(quirks.some(q => q.includes('Screen'))).toBe(true)
-    expect(quirks.some(q => q.includes('Italic'))).toBe(true)
+    expect(quirks.some((q) => q.includes('Screen'))).toBe(true)
+    expect(quirks.some((q) => q.includes('Italic'))).toBe(true)
   })
 
   test('returns no quirks for Ghostty with full support', () => {
@@ -526,7 +564,7 @@ describe('getTerminalQuirks', () => {
   test('returns quirks for tmux', () => {
     const caps = { terminal: 'tmux', supportsUnicode: true, insideMultiplexer: true } as TerminalCapabilities
     const quirks = getTerminalQuirks(caps)
-    expect(quirks.some(q => q.includes('tmux'))).toBe(true)
+    expect(quirks.some((q) => q.includes('tmux'))).toBe(true)
   })
 })
 
@@ -618,21 +656,47 @@ describe('detectCapabilities: full terminal profiles', () => {
 describe('Color fallback logic', () => {
   test('getColorDepth returns appropriate depth for each terminal tier', () => {
     // Tier 1: True color
-    expect(getColorDepth({ supportsTrueColor: true, supports256Color: true, terminal: 'kitty' } as TerminalCapabilities)).toBe('truecolor')
-    expect(getColorDepth({ supportsTrueColor: true, supports256Color: true, terminal: 'ghostty' } as TerminalCapabilities)).toBe('truecolor')
+    expect(
+      getColorDepth({ supportsTrueColor: true, supports256Color: true, terminal: 'kitty' } as TerminalCapabilities),
+    ).toBe('truecolor')
+    expect(
+      getColorDepth({ supportsTrueColor: true, supports256Color: true, terminal: 'ghostty' } as TerminalCapabilities),
+    ).toBe('truecolor')
 
     // Tier 2: 256 colors
-    expect(getColorDepth({ supportsTrueColor: false, supports256Color: true, terminal: 'apple-terminal' } as TerminalCapabilities)).toBe('256')
-    expect(getColorDepth({ supportsTrueColor: false, supports256Color: true, terminal: 'unknown' } as TerminalCapabilities)).toBe('256')
+    expect(
+      getColorDepth({
+        supportsTrueColor: false,
+        supports256Color: true,
+        terminal: 'apple-terminal',
+      } as TerminalCapabilities),
+    ).toBe('256')
+    expect(
+      getColorDepth({ supportsTrueColor: false, supports256Color: true, terminal: 'unknown' } as TerminalCapabilities),
+    ).toBe('256')
 
     // Tier 3: 16 colors
-    expect(getColorDepth({ supportsTrueColor: false, supports256Color: false, terminal: 'linux-console' } as TerminalCapabilities)).toBe('16')
+    expect(
+      getColorDepth({
+        supportsTrueColor: false,
+        supports256Color: false,
+        terminal: 'linux-console',
+      } as TerminalCapabilities),
+    ).toBe('16')
   })
 
   test('formatColor produces correct escape sequence format for each depth', () => {
     const trueColorCaps = { supportsTrueColor: true, supports256Color: true, terminal: 'kitty' } as TerminalCapabilities
-    const color256Caps = { supportsTrueColor: false, supports256Color: true, terminal: 'apple-terminal' } as TerminalCapabilities
-    const color16Caps = { supportsTrueColor: false, supports256Color: false, terminal: 'linux-console' } as TerminalCapabilities
+    const color256Caps = {
+      supportsTrueColor: false,
+      supports256Color: true,
+      terminal: 'apple-terminal',
+    } as TerminalCapabilities
+    const color16Caps = {
+      supportsTrueColor: false,
+      supports256Color: false,
+      terminal: 'linux-console',
+    } as TerminalCapabilities
 
     // True color: \x1b[38;2;R;G;Bm
     const tcSeq = formatColor('#ff8800', trueColorCaps)
@@ -655,10 +719,10 @@ describe('Color fallback logic', () => {
 
   test('hexTo256Color maps primary colors correctly', () => {
     expect(hexTo256Color('#ff0000')).toBe(196) // Red
-    expect(hexTo256Color('#00ff00')).toBe(46)  // Green
-    expect(hexTo256Color('#0000ff')).toBe(21)  // Blue
-    expect(hexTo256Color('#ffffff')).toBe(231)  // White
-    expect(hexTo256Color('#000000')).toBe(16)   // Black
+    expect(hexTo256Color('#00ff00')).toBe(46) // Green
+    expect(hexTo256Color('#0000ff')).toBe(21) // Blue
+    expect(hexTo256Color('#ffffff')).toBe(231) // White
+    expect(hexTo256Color('#000000')).toBe(16) // Black
   })
 
   test('hexTo16Color maps to valid ANSI range', () => {
@@ -666,7 +730,7 @@ describe('Color fallback logic', () => {
     for (const hex of colors) {
       const code = hexTo16Color(hex)
       // Valid ANSI foreground codes: 30-37 (normal) or 90-97 (bright)
-      expect(code >= 30 && code <= 37 || code >= 90 && code <= 97).toBe(true)
+      expect((code >= 30 && code <= 37) || (code >= 90 && code <= 97)).toBe(true)
     }
   })
 })

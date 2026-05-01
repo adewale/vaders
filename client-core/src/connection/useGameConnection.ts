@@ -12,9 +12,41 @@ import type {
 } from '../../../shared/types'
 import { applyPlayerInput } from '../../../shared/types'
 
+// Application-level heartbeat. Browsers cannot send WebSocket protocol ping
+// frames, so this data message intentionally wakes a hibernated Durable Object
+// about every 30s. For Vaders' low traffic, reliable phantom-player detection
+// and user-visible reconnect behavior are worth that small idle-room cost.
 const PING_INTERVAL = 30000
 const PONG_TIMEOUT = 5000
 const SYNC_INTERVAL_MS = 33 // Expected sync rate for lerp calculation
+
+function rejoinStorageKey(roomUrl: string): string {
+  return `vaders:rejoin:${roomUrl}`
+}
+
+function readStoredRejoinToken(roomUrl: string): string | null {
+  try {
+    return globalThis.sessionStorage?.getItem(rejoinStorageKey(roomUrl)) ?? null
+  } catch {
+    return null
+  }
+}
+
+function writeStoredRejoinToken(roomUrl: string, token: string): void {
+  try {
+    globalThis.sessionStorage?.setItem(rejoinStorageKey(roomUrl), token)
+  } catch {
+    // Non-browser frontends keep the in-memory token ref only.
+  }
+}
+
+function clearStoredRejoinToken(roomUrl: string): void {
+  try {
+    globalThis.sessionStorage?.removeItem(rejoinStorageKey(roomUrl))
+  } catch {
+    // ignore
+  }
+}
 
 // Reconnection constants
 const RECONNECT_BASE_DELAY = 1000 // Start at 1 second
@@ -57,6 +89,7 @@ export function useGameConnection(roomUrl: string, playerName: string) {
   const lastPongRef = useRef<number>(Date.now())
   const pingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const localInputRef = useRef<InputState>({ left: false, right: false })
+  const rejoinTokenRef = useRef<string | null>(null)
 
   // Reconnection refs
   const intentionalCloseRef = useRef(false)
@@ -69,10 +102,12 @@ export function useGameConnection(roomUrl: string, playerName: string) {
     // Reset reconnection state on fresh mount / roomUrl change
     intentionalCloseRef.current = false
     reconnectAttemptRef.current = 0
+    rejoinTokenRef.current = readStoredRejoinToken(roomUrl)
 
     const connect = () => {
       try {
-        const ws = new WebSocket(roomUrl)
+        const rejoinToken = rejoinTokenRef.current
+        const ws = new WebSocket(rejoinToken ? `${roomUrl}${roomUrl.includes('?') ? '&' : '?'}rejoin=1` : roomUrl)
         wsRef.current = ws
 
         ws.onopen = () => {
@@ -80,12 +115,13 @@ export function useGameConnection(roomUrl: string, playerName: string) {
           reconnectAttemptRef.current = 0
           setState((s) => ({ ...s, connected: true, reconnecting: false, error: null }))
 
-          // Send join message (both on initial connect and reconnect)
+          // Rejoin if we have a room-scoped token; otherwise perform a fresh join.
           ws.send(
-            JSON.stringify({
-              type: 'join',
-              name: playerName,
-            } satisfies ClientMessage),
+            JSON.stringify(
+              rejoinToken
+                ? ({ type: 'rejoin', token: rejoinToken } satisfies ClientMessage)
+                : ({ type: 'join', name: playerName } satisfies ClientMessage),
+            ),
           )
 
           // Start ping interval
@@ -113,6 +149,10 @@ export function useGameConnection(roomUrl: string, playerName: string) {
             if (msg.type === 'sync') {
               // Track game status for reconnection decisions
               gameStatusRef.current = msg.state.status
+              if (msg.rejoinToken) {
+                rejoinTokenRef.current = msg.rejoinToken
+                writeStoredRejoinToken(roomUrl, msg.rejoinToken)
+              }
               setState((s) => ({
                 ...s,
                 prevState: s.serverState,
@@ -125,6 +165,14 @@ export function useGameConnection(roomUrl: string, playerName: string) {
             }
 
             if (msg.type === 'error') {
+              if (msg.code === 'invalid_rejoin') {
+                clearStoredRejoinToken(roomUrl)
+                rejoinTokenRef.current = null
+                if (ws.readyState === WebSocket.OPEN) {
+                  ws.send(JSON.stringify({ type: 'join', name: playerName } satisfies ClientMessage))
+                }
+                return
+              }
               setState((s) => ({ ...s, error: `${msg.code}: ${msg.message}` }))
               return
             }
@@ -170,7 +218,7 @@ export function useGameConnection(roomUrl: string, playerName: string) {
             setState((s) => ({ ...s, error: 'Connection error' }))
           }
         }
-      } catch (err) {
+      } catch (_err) {
         setState((s) => ({ ...s, error: 'Failed to connect', reconnecting: false }))
       }
     }

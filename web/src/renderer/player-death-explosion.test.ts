@@ -13,11 +13,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest'
 import fc from 'fast-check'
-import {
-  buildDrawCommands,
-  resetEffects,
-  type DrawCommand,
-} from './canvasRenderer'
+import { buildDrawCommands, resetEffects, type DrawCommand } from './canvasRenderer'
 import { createDefaultGameState } from '../../../shared/state-defaults'
 import type { GameState, Player, PlayerSlot } from '../../../shared/types'
 import { COLORS } from '../../../client-core/src/sprites/colors'
@@ -46,10 +42,7 @@ function makePlayer(overrides: Partial<Player> = {}): Player {
   }
 }
 
-function stateWith(
-  players: Record<string, Player> = {},
-  overrides: Partial<GameState> = {},
-): GameState {
+function stateWith(players: Record<string, Player> = {}, overrides: Partial<GameState> = {}): GameState {
   const state = createDefaultGameState('TEST01')
   state.entities = []
   state.players = players
@@ -195,11 +188,7 @@ describe('bug #2: player death spawns an explosion at the player position', () =
     const alive2 = makePlayer({ id: 'p1', slot: 1, x: 50, alive: true })
     const dead2 = makePlayer({ id: 'p1', slot: 1, x: 50, alive: false })
     buildDrawCommands(stateWith({ p1: alive2 }, { tick: 0 }), null, stateWith({ p1: dead1 }, { tick: 20 }))
-    const cmds = buildDrawCommands(
-      stateWith({ p1: dead2 }, { tick: 1 }),
-      null,
-      stateWith({ p1: alive2 }, { tick: 0 }),
-    )
+    const cmds = buildDrawCommands(stateWith({ p1: dead2 }, { tick: 1 }), null, stateWith({ p1: alive2 }, { tick: 0 }))
     const explosions = findExplosionCmds(cmds)
     // If seenDeadPlayerIds didn't clear, the same id 'p1' would be in the set
     // and no explosion would fire. That would be the bug. Assert > 0.

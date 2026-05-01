@@ -67,10 +67,7 @@ export function coopPlayer(slot: PlayerSlot, overrides: Partial<Player> = {}): P
  * bullets render a different colour than slot 2's", or "damage flash fires
  * only when the LOCAL player's lives drop".
  */
-export function coopState(
-  n: 2 | 3 | 4,
-  overrides: Partial<GameState> = {},
-): GameState {
+export function coopState(n: 2 | 3 | 4, overrides: Partial<GameState> = {}): GameState {
   const state = createDefaultGameState('TESTCC')
   // `n` is typed 2|3|4 so this is always 'coop'. The conditional was a
   // leftover from an earlier signature that also accepted 1; keeping it
@@ -90,10 +87,7 @@ export function coopState(
  * Build a player-owned bullet for the given slot. Useful for testing that
  * bullet render commands carry the shooter's slot identity.
  */
-export function coopBullet(
-  slot: PlayerSlot,
-  overrides: Partial<BulletEntity> = {},
-): BulletEntity {
+export function coopBullet(slot: PlayerSlot, overrides: Partial<BulletEntity> = {}): BulletEntity {
   return {
     kind: 'bullet',
     id: `bullet-${slot}-${Math.random().toString(36).slice(2, 7)}`,
@@ -119,11 +113,7 @@ export function withEntities(state: GameState, entities: Entity[]): GameState {
  * alive → dead. Used by tests asserting a death explosion fires for that
  * player.
  */
-export function coopDeathPair(
-  n: 2 | 3 | 4,
-  dyingSlot: PlayerSlot,
-  tick = 20,
-): { prev: GameState; curr: GameState } {
+export function coopDeathPair(n: 2 | 3 | 4, dyingSlot: PlayerSlot, tick = 20): { prev: GameState; curr: GameState } {
   const prev = coopState(n, { tick: tick - 1 })
   const curr = coopState(n, { tick })
   // Replace the dying player with a dead-alive flag in curr only.

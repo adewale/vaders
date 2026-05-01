@@ -18,7 +18,7 @@ export function Spinner({ fg }: { fg?: string }) {
 
   useEffect(() => {
     const id = setInterval(() => {
-      setFrameIndex(i => (i + 1) % frames.length)
+      setFrameIndex((i) => (i + 1) % frames.length)
     }, SPINNER_INTERVAL_MS)
     return () => clearInterval(id)
   }, [frames.length])

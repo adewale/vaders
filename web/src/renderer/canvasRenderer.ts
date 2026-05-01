@@ -922,7 +922,7 @@ export function buildDrawCommands(
     // toward the slot hue so it reads as this player's signature flash.
     if (isPlayerBullet && slotColor && prevState && !prevBulletIds.has(bullet.id)) {
       const owner = bullet.ownerId ? state.players[bullet.ownerId] : null
-      if (owner && owner.alive) {
+      if (owner?.alive) {
         const cockpitX = owner.x * CELL_W + CELL_W / 2
         const cockpitY = LAYOUT.PLAYER_Y * CELL_H
         // Only emit when owner is nearby (within ~12 cells horizontally)
@@ -1080,7 +1080,7 @@ export function buildDrawCommands(
           // Damage event — spawn a scar
           const scarList = barrierDamageScars.get(segKey) ?? []
           // Deterministic position from segKey + tick so repeated hits are distinct
-          const seed = hashString(segKey + ':' + state.tick)
+          const seed = hashString(`${segKey}:${state.tick}`)
           const rng = mulberry32(seed)
           scarList.push({
             offsetX: Math.floor(rng() * (segW - 6)) + 3,
@@ -1129,7 +1129,7 @@ export function buildDrawCommands(
       // Deterministic pitted-concrete speckle using small circles of varying
       // size/alpha. Seed derived from barrier+segment so it's stable.
       {
-        const seed = hashString(segKey + ':noise')
+        const seed = hashString(`${segKey}:noise`)
         const rng = mulberry32(seed)
         const pitCount = 6
         for (let i = 0; i < pitCount; i++) {
@@ -1178,7 +1178,7 @@ export function buildDrawCommands(
         const ufoCy = (ufo.y + SPRITE_SIZE.ufo.height / 2) * CELL_H
         const segCx = segX + segW / 2
         const dx = segCx - ufoCx
-        const verticalDist = Math.max(0, segY - ufoCy)
+        const _verticalDist = Math.max(0, segY - ufoCy)
         // Light cone: influence falls to 0 beyond ~30 cells horizontal
         const falloff = Math.max(0, 1 - Math.abs(dx) / (30 * CELL_W))
         if (falloff <= 0.01) continue
@@ -1858,12 +1858,7 @@ export function buildDrawCommands(
     for (const prevPlayerId of Object.keys(prevState.players)) {
       const prevPlayer = prevState.players[prevPlayerId]
       const currPlayer = state.players[prevPlayerId]
-      if (
-        prevPlayer.alive &&
-        currPlayer != null &&
-        !currPlayer.alive &&
-        !seenDeadPlayerIds.has(prevPlayerId)
-      ) {
+      if (prevPlayer.alive && currPlayer != null && !currPlayer.alive && !seenDeadPlayerIds.has(prevPlayerId)) {
         seenDeadPlayerIds.add(prevPlayerId)
         explosionSystem.spawn(
           prevPlayer.x - 3, // center → left edge (sprite is 7 wide, half=3)

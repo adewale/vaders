@@ -52,18 +52,11 @@ export function useDissolveEffects(
     if (lastEvent.name === 'alien_killed') {
       const data = lastEvent.data as { alienId: string; playerId: string | null }
       const aliens = getAliens(prevState.entities)
-      const alien = aliens.find(a => a.id === data.alienId)
+      const alien = aliens.find((a) => a.id === data.alienId)
       // Only dissolve top-row aliens (squid type)
       if (alien && alien.type === 'squid') {
         const color = COLORS.alien[alien.type] ?? '#ffffff'
-        system.spawn(
-          alien.x,
-          alien.y,
-          SPRITE_SIZE.alien.width,
-          SPRITE_SIZE.alien.height,
-          color,
-          'dissolve',
-        )
+        system.spawn(alien.x, alien.y, SPRITE_SIZE.alien.width, SPRITE_SIZE.alien.height, color, 'dissolve')
       }
     }
 
@@ -98,15 +91,13 @@ export function useDissolveEffects(
     const prevBarriers = getBarriers(prevState.entities)
 
     // Quick check: serialize barrier health to avoid unnecessary diffing
-    const currentKey = currentBarriers.map(b =>
-      b.segments.map(s => s.health).join(',')
-    ).join(';')
+    const currentKey = currentBarriers.map((b) => b.segments.map((s) => s.health).join(',')).join(';')
 
     if (currentKey === prevBarriersRef.current) return
     prevBarriersRef.current = currentKey
 
     for (const barrier of currentBarriers) {
-      const prevBarrier = prevBarriers.find(b => b.id === barrier.id)
+      const prevBarrier = prevBarriers.find((b) => b.id === barrier.id)
       if (!prevBarrier) continue
 
       for (let i = 0; i < barrier.segments.length; i++) {
@@ -134,15 +125,15 @@ export function useDissolveEffects(
 
     // Quick serialization check to avoid re-processing on every render
     // (state.entities is a new array reference each sync due to structuredClone)
-    const currentKey = currentUfos.map(u => `${u.id}:${u.alive ? 1 : 0}`).join(';')
+    const currentKey = currentUfos.map((u) => `${u.id}:${u.alive ? 1 : 0}`).join(';')
     if (currentKey === prevUfosRef.current) return
     prevUfosRef.current = currentKey
 
     for (const prevUfo of prevUfos) {
       if (!prevUfo.alive) continue
-      const currentUfo = currentUfos.find(u => u.id === prevUfo.id)
+      const currentUfo = currentUfos.find((u) => u.id === prevUfo.id)
       // UFO was alive in prevState but gone or dead in current state
-      if (!currentUfo || !currentUfo.alive) {
+      if (!currentUfo?.alive) {
         system.spawn(
           prevUfo.x,
           prevUfo.y,

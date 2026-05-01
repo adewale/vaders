@@ -1,13 +1,13 @@
 import type React from 'react'
 import { COLORS } from '../../../client-core/src/sprites/colors'
 
-export type HintsBarRole = 'lobby' | 'game-over' | 'launch' | string
+export type HintsBarScreen = 'lobby' | 'game-over' | 'launch' | 'game' | string
 
 export interface HintsBarProps {
   /** Ordered list of [key, description] tuples. Empty array → renders nothing. */
   hints: Array<[key: string, desc: string]>
-  /** Semantic role of the bar, exposed as data-role for tests / styling hooks. */
-  role: HintsBarRole
+  /** Screen/context of the bar, exposed as data-role for tests / styling hooks. */
+  screen: HintsBarScreen
 }
 
 /**
@@ -18,15 +18,13 @@ export interface HintsBarProps {
  * it does not attach keyboard listeners. Actual key handling lives in the
  * owning screen or App.tsx.
  */
-export function HintsBar({ hints, role }: HintsBarProps): React.ReactElement | null {
+export function HintsBar({ hints, screen }: HintsBarProps): React.ReactElement | null {
   if (hints.length === 0) return null
 
   return (
-    <div
+    <footer
       data-testid="hints-bar"
-      data-role={role}
-      role="contentinfo"
-      aria-label="Keyboard shortcuts"
+      data-role={screen}
       style={{
         position: 'absolute',
         left: 0,
@@ -49,6 +47,6 @@ export function HintsBar({ hints, role }: HintsBarProps): React.ReactElement | n
           <span>&nbsp;{desc}</span>
         </span>
       ))}
-    </div>
+    </footer>
   )
 }

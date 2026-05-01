@@ -4,6 +4,12 @@
 import type { DurableObjectState } from '@cloudflare/workers-types'
 import { logEvent } from './logger'
 
+const REQUEST_ID_HEADER = 'x-vaders-request-id'
+
+function getRequestId(request?: Request): string | undefined {
+  return request?.headers.get(REQUEST_ID_HEADER) ?? undefined
+}
+
 // lastStatusChangeAt is the timestamp of the most recent status
 // transition (waiting → countdown, waiting → playing, etc.). Unlike
 // updatedAt — which refreshes on every /register, including pure
@@ -61,11 +67,14 @@ export class Matchmaker {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url)
+    const requestId = getRequestId(request)
 
     // POST /register - Room registers/updates itself
     if (url.pathname === '/register' && request.method === 'POST') {
-      const { roomCode, playerCount, status } = await request.json() as {
-        roomCode: string; playerCount: number; status: string
+      const { roomCode, playerCount, status } = (await request.json()) as {
+        roomCode: string
+        playerCount: number
+        status: string
       }
       const wasOpen = this.openRooms.has(roomCode)
       const prev = this.rooms[roomCode]
@@ -101,6 +110,7 @@ export class Matchmaker {
       // around t?" are one filter. openRoomsCount is the post-update
       // size of the matchable pool.
       logEvent('mm_register', {
+        requestId,
         roomCode,
         playerCount,
         status,
@@ -112,12 +122,13 @@ export class Matchmaker {
 
     // POST /unregister - Room removes itself
     if (url.pathname === '/unregister' && request.method === 'POST') {
-      const { roomCode } = await request.json() as { roomCode: string }
+      const { roomCode } = (await request.json()) as { roomCode: string }
       const wasKnown = roomCode in this.rooms
       delete this.rooms[roomCode]
       this.openRooms.delete(roomCode)
       await this.state.storage.put('rooms', this.rooms)
       logEvent('mm_unregister', {
+        requestId,
         roomCode,
         wasKnown,
         openRoomsCount: this.openRooms.size,
@@ -135,14 +146,14 @@ export class Matchmaker {
     // status + playerCount against this.rooms before returning the
     // roomCode. Stale entries are pruned on-the-fly.
     if (url.pathname === '/find') {
-      const STALE_THRESHOLD = 5 * 60 * 1000  // 5 minutes
+      const STALE_THRESHOLD = 5 * 60 * 1000 // 5 minutes
       // Option C: a room that's been in `waiting` for more than this
       // threshold without any status transition is presumed stuck
       // (e.g. phantom-trapped: new victims cycle through without
       // readying, keeping updatedAt fresh but lastStatusChangeAt
       // frozen). Force-prune it from the matchmaker so the next
       // matchmaker sees a fresh pool.
-      const PROGRESS_STALE_THRESHOLD = 10 * 60 * 1000  // 10 minutes
+      const PROGRESS_STALE_THRESHOLD = 10 * 60 * 1000 // 10 minutes
       const now = Date.now()
 
       // Track pruning reasons so the wide event can explain WHY /find
@@ -175,11 +186,9 @@ export class Matchmaker {
         // sending new victims. Next DO wake will fire Option A's
         // reconciliation, cleaning the phantoms. Meanwhile, the next
         // matchmaker gets a fresh room rather than joining the trap.
-        if (
-          info.status === 'waiting' &&
-          now - info.lastStatusChangeAt > PROGRESS_STALE_THRESHOLD
-        ) {
+        if (info.status === 'waiting' && now - info.lastStatusChangeAt > PROGRESS_STALE_THRESHOLD) {
           logEvent('mm_prune_stale_by_progress', {
+            requestId,
             roomCode,
             playerCount: info.playerCount,
             status: info.status,
@@ -202,6 +211,7 @@ export class Matchmaker {
           continue
         }
         logEvent('mm_find_result', {
+          requestId,
           result: 'hit',
           roomCode,
           playerCount: info.playerCount,
@@ -213,13 +223,14 @@ export class Matchmaker {
           prunedFiltered,
         })
         return new Response(JSON.stringify({ roomCode }), {
-          headers: { 'Content-Type': 'application/json' }
+          headers: { 'Content-Type': 'application/json' },
         })
       }
 
       await this.state.storage.put('rooms', this.rooms)
 
       logEvent('mm_find_result', {
+        requestId,
         result: 'miss',
         roomCode: null,
         openRoomsScanned: scanned,
@@ -230,7 +241,7 @@ export class Matchmaker {
         openRoomsRemaining: this.openRooms.size,
       })
       return new Response(JSON.stringify({ roomCode: null }), {
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json' },
       })
     }
 
@@ -243,7 +254,7 @@ export class Matchmaker {
         return new Response('Not found', { status: 404 })
       }
       return new Response(JSON.stringify({ roomCode, ...info }), {
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json' },
       })
     }
 

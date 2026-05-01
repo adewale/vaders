@@ -3,11 +3,17 @@
 
 import { describe, test, expect } from 'bun:test'
 import type { KeyEvent } from '@opentui/core'
-import { normalizeKey, createHeldKeysTracker, type VadersKey } from './input'
+import { normalizeKey, createHeldKeysTracker } from './input'
 
 // Helper to create test key events with minimal required properties
 // We cast through unknown since we only need the properties that normalizeKey uses
-function mockKeyEvent(props: { name?: string; sequence?: string; ctrl?: boolean; meta?: boolean; shift?: boolean }): KeyEvent {
+function mockKeyEvent(props: {
+  name?: string
+  sequence?: string
+  ctrl?: boolean
+  meta?: boolean
+  shift?: boolean
+}): KeyEvent {
   return {
     name: props.name ?? '',
     sequence: props.sequence ?? '',

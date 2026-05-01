@@ -86,9 +86,7 @@ function canonicaliseToken(raw: string): string[] {
 /** Split a label like "R / ENTER" or "ESC / Q" into individual tokens,
  *  then canonicalise each. Returns flat array of canonical keys. */
 function canonicaliseLabel(label: string): string[] {
-  return label
-    .split(/\s*(?:\/|,|\||\s+OR\s+)\s*/i)
-    .flatMap(canonicaliseToken)
+  return label.split(/\s*(?:\/|,|\||\s+OR\s+)\s*/i).flatMap(canonicaliseToken)
 }
 
 function canonicaliseAll(raw: string[]): Set<string> {
@@ -224,11 +222,7 @@ describe('cross-surface keyboard parity', () => {
   const lobbySrc = read('web/src/components/LobbyScreen.tsx')
   const gameSrc = read('web/src/components/GameScreen.tsx')
   const gameOverSrc = read('web/src/components/GameOverScreen.tsx')
-  const hintsKeys = [
-    ...scrapeHintsTuples(lobbySrc),
-    ...scrapeHintsTuples(gameSrc),
-    ...scrapeHintsTuples(gameOverSrc),
-  ]
+  const hintsKeys = [...scrapeHintsTuples(lobbySrc), ...scrapeHintsTuples(gameSrc), ...scrapeHintsTuples(gameOverSrc)]
 
   const readmeSrc = read('README.md')
   const readmeKeys = scrapeReadmeControls(readmeSrc)
@@ -275,9 +269,7 @@ describe('cross-surface keyboard parity', () => {
   it('Contract A — every documented key resolves to a handler somewhere', () => {
     // For each canonical key mentioned in any doc surface, assert a
     // raw-key handler exists OR the key is allowlisted.
-    const missing = [...docKeys].filter(
-      (k) => !rawHandlerKeys.has(k) && !(k in KNOWN_DOC_ONLY_KEYS),
-    )
+    const missing = [...docKeys].filter((k) => !rawHandlerKeys.has(k) && !(k in KNOWN_DOC_ONLY_KEYS))
     expect(missing).toEqual([])
   })
 
@@ -286,9 +278,7 @@ describe('cross-surface keyboard parity', () => {
     // KEY_MAP is the canonical routing table. Adding a KEY_MAP entry without
     // updating docs is the most common drift pattern.
     const keyMapCanonical = canonicaliseAll(keyMap)
-    const missing = [...keyMapCanonical].filter(
-      (k) => !docKeys.has(k) && !(k in KNOWN_HANDLER_ONLY_KEYS),
-    )
+    const missing = [...keyMapCanonical].filter((k) => !docKeys.has(k) && !(k in KNOWN_HANDLER_ONLY_KEYS))
     expect(missing).toEqual([])
   })
 
@@ -326,11 +316,7 @@ describe('cross-surface keyboard parity', () => {
       }
       // Canonicalise every key literal in the owning screen sources.
       const sectionHandlerKeys = canonicaliseAll(
-        handlerSrcs.flatMap((s) => [
-          ...scrapeKeyEquals(s),
-          ...scrapeCaseLiterals(s),
-          ...scrapeLoweredEquals(s),
-        ]),
+        handlerSrcs.flatMap((s) => [...scrapeKeyEquals(s), ...scrapeCaseLiterals(s), ...scrapeLoweredEquals(s)]),
       )
       for (const rawLabel of rawLabels) {
         const canonical = canonicaliseLabel(rawLabel)

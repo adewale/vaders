@@ -302,7 +302,9 @@ describe('LobbyScreen', () => {
         p1: { id: 'p1', name: 'Alice', slot: 1, color: 'cyan', kills: 0 } as any,
       },
     })
-    render(<LobbyScreen state={state} playerId="p1" onReady={() => {}} onUnready={() => {}} onStartSolo={onStartSolo} />)
+    render(
+      <LobbyScreen state={state} playerId="p1" onReady={() => {}} onUnready={() => {}} onStartSolo={onStartSolo} />,
+    )
     fireEvent.click(screen.getByRole('button', { name: /start solo/i }))
     expect(onStartSolo).toHaveBeenCalledTimes(1)
   })
@@ -440,7 +442,13 @@ describe('LobbyScreen - hints bar', () => {
       },
     })
     const { unmount: unmountCoopAlone } = render(
-      <LobbyScreen state={coopAloneState} playerId="p1" onReady={() => {}} onUnready={() => {}} onStartSolo={() => {}} />,
+      <LobbyScreen
+        state={coopAloneState}
+        playerId="p1"
+        onReady={() => {}}
+        onUnready={() => {}}
+        onStartSolo={() => {}}
+      />,
     )
     expect((screen.getByTestId('hints-bar').textContent ?? '').toLowerCase()).toContain('start solo')
     unmountCoopAlone()
@@ -454,7 +462,13 @@ describe('LobbyScreen - hints bar', () => {
       },
     })
     render(
-      <LobbyScreen state={coopFullState} playerId="p1" onReady={() => {}} onUnready={() => {}} onStartSolo={() => {}} />,
+      <LobbyScreen
+        state={coopFullState}
+        playerId="p1"
+        onReady={() => {}}
+        onUnready={() => {}}
+        onStartSolo={() => {}}
+      />,
     )
     expect((screen.getByTestId('hints-bar').textContent ?? '').toLowerCase()).not.toContain('start solo')
   })

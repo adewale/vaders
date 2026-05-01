@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test } from '@playwright/test'
 
 test.describe('Multiplayer flow', () => {
   // Multiplayer tests use two browser pages to simulate two players

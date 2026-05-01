@@ -42,35 +42,21 @@ test.describe('Full user journey', () => {
   test('launch → create room → lobby → back to launch', async ({ page }) => {
     await page.goto('/')
     await expect(page.locator('text=CREATE ROOM')).toBeVisible()
-    await page.click('body')
-
-    // Press 2 for CREATE ROOM
-    await page.keyboard.press('2')
+    await page.getByText('CREATE ROOM').click()
 
     // Expect either lobby text or room code in URL
     await expect(async () => {
       const urlHasRoom = page.url().match(/\/room\/[A-Z0-9]{6}/)
-      const lobbyVisible = await page.locator('text=/lobby|room/i').first().count() > 0
+      const lobbyVisible = (await page.locator('text=/lobby|room/i').first().count()) > 0
       expect(urlHasRoom || lobbyVisible).toBeTruthy()
     }).toPass({ timeout: 15000 })
   })
 
   test('launch → join room with valid code', async ({ page }) => {
     await page.goto('/')
-    await page.click('body')
 
-    // Press 3 to start JOIN ROOM input mode
-    await page.keyboard.press('3')
-
-    // Type a room code (any 6 chars)
-    await page.keyboard.press('A')
-    await page.keyboard.press('B')
-    await page.keyboard.press('C')
-    await page.keyboard.press('1')
-    await page.keyboard.press('2')
-    await page.keyboard.press('3')
-
-    // Press enter to join
+    await page.getByText('JOIN ROOM').click()
+    await page.getByLabel('Room code').fill('ABC123')
     await page.keyboard.press('Enter')
 
     // URL should update to /room/ABC123

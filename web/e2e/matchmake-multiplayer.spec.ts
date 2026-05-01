@@ -79,7 +79,7 @@ test.describe('Matchmake multiplayer', () => {
         await alice.keyboard.press('4')
         await alice.waitForURL(/\/room\/[A-Z0-9]{6}(?:\/.*)?$/, { timeout: 10000 })
         const match = alice.url().match(/\/room\/([A-Z0-9]{6})/)
-        expect(match, 'room code should appear in Alice\'s URL').not.toBeNull()
+        expect(match, "room code should appear in Alice's URL").not.toBeNull()
         roomCode = match![1]
 
         const ticker = alice.getByTestId('lobby-ready-ticker')
@@ -96,11 +96,11 @@ test.describe('Matchmake multiplayer', () => {
         await expect(bob.getByTestId('vaders-logo')).toBeVisible()
       })
 
-      await test.step('Step 4 — Bob presses 4 → matchmaker hands him Alice\'s room → both see 2 players in distinct slot colours', async () => {
+      await test.step("Step 4 — Bob presses 4 → matchmaker hands him Alice's room → both see 2 players in distinct slot colours", async () => {
         await bob.keyboard.press('4')
         await bob.waitForURL(/\/room\/[A-Z0-9]{6}(?:\/.*)?$/, { timeout: 10000 })
         const bobMatch = bob.url().match(/\/room\/([A-Z0-9]{6})/)
-        expect(bobMatch, 'room code should appear in Bob\'s URL').not.toBeNull()
+        expect(bobMatch, "room code should appear in Bob's URL").not.toBeNull()
         // Critical: Bob converged on Alice's room (not a freshly created
         // one). If this fails, the matchmaker's /find returned null
         // instead of Alice's roomCode.
@@ -196,8 +196,8 @@ test.describe('Matchmake multiplayer', () => {
         const bobTickAfter = await bob.evaluate(
           () => (window as { __VADERS_STATE__?: { tick?: number } }).__VADERS_STATE__?.tick ?? 0,
         )
-        expect(aliceTickAfter, 'Alice\'s tick advanced').toBeGreaterThan(aliceTickBefore)
-        expect(bobTickAfter, 'Bob\'s tick advanced').toBeGreaterThan(bobTickBefore)
+        expect(aliceTickAfter, "Alice's tick advanced").toBeGreaterThan(aliceTickBefore)
+        expect(bobTickAfter, "Bob's tick advanced").toBeGreaterThan(bobTickBefore)
 
         // Alice shoots. The bullet must appear in BOTH clients' state
         // (proves the server broadcasts reach both WebSockets).
@@ -211,7 +211,7 @@ test.describe('Matchmake multiplayer', () => {
               })
               return n
             },
-            { timeout: 3000, message: 'Alice\'s shoot should spawn a bullet in her state' },
+            { timeout: 3000, message: "Alice's shoot should spawn a bullet in her state" },
           )
           .toBeGreaterThan(0)
         await expect
@@ -223,7 +223,7 @@ test.describe('Matchmake multiplayer', () => {
               })
               return n
             },
-            { timeout: 3000, message: 'Alice\'s bullet should also appear in Bob\'s state (coop sync)' },
+            { timeout: 3000, message: "Alice's bullet should also appear in Bob's state (coop sync)" },
           )
           .toBeGreaterThan(0)
 
@@ -232,7 +232,7 @@ test.describe('Matchmake multiplayer', () => {
         const bobId = await bob.evaluate(
           () => (window as { __VADERS_PLAYER_ID__?: string | null }).__VADERS_PLAYER_ID__,
         )
-        expect(bobId, 'Bob\'s playerId is known').toBeTruthy()
+        expect(bobId, "Bob's playerId is known").toBeTruthy()
         const bobXBefore = await bob.evaluate((id: string) => {
           const s = (window as { __VADERS_STATE__?: { players?: Record<string, { x: number }> } }).__VADERS_STATE__
           return s?.players?.[id]?.x ?? 0
@@ -248,10 +248,10 @@ test.describe('Matchmake multiplayer', () => {
           const s = (window as { __VADERS_STATE__?: { players?: Record<string, { x: number }> } }).__VADERS_STATE__
           return s?.players?.[id]?.x ?? 0
         }, bobId as string)
-        expect(bobXAfterSelf, 'Bob\'s own view: his x changed').not.toBe(bobXBefore)
+        expect(bobXAfterSelf, "Bob's own view: his x changed").not.toBe(bobXBefore)
         expect(
           bobXAfterAlice,
-          'Alice\'s view of Bob: his x changed (sync). Exact equality not asserted — broadcast latency means Alice may be one tick behind Bob\'s local read.',
+          "Alice's view of Bob: his x changed (sync). Exact equality not asserted — broadcast latency means Alice may be one tick behind Bob's local read.",
         ).not.toBe(bobXBefore)
         // Tolerance: Alice and Bob are within a few ticks of each other.
         // At 30Hz ticks and 1 cell/tick movement speed, a broadcast lag
@@ -275,7 +275,9 @@ test.describe('Matchmake multiplayer', () => {
           const data = ctx.getImageData(0, canvas.height / 2, canvas.width, 4).data
           const seen = new Set<number>()
           for (let i = 0; i < data.length; i += 4) {
-            const r = data[i], g = data[i + 1], b = data[i + 2]
+            const r = data[i],
+              g = data[i + 1],
+              b = data[i + 2]
             seen.add((r << 16) | (g << 8) | b)
           }
           return seen.size

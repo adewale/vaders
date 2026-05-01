@@ -11,21 +11,17 @@ import { LOGO_ASCII } from './sprites'
 function parseHex(hex: string): { r: number; g: number; b: number } {
   const h = hex.replace('#', '')
   return {
-    r: parseInt(h.slice(0, 2), 16),
-    g: parseInt(h.slice(2, 4), 16),
-    b: parseInt(h.slice(4, 6), 16),
+    r: Number.parseInt(h.slice(0, 2), 16),
+    g: Number.parseInt(h.slice(2, 4), 16),
+    b: Number.parseInt(h.slice(4, 6), 16),
   }
 }
 
 /** Check two hex colors are within tolerance (per-channel) */
-function colorsClose(a: string, b: string, tolerance = 2): boolean {
+function _colorsClose(a: string, b: string, tolerance = 2): boolean {
   const pa = parseHex(a)
   const pb = parseHex(b)
-  return (
-    Math.abs(pa.r - pb.r) <= tolerance &&
-    Math.abs(pa.g - pb.g) <= tolerance &&
-    Math.abs(pa.b - pb.b) <= tolerance
-  )
+  return Math.abs(pa.r - pb.r) <= tolerance && Math.abs(pa.g - pb.g) <= tolerance && Math.abs(pa.b - pb.b) <= tolerance
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
@@ -59,9 +55,9 @@ describe('interpolateGradient', () => {
     // Red → Green → Blue with 5 colors
     const result = interpolateGradient(['#ff0000', '#00ff00', '#0000ff'], 5)
     expect(result).toHaveLength(5)
-    expect(result[0]).toBe('#ff0000')   // Pure red
-    expect(result[2]).toBe('#00ff00')   // Pure green (midpoint)
-    expect(result[4]).toBe('#0000ff')   // Pure blue
+    expect(result[0]).toBe('#ff0000') // Pure red
+    expect(result[2]).toBe('#00ff00') // Pure green (midpoint)
+    expect(result[4]).toBe('#0000ff') // Pure blue
     // Position 1: between red and green
     const c1 = parseHex(result[1])
     expect(c1.r).toBeGreaterThan(0)
@@ -118,8 +114,8 @@ describe('gradientMultiline', () => {
     const result = gradientMultiline(text, ['#ff0000', '#0000ff'])
     // Line 0 has 5 chars, line 1 has 2 chars
     // Both should use gradient computed for width 5
-    expect(result[0][0].color).toBe('#ff0000')  // First column = red
-    expect(result[0][4].color).toBe('#0000ff')  // Last column of longest = blue
+    expect(result[0][0].color).toBe('#ff0000') // First column = red
+    expect(result[0][4].color).toBe('#0000ff') // Last column of longest = blue
     // Short line's column 0 matches long line's column 0
     expect(result[1][0].color).toBe(result[0][0].color)
   })
@@ -138,14 +134,14 @@ describe('gradientMultiline', () => {
 
 describe('GRADIENT_PRESETS', () => {
   test('all presets have at least 2 color stops', () => {
-    for (const [name, stops] of Object.entries(GRADIENT_PRESETS)) {
+    for (const [_name, stops] of Object.entries(GRADIENT_PRESETS)) {
       expect(stops.length).toBeGreaterThanOrEqual(2)
     }
   })
 
   test('all preset colors are valid hex', () => {
     const hexPattern = /^#[0-9a-f]{6}$/i
-    for (const [name, stops] of Object.entries(GRADIENT_PRESETS)) {
+    for (const [_name, stops] of Object.entries(GRADIENT_PRESETS)) {
       for (const color of stops) {
         expect(color).toMatch(hexPattern)
       }

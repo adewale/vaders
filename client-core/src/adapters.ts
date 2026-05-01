@@ -11,8 +11,8 @@ export type VadersKey =
   | 'enter'
   | 'escape'
   | 'quit'
-  | 'mute'         // SFX mute (M)
-  | 'mute-music'   // Music mute (N) — separate so SFX + music can toggle independently
+  | 'mute' // SFX mute (M)
+  | 'mute-music' // Music mute (N) — separate so SFX + music can toggle independently
   | 'solo'
   | 'ready'
   | 'forfeit'

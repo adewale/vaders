@@ -28,16 +28,14 @@ export function WaveAnnounce({ waveNumber, terminalWidth, terminalHeight }: Wave
   const useAscii = !caps.supportsUnicode
 
   // Compose digit art
-  const { text: digitText, width: digitWidth, height: digitHeight } = useMemo(
-    () => composeDigits(waveNumber, useAscii),
-    [waveNumber, useAscii],
-  )
+  const {
+    text: digitText,
+    width: digitWidth,
+    height: digitHeight,
+  } = useMemo(() => composeDigits(waveNumber, useAscii), [waveNumber, useAscii])
 
   // Select gradient
-  const gradientColors = useMemo(
-    () => getWaveGradient(waveNumber),
-    [waveNumber],
-  )
+  const gradientColors = useMemo(() => getWaveGradient(waveNumber), [waveNumber])
 
   // Box dimensions — fill most of the screen for dramatic effect
   const boxWidth = Math.max(digitWidth + 10, Math.floor(terminalWidth * 0.6))
@@ -53,14 +51,17 @@ export function WaveAnnounce({ waveNumber, terminalWidth, terminalHeight }: Wave
   const digitLeft = Math.floor((terminalWidth - digitWidth) / 2)
 
   // Build animation config (shared between initial frame and effect)
-  const animConfig = useMemo(() => ({
-    boxWidth,
-    boxHeight,
-    waveNumber,
-    contentWidth: digitWidth,
-    contentHeight: digitHeight + 2, // include "WAVE" label
-    innerPadding: padding,
-  }), [boxWidth, boxHeight, waveNumber, digitWidth, digitHeight, padding])
+  const animConfig = useMemo(
+    () => ({
+      boxWidth,
+      boxHeight,
+      waveNumber,
+      contentWidth: digitWidth,
+      contentHeight: digitHeight + 2, // include "WAVE" label
+      innerPadding: padding,
+    }),
+    [boxWidth, boxHeight, waveNumber, digitWidth, digitHeight, padding],
+  )
 
   // Compute first frame synchronously so the initial render isn't empty
   const initialCells = useMemo(() => {
@@ -96,10 +97,20 @@ export function WaveAnnounce({ waveNumber, terminalWidth, terminalHeight }: Wave
   // ASCII-only fallback: simple centered text
   if (useAscii) {
     return (
-      <box width={terminalWidth} height={terminalHeight} justifyContent="center" alignItems="center" flexDirection="column">
-        <text fg="yellow"><b>WAVE</b></text>
+      <box
+        width={terminalWidth}
+        height={terminalHeight}
+        justifyContent="center"
+        alignItems="center"
+        flexDirection="column"
+      >
+        <text fg="yellow">
+          <b>WAVE</b>
+        </text>
         <box height={1} />
-        <text fg="yellow"><b>{digitText}</b></text>
+        <text fg="yellow">
+          <b>{digitText}</b>
+        </text>
       </box>
     )
   }
@@ -118,26 +129,22 @@ export function WaveAnnounce({ waveNumber, terminalWidth, terminalHeight }: Wave
 
       {/* Digit art with gradient */}
       <box position="absolute" top={digitTop} left={digitLeft}>
-        <GradientText
-          text={digitText}
-          colors={gradientColors}
-          fallbackColor="#ffff00"
-          richColor={richColor}
-        />
+        <GradientText text={digitText} colors={gradientColors} fallbackColor="#ffff00" richColor={richColor} />
       </box>
 
       {/* Braille border + ripple cells */}
-      {braille && borderCells.map((cell, i) => (
-        <text
-          key={`${cell.x}-${cell.y}`}
-          position="absolute"
-          top={boxTop + cell.y}
-          left={boxLeft + cell.x}
-          fg={convertColorForTerminal(cell.color, caps)}
-        >
-          {cell.char}
-        </text>
-      ))}
+      {braille &&
+        borderCells.map((cell, _i) => (
+          <text
+            key={`${cell.x}-${cell.y}`}
+            position="absolute"
+            top={boxTop + cell.y}
+            left={boxLeft + cell.x}
+            fg={convertColorForTerminal(cell.color, caps)}
+          >
+            {cell.char}
+          </text>
+        ))}
     </box>
   )
 }

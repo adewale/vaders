@@ -36,8 +36,7 @@ export function MobileGate({ children }: { children: ReactNode }) {
 
     // Match-media listeners re-fire the handler if the user switches
     // between primary pointer types (rare but possible on hybrid devices).
-    const coarseMq =
-      typeof window.matchMedia === 'function' ? window.matchMedia('(pointer: coarse)') : null
+    const coarseMq = typeof window.matchMedia === 'function' ? window.matchMedia('(pointer: coarse)') : null
     coarseMq?.addEventListener?.('change', handler)
 
     return () => {
@@ -67,9 +66,7 @@ export function MobileGate({ children }: { children: ReactNode }) {
         <h1 style={{ fontSize: '1.5rem', marginBottom: '1rem' }}>VADERS</h1>
         <p>Vaders is a keyboard-only game and doesn't support mobile or touch input.</p>
         <p style={{ marginTop: '0.5rem' }}>Please play on a desktop or laptop with a physical keyboard.</p>
-        <p style={{ marginTop: '1rem', fontSize: 14, opacity: 0.6 }}>
-          Mobile support is not on the roadmap.
-        </p>
+        <p style={{ marginTop: '1rem', fontSize: 14, opacity: 0.6 }}>Mobile support is not on the roadmap.</p>
       </div>
     )
   }

@@ -2,12 +2,7 @@
 // React hook for smooth movement interpolation
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import {
-  InterpolationManager,
-  type InterpolationConfig,
-  type RenderPosition,
-  toRenderPosition,
-} from '../animation'
+import { InterpolationManager, type InterpolationConfig, type RenderPosition, toRenderPosition } from '../animation'
 import type { FrameScheduler } from '../../../client-core/src/adapters'
 
 /**
@@ -98,9 +93,7 @@ export interface UseInterpolationReturn {
 // Stable empty config to avoid re-creating on every render
 const EMPTY_CONFIG: Partial<InterpolationConfig> = {}
 
-export function useInterpolation(
-  options: UseInterpolationOptions = {}
-): UseInterpolationReturn {
+export function useInterpolation(options: UseInterpolationOptions = {}): UseInterpolationReturn {
   // Use stable reference for empty config
   const config = options.config ?? EMPTY_CONFIG
   const scheduler = options.frameScheduler ?? DEFAULT_FRAME_SCHEDULER
@@ -163,11 +156,14 @@ export function useInterpolation(
   }, [])
 
   // Get render position with sub-cell info
-  const getRenderPosition = useCallback((id: string): RenderPosition | null => {
-    const pos = managerRef.current.getVisualPosition(id)
-    if (!pos) return null
-    return toRenderPosition(pos.x, pos.y, config.useAscii)
-  }, [config.useAscii])
+  const getRenderPosition = useCallback(
+    (id: string): RenderPosition | null => {
+      const pos = managerRef.current.getVisualPosition(id)
+      if (!pos) return null
+      return toRenderPosition(pos.x, pos.y, config.useAscii)
+    },
+    [config.useAscii],
+  )
 
   // Mark tick start
   const markTickFn = useCallback((gameTick: number) => {

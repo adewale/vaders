@@ -163,10 +163,7 @@ describe('worker → web server-event coverage', () => {
 
   it('every worker broadcast event has a consumer, a state-delta derivation, or an explicit ignore', () => {
     const uncovered = [...broadcastEvents].filter(
-      (name) =>
-        !consumedRefs.has(name) &&
-        !(name in EVENT_COVERED_BY_STATE_DELTA) &&
-        !(name in CLIENT_IGNORED_EVENTS),
+      (name) => !consumedRefs.has(name) && !(name in EVENT_COVERED_BY_STATE_DELTA) && !(name in CLIENT_IGNORED_EVENTS),
     )
     expect(uncovered).toEqual([])
   })

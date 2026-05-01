@@ -50,20 +50,20 @@ function createMockDurableObjectContext() {
             return { toArray: () => [] }
           }
           if (query.includes('SELECT')) {
-            if (sqlData['game_state']) {
-              return { toArray: () => [sqlData['game_state']] }
+            if (sqlData.game_state) {
+              return { toArray: () => [sqlData.game_state] }
             }
             return { toArray: () => [] }
           }
           if (query.includes('INSERT OR REPLACE')) {
-            sqlData['game_state'] = {
+            sqlData.game_state = {
               data: params[0] as string,
               next_entity_id: params[1] as number,
             }
             return { toArray: () => [] }
           }
           if (query.includes('DELETE')) {
-            delete sqlData['game_state']
+            sqlData.game_state = undefined
             return { toArray: () => [] }
           }
           return { toArray: () => [] }
@@ -170,7 +170,7 @@ describe('Integration: Player Creates Room, Another Player Joins', () => {
     // Setup Matchmaker
     matchmakerState = createMockMatchmakerState()
     matchmaker = new Matchmaker(matchmakerState as any)
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await new Promise((resolve) => setTimeout(resolve, 0))
 
     // Setup GameRoom with Matchmaker binding
     gameRoomCtx = createMockDurableObjectContext()
@@ -190,7 +190,7 @@ describe('Integration: Player Creates Room, Another Player Joins', () => {
     }
 
     gameRoom = new GameRoom(gameRoomCtx as any, env)
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await new Promise((resolve) => setTimeout(resolve, 0))
   })
 
   it('Player 1 creates room and Player 2 joins - both receive correct state', async () => {
@@ -213,7 +213,7 @@ describe('Integration: Player Creates Room, Another Player Joins', () => {
     // Verify Player 1 received sync with playerId
     const player1Syncs = getSyncMessages(ws1)
     expect(player1Syncs.length).toBeGreaterThan(0)
-    const player1Sync = player1Syncs.find(s => s.playerId)
+    const player1Sync = player1Syncs.find((s) => s.playerId)
     expect(player1Sync).toBeDefined()
     expect(player1Sync!.playerId).toBeDefined()
     expect(player1Sync!.config).toBeDefined()
@@ -231,7 +231,7 @@ describe('Integration: Player Creates Room, Another Player Joins', () => {
     // Verify Player 2 received sync with their playerId
     const player2Syncs = getSyncMessages(ws2)
     expect(player2Syncs.length).toBeGreaterThan(0)
-    const player2Sync = player2Syncs.find(s => s.playerId)
+    const player2Sync = player2Syncs.find((s) => s.playerId)
     expect(player2Sync).toBeDefined()
     expect(player2Sync!.playerId).toBeDefined()
 
@@ -247,7 +247,7 @@ describe('Integration: Player Creates Room, Another Player Joins', () => {
 
     // Step 5: Verify Player 1 received player_joined event for Player 2
     const player1Events = getEventMessages(ws1)
-    const joinEvent = player1Events.find(e => e.name === 'player_joined' && (e.data as any).player.name === 'Player2')
+    const joinEvent = player1Events.find((e) => e.name === 'player_joined' && (e.data as any).player.name === 'Player2')
     expect(joinEvent).toBeDefined()
   })
 
@@ -255,10 +255,12 @@ describe('Integration: Player Creates Room, Another Player Joins', () => {
     const roomCode = 'READY1'
 
     // Initialize room
-    await gameRoom.fetch(new Request('https://internal/init', {
-      method: 'POST',
-      body: JSON.stringify({ roomCode }),
-    }))
+    await gameRoom.fetch(
+      new Request('https://internal/init', {
+        method: 'POST',
+        body: JSON.stringify({ roomCode }),
+      }),
+    )
 
     // Both players join
     const ws1 = createMockWebSocket()
@@ -276,22 +278,22 @@ describe('Integration: Player Creates Room, Another Player Joins', () => {
     await gameRoom.webSocketMessage(ws1 as any, JSON.stringify({ type: 'ready' }))
 
     // Verify player_ready event was broadcast
-    let player1Events = getEventMessages(ws1)
-    expect(player1Events.some(e => e.name === 'player_ready')).toBe(true)
+    const player1Events = getEventMessages(ws1)
+    expect(player1Events.some((e) => e.name === 'player_ready')).toBe(true)
 
     // Player 2 readies up - this should start countdown
     await gameRoom.webSocketMessage(ws2 as any, JSON.stringify({ type: 'ready' }))
 
     // Both players should receive countdown_tick event with COUNTDOWN_SECONDS
-    const ws1CountdownEvents = getEventMessages(ws1).filter(e => e.name === 'countdown_tick')
-    const ws2CountdownEvents = getEventMessages(ws2).filter(e => e.name === 'countdown_tick')
+    const ws1CountdownEvents = getEventMessages(ws1).filter((e) => e.name === 'countdown_tick')
+    const ws2CountdownEvents = getEventMessages(ws2).filter((e) => e.name === 'countdown_tick')
 
     expect(ws1CountdownEvents.length).toBeGreaterThan(0)
     expect(ws2CountdownEvents.length).toBeGreaterThan(0)
     expect((ws1CountdownEvents[0].data as any).count).toBe(COUNTDOWN_SECONDS)
 
     // Verify state shows countdown status
-    const state = JSON.parse(gameRoomCtx._sqlData['game_state'].data) as GameState
+    const state = JSON.parse(gameRoomCtx._sqlData.game_state.data) as GameState
     expect(state.status).toBe('countdown')
     expect(state.readyPlayerIds.length).toBe(2)
   })
@@ -300,10 +302,12 @@ describe('Integration: Player Creates Room, Another Player Joins', () => {
     const roomCode = 'START1'
 
     // Initialize room and join 2 players
-    await gameRoom.fetch(new Request('https://internal/init', {
-      method: 'POST',
-      body: JSON.stringify({ roomCode }),
-    }))
+    await gameRoom.fetch(
+      new Request('https://internal/init', {
+        method: 'POST',
+        body: JSON.stringify({ roomCode }),
+      }),
+    )
 
     const ws1 = createMockWebSocket()
     const ws2 = createMockWebSocket()
@@ -329,14 +333,14 @@ describe('Integration: Player Creates Room, Another Player Joins', () => {
     const ws1Events = getEventMessages(ws1)
     const ws2Events = getEventMessages(ws2)
 
-    expect(ws1Events.some(e => e.name === 'game_start')).toBe(true)
-    expect(ws2Events.some(e => e.name === 'game_start')).toBe(true)
+    expect(ws1Events.some((e) => e.name === 'game_start')).toBe(true)
+    expect(ws2Events.some((e) => e.name === 'game_start')).toBe(true)
 
     // Complete wipe phases to reach 'playing'
     await completeWipePhases(gameRoom)
 
     // Verify game state is now 'playing'
-    const state = JSON.parse(gameRoomCtx._sqlData['game_state'].data) as GameState
+    const state = JSON.parse(gameRoomCtx._sqlData.game_state.data) as GameState
     expect(state.status).toBe('playing')
     expect(state.mode).toBe('coop')
     expect(state.lives).toBe(5) // Coop mode has 5 shared lives
@@ -346,10 +350,12 @@ describe('Integration: Player Creates Room, Another Player Joins', () => {
     const roomCode = 'LEAVE1'
 
     // Initialize room
-    await gameRoom.fetch(new Request('https://internal/init', {
-      method: 'POST',
-      body: JSON.stringify({ roomCode }),
-    }))
+    await gameRoom.fetch(
+      new Request('https://internal/init', {
+        method: 'POST',
+        body: JSON.stringify({ roomCode }),
+      }),
+    )
 
     // Both players join
     const ws1 = createMockWebSocket()
@@ -360,7 +366,7 @@ describe('Integration: Player Creates Room, Another Player Joins', () => {
     await gameRoom.webSocketMessage(ws2 as any, JSON.stringify({ type: 'join', name: 'Bob' }))
 
     // Get Player 2's ID
-    const player2Sync = getSyncMessages(ws2).find(s => s.playerId)!
+    const player2Sync = getSyncMessages(ws2).find((s) => s.playerId)!
     const player2Id = player2Sync.playerId!
 
     // Clear mocks
@@ -371,11 +377,11 @@ describe('Integration: Player Creates Room, Another Player Joins', () => {
 
     // Player 1 should receive player_left event
     const ws1Events = getEventMessages(ws1)
-    const leaveEvent = ws1Events.find(e => e.name === 'player_left' && (e.data as any).playerId === player2Id)
+    const leaveEvent = ws1Events.find((e) => e.name === 'player_left' && (e.data as any).playerId === player2Id)
     expect(leaveEvent).toBeDefined()
 
     // State should only have Player 1
-    const state = JSON.parse(gameRoomCtx._sqlData['game_state'].data) as GameState
+    const state = JSON.parse(gameRoomCtx._sqlData.game_state.data) as GameState
     expect(Object.keys(state.players).length).toBe(1)
   })
 
@@ -383,10 +389,12 @@ describe('Integration: Player Creates Room, Another Player Joins', () => {
     const roomCode = 'NOCNT1'
 
     // Initialize room
-    await gameRoom.fetch(new Request('https://internal/init', {
-      method: 'POST',
-      body: JSON.stringify({ roomCode }),
-    }))
+    await gameRoom.fetch(
+      new Request('https://internal/init', {
+        method: 'POST',
+        body: JSON.stringify({ roomCode }),
+      }),
+    )
 
     // Player 1 and original Player 2 join
     const ws1 = createMockWebSocket()
@@ -408,17 +416,19 @@ describe('Integration: Player Creates Room, Another Player Joins', () => {
 
     // Player 3 should receive error
     const errors = getErrorMessages(ws3)
-    expect(errors.some(e => e.code === 'countdown_in_progress')).toBe(true)
+    expect(errors.some((e) => e.code === 'countdown_in_progress')).toBe(true)
   })
 
   it('Unready during countdown cancels and allows re-ready', async () => {
     const roomCode = 'UNRDY1'
 
     // Initialize room
-    await gameRoom.fetch(new Request('https://internal/init', {
-      method: 'POST',
-      body: JSON.stringify({ roomCode }),
-    }))
+    await gameRoom.fetch(
+      new Request('https://internal/init', {
+        method: 'POST',
+        body: JSON.stringify({ roomCode }),
+      }),
+    )
 
     // Both players join and ready up
     const ws1 = createMockWebSocket()
@@ -432,7 +442,7 @@ describe('Integration: Player Creates Room, Another Player Joins', () => {
     await gameRoom.webSocketMessage(ws2 as any, JSON.stringify({ type: 'ready' }))
 
     // Verify countdown started
-    let state = JSON.parse(gameRoomCtx._sqlData['game_state'].data) as GameState
+    let state = JSON.parse(gameRoomCtx._sqlData.game_state.data) as GameState
     expect(state.status).toBe('countdown')
 
     // Player 1 unreadies
@@ -441,17 +451,17 @@ describe('Integration: Player Creates Room, Another Player Joins', () => {
     await gameRoom.webSocketMessage(ws1 as any, JSON.stringify({ type: 'unready' }))
 
     // Both should receive countdown_cancelled event
-    expect(getEventMessages(ws1).some(e => e.name === 'countdown_cancelled')).toBe(true)
-    expect(getEventMessages(ws2).some(e => e.name === 'countdown_cancelled')).toBe(true)
+    expect(getEventMessages(ws1).some((e) => e.name === 'countdown_cancelled')).toBe(true)
+    expect(getEventMessages(ws2).some((e) => e.name === 'countdown_cancelled')).toBe(true)
 
     // State should be back to waiting
-    state = JSON.parse(gameRoomCtx._sqlData['game_state'].data) as GameState
+    state = JSON.parse(gameRoomCtx._sqlData.game_state.data) as GameState
     expect(state.status).toBe('waiting')
 
     // Player 1 re-readies, then countdown should start again
     await gameRoom.webSocketMessage(ws1 as any, JSON.stringify({ type: 'ready' }))
 
-    state = JSON.parse(gameRoomCtx._sqlData['game_state'].data) as GameState
+    state = JSON.parse(gameRoomCtx._sqlData.game_state.data) as GameState
     expect(state.status).toBe('countdown')
   })
 })
@@ -468,7 +478,7 @@ describe('Integration: Two Players Invoke Matchmaking', () => {
   beforeEach(async () => {
     matchmakerState = createMockMatchmakerState()
     matchmaker = new Matchmaker(matchmakerState as any)
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await new Promise((resolve) => setTimeout(resolve, 0))
 
     gameRooms = new Map()
   })
@@ -494,19 +504,23 @@ describe('Integration: Two Players Invoke Matchmaking', () => {
     }
 
     const room = new GameRoom(ctx as any, env)
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await new Promise((resolve) => setTimeout(resolve, 0))
 
     // Initialize the room
-    await room.fetch(new Request('https://internal/init', {
-      method: 'POST',
-      body: JSON.stringify({ roomCode }),
-    }))
+    await room.fetch(
+      new Request('https://internal/init', {
+        method: 'POST',
+        body: JSON.stringify({ roomCode }),
+      }),
+    )
 
     // Register with matchmaker
-    await matchmaker.fetch(new Request('https://internal/register', {
-      method: 'POST',
-      body: JSON.stringify({ roomCode, playerCount: 0, status: 'waiting' }),
-    }))
+    await matchmaker.fetch(
+      new Request('https://internal/register', {
+        method: 'POST',
+        body: JSON.stringify({ roomCode, playerCount: 0, status: 'waiting' }),
+      }),
+    )
 
     const entry = { ctx, room }
     gameRooms.set(roomCode, entry)
@@ -516,7 +530,7 @@ describe('Integration: Two Players Invoke Matchmaking', () => {
   it('Player 1 matchmakes and creates room, Player 2 matchmakes and finds same room', async () => {
     // Step 1: Player 1 calls matchmake - no open rooms, creates new one
     const findResult1 = await matchmaker.fetch(new Request('https://internal/find'))
-    const { roomCode: existingRoom1 } = await findResult1.json() as { roomCode: string | null }
+    const { roomCode: existingRoom1 } = (await findResult1.json()) as { roomCode: string | null }
     expect(existingRoom1).toBeNull() // No rooms yet
 
     // Simulate creating a room for Player 1
@@ -529,14 +543,16 @@ describe('Integration: Two Players Invoke Matchmaking', () => {
     await room1.webSocketMessage(ws1 as any, JSON.stringify({ type: 'join', name: 'MatchPlayer1' }))
 
     // Update matchmaker with new player count
-    await matchmaker.fetch(new Request('https://internal/register', {
-      method: 'POST',
-      body: JSON.stringify({ roomCode: room1Code, playerCount: 1, status: 'waiting' }),
-    }))
+    await matchmaker.fetch(
+      new Request('https://internal/register', {
+        method: 'POST',
+        body: JSON.stringify({ roomCode: room1Code, playerCount: 1, status: 'waiting' }),
+      }),
+    )
 
     // Step 2: Player 2 calls matchmake - should find Player 1's room
     const findResult2 = await matchmaker.fetch(new Request('https://internal/find'))
-    const { roomCode: existingRoom2 } = await findResult2.json() as { roomCode: string | null }
+    const { roomCode: existingRoom2 } = (await findResult2.json()) as { roomCode: string | null }
 
     expect(existingRoom2).toBe(room1Code) // Should find Player 1's room
 
@@ -546,10 +562,10 @@ describe('Integration: Two Players Invoke Matchmaking', () => {
     await room1.webSocketMessage(ws2 as any, JSON.stringify({ type: 'join', name: 'MatchPlayer2' }))
 
     // Verify both players are in the same room
-    const state = JSON.parse(ctx1._sqlData['game_state'].data) as GameState
+    const state = JSON.parse(ctx1._sqlData.game_state.data) as GameState
     expect(Object.keys(state.players).length).toBe(2)
 
-    const playerNames = Object.values(state.players).map(p => p.name)
+    const playerNames = Object.values(state.players).map((p) => p.name)
     expect(playerNames).toContain('MatchPlayer1')
     expect(playerNames).toContain('MatchPlayer2')
   })
@@ -566,15 +582,17 @@ describe('Integration: Two Players Invoke Matchmaking', () => {
       await room.webSocketMessage(ws as any, JSON.stringify({ type: 'join', name: `Player${i}` }))
 
       // Update matchmaker
-      await matchmaker.fetch(new Request('https://internal/register', {
-        method: 'POST',
-        body: JSON.stringify({ roomCode, playerCount: i, status: 'waiting' }),
-      }))
+      await matchmaker.fetch(
+        new Request('https://internal/register', {
+          method: 'POST',
+          body: JSON.stringify({ roomCode, playerCount: i, status: 'waiting' }),
+        }),
+      )
     }
 
     // New player tries to matchmake - should NOT find full room
     const findResult = await matchmaker.fetch(new Request('https://internal/find'))
-    const { roomCode: foundRoom } = await findResult.json() as { roomCode: string | null }
+    const { roomCode: foundRoom } = (await findResult.json()) as { roomCode: string | null }
 
     expect(foundRoom).toBeNull() // Full room should not be returned
   })
@@ -593,24 +611,28 @@ describe('Integration: Two Players Invoke Matchmaking', () => {
     await room.webSocketMessage(ws2 as any, JSON.stringify({ type: 'join', name: 'Player2' }))
 
     // Update matchmaker with 2 players
-    await matchmaker.fetch(new Request('https://internal/register', {
-      method: 'POST',
-      body: JSON.stringify({ roomCode, playerCount: 2, status: 'waiting' }),
-    }))
+    await matchmaker.fetch(
+      new Request('https://internal/register', {
+        method: 'POST',
+        body: JSON.stringify({ roomCode, playerCount: 2, status: 'waiting' }),
+      }),
+    )
 
     // Both ready up - starts countdown
     await room.webSocketMessage(ws1 as any, JSON.stringify({ type: 'ready' }))
     await room.webSocketMessage(ws2 as any, JSON.stringify({ type: 'ready' }))
 
     // Update matchmaker with countdown status
-    await matchmaker.fetch(new Request('https://internal/register', {
-      method: 'POST',
-      body: JSON.stringify({ roomCode, playerCount: 2, status: 'countdown' }),
-    }))
+    await matchmaker.fetch(
+      new Request('https://internal/register', {
+        method: 'POST',
+        body: JSON.stringify({ roomCode, playerCount: 2, status: 'countdown' }),
+      }),
+    )
 
     // New player tries to matchmake - should NOT find room in countdown
     const findResult = await matchmaker.fetch(new Request('https://internal/find'))
-    const { roomCode: foundRoom } = await findResult.json() as { roomCode: string | null }
+    const { roomCode: foundRoom } = (await findResult.json()) as { roomCode: string | null }
 
     expect(foundRoom).toBeNull()
   })
@@ -624,15 +646,17 @@ describe('Integration: Two Players Invoke Matchmaking', () => {
     const ws1 = createMockWebSocket()
     ctx._webSockets.push(ws1)
     await room.webSocketMessage(ws1 as any, JSON.stringify({ type: 'join', name: 'Player1' }))
-    await matchmaker.fetch(new Request('https://internal/register', {
-      method: 'POST',
-      body: JSON.stringify({ roomCode, playerCount: 1, status: 'waiting' }),
-    }))
+    await matchmaker.fetch(
+      new Request('https://internal/register', {
+        method: 'POST',
+        body: JSON.stringify({ roomCode, playerCount: 1, status: 'waiting' }),
+      }),
+    )
 
     // Players 2, 3, 4 all matchmake - should all get same room
     for (let i = 2; i <= 4; i++) {
       const findResult = await matchmaker.fetch(new Request('https://internal/find'))
-      const { roomCode: foundRoom } = await findResult.json() as { roomCode: string | null }
+      const { roomCode: foundRoom } = (await findResult.json()) as { roomCode: string | null }
       expect(foundRoom).toBe(roomCode)
 
       // Join the room
@@ -641,19 +665,21 @@ describe('Integration: Two Players Invoke Matchmaking', () => {
       await room.webSocketMessage(ws as any, JSON.stringify({ type: 'join', name: `Player${i}` }))
 
       // Update matchmaker
-      await matchmaker.fetch(new Request('https://internal/register', {
-        method: 'POST',
-        body: JSON.stringify({ roomCode, playerCount: i, status: 'waiting' }),
-      }))
+      await matchmaker.fetch(
+        new Request('https://internal/register', {
+          method: 'POST',
+          body: JSON.stringify({ roomCode, playerCount: i, status: 'waiting' }),
+        }),
+      )
     }
 
     // Room should now be full
-    const state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+    const state = JSON.parse(ctx._sqlData.game_state.data) as GameState
     expect(Object.keys(state.players).length).toBe(4)
 
     // Player 5 matchmakes - should NOT find room (it's full)
     const findResult5 = await matchmaker.fetch(new Request('https://internal/find'))
-    const { roomCode: foundRoom5 } = await findResult5.json() as { roomCode: string | null }
+    const { roomCode: foundRoom5 } = (await findResult5.json()) as { roomCode: string | null }
     expect(foundRoom5).toBeNull()
   })
 
@@ -661,22 +687,22 @@ describe('Integration: Two Players Invoke Matchmaking', () => {
     // Manually add a stale room to matchmaker storage
     const staleTime = Date.now() - 10 * 60 * 1000 // 10 minutes ago
     matchmakerState._storage.set('rooms', {
-      'STALE1': { playerCount: 1, status: 'waiting', updatedAt: staleTime },
+      STALE1: { playerCount: 1, status: 'waiting', updatedAt: staleTime },
     })
 
     // Re-create matchmaker to load stale data
     matchmaker = new Matchmaker(matchmakerState as any)
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await new Promise((resolve) => setTimeout(resolve, 0))
 
     // Matchmake - should clean up stale room
     const findResult = await matchmaker.fetch(new Request('https://internal/find'))
-    const { roomCode: foundRoom } = await findResult.json() as { roomCode: string | null }
+    const { roomCode: foundRoom } = (await findResult.json()) as { roomCode: string | null }
 
     expect(foundRoom).toBeNull() // Stale room should be removed
 
     // Verify storage was cleaned
     const rooms = matchmakerState._storage.get('rooms') as Record<string, unknown>
-    expect(rooms['STALE1']).toBeUndefined()
+    expect(rooms.STALE1).toBeUndefined()
   })
 })
 
@@ -689,7 +715,7 @@ describe('Integration: Complete 4-Player Game Flow', () => {
     // Setup
     const matchmakerState = createMockMatchmakerState()
     const matchmaker = new Matchmaker(matchmakerState as any)
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await new Promise((resolve) => setTimeout(resolve, 0))
 
     const roomCode = 'FULL4P'
     const ctx = createMockDurableObjectContext()
@@ -707,19 +733,23 @@ describe('Integration: Complete 4-Player Game Flow', () => {
     }
 
     const gameRoom = new GameRoom(ctx as any, env)
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await new Promise((resolve) => setTimeout(resolve, 0))
 
     // Initialize room
-    await gameRoom.fetch(new Request('https://internal/init', {
-      method: 'POST',
-      body: JSON.stringify({ roomCode }),
-    }))
+    await gameRoom.fetch(
+      new Request('https://internal/init', {
+        method: 'POST',
+        body: JSON.stringify({ roomCode }),
+      }),
+    )
 
     // Register with matchmaker
-    await matchmaker.fetch(new Request('https://internal/register', {
-      method: 'POST',
-      body: JSON.stringify({ roomCode, playerCount: 0, status: 'waiting' }),
-    }))
+    await matchmaker.fetch(
+      new Request('https://internal/register', {
+        method: 'POST',
+        body: JSON.stringify({ roomCode, playerCount: 0, status: 'waiting' }),
+      }),
+    )
 
     // 4 players join
     const webSockets: MockWebSocket[] = []
@@ -733,19 +763,21 @@ describe('Integration: Complete 4-Player Game Flow', () => {
       await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'join', name: `Player${i}` }))
 
       const syncs = getSyncMessages(ws)
-      const joinSync = syncs.find(s => s.playerId)!
+      const joinSync = syncs.find((s) => s.playerId)!
       playerIds.push(joinSync.playerId!)
 
       // Update matchmaker
-      await matchmaker.fetch(new Request('https://internal/register', {
-        method: 'POST',
-        body: JSON.stringify({ roomCode, playerCount: i, status: 'waiting' }),
-      }))
+      await matchmaker.fetch(
+        new Request('https://internal/register', {
+          method: 'POST',
+          body: JSON.stringify({ roomCode, playerCount: i, status: 'waiting' }),
+        }),
+      )
     }
 
     // Verify all 4 players are assigned different slots
-    const state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
-    const slots = Object.values(state.players).map(p => p.slot)
+    const state = JSON.parse(ctx._sqlData.game_state.data) as GameState
+    const slots = Object.values(state.players).map((p) => p.slot)
     expect(slots.sort()).toEqual([1, 2, 3, 4])
 
     // All 4 players ready up
@@ -754,7 +786,7 @@ describe('Integration: Complete 4-Player Game Flow', () => {
     }
 
     // Verify countdown started
-    let gameState = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+    let gameState = JSON.parse(ctx._sqlData.game_state.data) as GameState
     expect(gameState.status).toBe('countdown')
 
     // Complete countdown
@@ -764,19 +796,19 @@ describe('Integration: Complete 4-Player Game Flow', () => {
     await completeWipePhases(gameRoom)
 
     // Verify game started with correct 4-player config
-    gameState = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+    gameState = JSON.parse(ctx._sqlData.game_state.data) as GameState
     expect(gameState.status).toBe('playing')
     expect(gameState.lives).toBe(5) // 4-player coop mode
     expect(gameState.mode).toBe('coop')
 
     // Verify correct alien formation for 4 players (13 cols x 6 rows = 78 aliens)
-    const aliens = gameState.entities.filter(e => e.kind === 'alien')
+    const aliens = gameState.entities.filter((e) => e.kind === 'alien')
     expect(aliens.length).toBe(78)
 
     // All players should have received game_start event
     for (const ws of webSockets) {
       const events = getEventMessages(ws)
-      expect(events.some(e => e.name === 'game_start')).toBe(true)
+      expect(events.some((e) => e.name === 'game_start')).toBe(true)
     }
   })
 })
@@ -805,12 +837,14 @@ describe('Integration: Edge Cases', () => {
     }
 
     gameRoom = new GameRoom(ctx as any, env)
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await new Promise((resolve) => setTimeout(resolve, 0))
 
-    await gameRoom.fetch(new Request('https://internal/init', {
-      method: 'POST',
-      body: JSON.stringify({ roomCode: 'EDGE01' }),
-    }))
+    await gameRoom.fetch(
+      new Request('https://internal/init', {
+        method: 'POST',
+        body: JSON.stringify({ roomCode: 'EDGE01' }),
+      }),
+    )
   })
 
   it('Same player cannot join twice', async () => {
@@ -826,7 +860,7 @@ describe('Integration: Edge Cases', () => {
 
     // Should receive error
     const errors = getErrorMessages(ws)
-    expect(errors.some(e => e.code === 'already_joined')).toBe(true)
+    expect(errors.some((e) => e.code === 'already_joined')).toBe(true)
   })
 
   it('5th player cannot join full room', async () => {
@@ -843,7 +877,7 @@ describe('Integration: Edge Cases', () => {
     await gameRoom.webSocketMessage(ws5 as any, JSON.stringify({ type: 'join', name: 'Player5' }))
 
     const errors = getErrorMessages(ws5)
-    expect(errors.some(e => e.code === 'room_full')).toBe(true)
+    expect(errors.some((e) => e.code === 'room_full')).toBe(true)
   })
 
   it('Player disconnect during game removes them but game continues', async () => {
@@ -868,7 +902,7 @@ describe('Integration: Edge Cases', () => {
     await gameRoom.webSocketClose(ws2 as any, 1000, 'Left', true)
 
     // Game should continue with Player 1
-    const state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+    const state = JSON.parse(ctx._sqlData.game_state.data) as GameState
     expect(state.status).toBe('playing')
     expect(Object.keys(state.players).length).toBe(1)
   })
@@ -884,14 +918,14 @@ describe('Integration: Edge Cases', () => {
     await completeWipePhases(gameRoom)
 
     // Verify game started
-    let state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+    let state = JSON.parse(ctx._sqlData.game_state.data) as GameState
     expect(state.status).toBe('playing')
 
     // Player disconnects
     await gameRoom.webSocketClose(ws as any, 1000, 'Left', true)
 
     // Game should end
-    state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+    state = JSON.parse(ctx._sqlData.game_state.data) as GameState
     expect(state.status).toBe('game_over')
   })
 
@@ -907,7 +941,7 @@ describe('Integration: Edge Cases', () => {
 
     // Should not crash - check no error for unknown types (they're just ignored)
     // The game should still be functional
-    const state = JSON.parse(ctx._sqlData['game_state'].data) as GameState
+    const state = JSON.parse(ctx._sqlData.game_state.data) as GameState
     expect(Object.keys(state.players).length).toBe(1)
   })
 
@@ -918,7 +952,7 @@ describe('Integration: Edge Cases', () => {
     await gameRoom.webSocketMessage(ws as any, 'not json at all')
 
     const errors = getErrorMessages(ws)
-    expect(errors.some(e => e.code === 'invalid_message')).toBe(true)
+    expect(errors.some((e) => e.code === 'invalid_message')).toBe(true)
   })
 })
 
@@ -952,7 +986,7 @@ describe('Worker: HTTP Endpoints', () => {
       const response = await worker.fetch(request, env)
 
       expect(response.status).toBe(200)
-      const data = await response.json() as {
+      const data = (await response.json()) as {
         status: string
         game: string
         version: string
@@ -1004,7 +1038,7 @@ describe('Worker: HTTP Endpoints', () => {
       const response = await worker.fetch(request, env)
 
       expect(response.status).toBe(404)
-      const data = await response.json() as { error: string }
+      const data = (await response.json()) as { error: string }
       expect(data.error).toBe('Room not found')
     })
   })

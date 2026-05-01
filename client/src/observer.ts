@@ -19,19 +19,19 @@ const colors = {
   dim: '\x1b[2m',
 
   // Message type colors
-  sync: '\x1b[36m',      // cyan
-  tick: '\x1b[90m',      // gray
-  event: '\x1b[33m',     // yellow
-  error: '\x1b[31m',     // red
-  status: '\x1b[35m',    // magenta
-  info: '\x1b[34m',      // blue
-  success: '\x1b[32m',   // green
+  sync: '\x1b[36m', // cyan
+  tick: '\x1b[90m', // gray
+  event: '\x1b[33m', // yellow
+  error: '\x1b[31m', // red
+  status: '\x1b[35m', // magenta
+  info: '\x1b[34m', // blue
+  success: '\x1b[32m', // green
 
   // Entity colors
-  alien: '\x1b[32m',     // green
-  bullet: '\x1b[33m',    // yellow
-  player: '\x1b[36m',    // cyan
-  barrier: '\x1b[90m',   // gray
+  alien: '\x1b[32m', // green
+  bullet: '\x1b[33m', // yellow
+  player: '\x1b[36m', // cyan
+  barrier: '\x1b[90m', // gray
 }
 
 // ─── CLI Argument Parsing ────────────────────────────────────────────────────
@@ -172,9 +172,7 @@ function formatWipeState(state: GameState): string {
 }
 
 function formatCompactState(state: GameState): string {
-  const parts: string[] = [
-    `status=${colors.bold}${state.status}${colors.reset}`,
-  ]
+  const parts: string[] = [`status=${colors.bold}${state.status}${colors.reset}`]
 
   // Add wipe state if applicable
   const wipeStr = formatWipeState(state)
@@ -230,7 +228,7 @@ function formatVerboseState(state: GameState): string {
   lines.push(`  entities: [ // ${state.entities.length} total`)
   for (const [kind, entities] of Object.entries(byKind)) {
     if (kind === 'alien') {
-      const entering = entities.filter(e => e.kind === 'alien' && e.entering).length
+      const entering = entities.filter((e) => e.kind === 'alien' && e.entering).length
       const enteringStr = entering > 0 ? ` (${entering} entering)` : ''
       lines.push(`    // ${kind}: ${entities.length}${enteringStr}`)
     } else {
@@ -273,10 +271,11 @@ function formatEvent(event: ServerEvent): string {
       return `${colors.success}score_awarded${colors.reset}: +${data.points} (${data.source}) to ${data.playerId ?? 'team'}`
     case 'wave_complete':
       return `${colors.success}${colors.bold}wave_complete${colors.reset}: wave ${data.wave}`
-    case 'game_over':
+    case 'game_over': {
       const result = data.result as string
       const resultColor = result === 'victory' ? colors.success : colors.error
       return `${resultColor}${colors.bold}game_over${colors.reset}: ${result}`
+    }
     case 'ufo_spawn':
       return `${colors.event}ufo_spawn${colors.reset}: x=${data.x}`
     default:
@@ -291,8 +290,8 @@ class Observer {
   private ws: WebSocket | null = null
   private roomCode: string | null = null
   private playerId: string | null = null
+  private rejoinToken: string | null = null
   private lastStatus: string | null = null
-  private connected = false
   private shouldReconnect = true
 
   constructor(options: ObserverOptions) {
@@ -311,7 +310,7 @@ class Observer {
       console.log(`${colors.dim}Creating new room...${colors.reset}`)
       try {
         const response = await fetch(`${this.options.serverUrl}/room`, { method: 'POST' })
-        const data = await response.json() as { roomCode: string }
+        const data = (await response.json()) as { roomCode: string }
         this.roomCode = data.roomCode
         console.log(`${colors.success}Room created: ${colors.bold}${this.roomCode}${colors.reset}`)
       } catch (err) {
@@ -320,10 +319,9 @@ class Observer {
       }
     }
 
-    const modeStr = [
-      this.options.verbose ? 'verbose' : 'compact',
-      this.options.solo ? 'solo' : null,
-    ].filter(Boolean).join(', ')
+    const modeStr = [this.options.verbose ? 'verbose' : 'compact', this.options.solo ? 'solo' : null]
+      .filter(Boolean)
+      .join(', ')
     console.log(`${colors.dim}Mode: ${modeStr}${colors.reset}`)
     console.log(`${colors.dim}Press Ctrl+C to exit${colors.reset}\n`)
     console.log(`${colors.dim}${'─'.repeat(80)}${colors.reset}\n`)
@@ -340,7 +338,8 @@ class Observer {
   }
 
   private connect() {
-    const wsUrl = `${this.options.serverUrl.replace('http', 'ws')}/room/${this.roomCode}/ws`
+    const baseWsUrl = `${this.options.serverUrl.replace('http', 'ws')}/room/${this.roomCode}/ws`
+    const wsUrl = this.rejoinToken ? `${baseWsUrl}?rejoin=1` : baseWsUrl
 
     console.log(`${colors.info}[${timestamp()}] CONNECTING${colors.reset} ${wsUrl}`)
 
@@ -348,11 +347,11 @@ class Observer {
       this.ws = new WebSocket(wsUrl)
 
       this.ws.onopen = () => {
-        this.connected = true
         console.log(`${colors.success}[${timestamp()}] CONNECTED${colors.reset}`)
 
-        // Send join message
-        this.send({ type: 'join', name: this.options.name })
+        // Rejoin after transient disconnects when possible, otherwise join fresh.
+        if (this.rejoinToken) this.send({ type: 'rejoin', token: this.rejoinToken })
+        else this.send({ type: 'join', name: this.options.name })
 
         // If solo mode, start solo game after a short delay to allow join to complete
         if (this.options.solo) {
@@ -368,7 +367,6 @@ class Observer {
       }
 
       this.ws.onclose = () => {
-        this.connected = false
         console.log(`${colors.error}[${timestamp()}] DISCONNECTED${colors.reset}`)
 
         if (this.shouldReconnect) {
@@ -377,7 +375,7 @@ class Observer {
         }
       }
 
-      this.ws.onerror = (err) => {
+      this.ws.onerror = (_err) => {
         console.error(`${colors.error}[${timestamp()}] WebSocket error${colors.reset}`)
       }
     } catch (err) {
@@ -408,6 +406,7 @@ class Observer {
 
       switch (msg.type) {
         case 'sync':
+          if (msg.rejoinToken) this.rejoinToken = msg.rejoinToken
           this.handleSync(msg.state, msg.playerId)
           break
         case 'event':
@@ -435,7 +434,9 @@ class Observer {
     const statusChanged = this.lastStatus !== null && this.lastStatus !== state.status
 
     if (statusChanged) {
-      console.log(`\n${colors.status}${colors.bold}>>> STATUS CHANGE: ${this.lastStatus} -> ${state.status}${colors.reset}`)
+      console.log(
+        `\n${colors.status}${colors.bold}>>> STATUS CHANGE: ${this.lastStatus} -> ${state.status}${colors.reset}`,
+      )
 
       if (this.options.verbose) {
         console.log(formatVerboseState(state))
@@ -454,30 +455,31 @@ class Observer {
       // Full sync output
       console.log(
         `${colors.sync}[${timestamp()}] SYNC${colors.reset} ` +
-        `roomCode=${state.roomCode} players=${playerCount} ` +
-        formatCompactState(state)
+          `roomCode=${state.roomCode} players=${playerCount} ` +
+          formatCompactState(state),
       )
     } else {
       // Tick output (compact)
       console.log(
         `${colors.tick}[${timestamp()}] TICK${colors.reset} ` +
-        `#${state.tick.toString().padStart(4)} ` +
-        formatCompactState(state)
+          `#${state.tick.toString().padStart(4)} ` +
+          formatCompactState(state),
       )
     }
   }
 
   private handleEvent(event: ServerEvent) {
-    console.log(
-      `${colors.event}[${timestamp()}] EVENT${colors.reset} ` +
-      formatEvent(event)
-    )
+    console.log(`${colors.event}[${timestamp()}] EVENT${colors.reset} ${formatEvent(event)}`)
   }
 
   private handleError(code: string, message: string) {
+    if (code === 'invalid_rejoin') {
+      this.rejoinToken = null
+      this.send({ type: 'join', name: this.options.name })
+      return
+    }
     console.log(
-      `${colors.error}[${timestamp()}] ERROR${colors.reset} ` +
-      `${colors.bold}${code}${colors.reset}: ${message}`
+      `${colors.error}[${timestamp()}] ERROR${colors.reset} ` + `${colors.bold}${code}${colors.reset}: ${message}`,
     )
   }
 }

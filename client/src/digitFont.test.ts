@@ -1,14 +1,7 @@
 // client/src/digitFont.test.ts
 
 import { describe, test, expect } from 'bun:test'
-import {
-  DIGIT_FONT,
-  DIGIT_FONT_ASCII,
-  DIGIT_WIDTH,
-  DIGIT_HEIGHT,
-  DIGIT_GAP,
-  composeDigits,
-} from './digitFont'
+import { DIGIT_FONT, DIGIT_FONT_ASCII, DIGIT_WIDTH, DIGIT_HEIGHT, DIGIT_GAP, composeDigits } from './digitFont'
 
 // ─── Font Data ──────────────────────────────────────────────────────────────
 
@@ -134,21 +127,21 @@ describe('composeDigits', () => {
   })
 
   test('NaN input produces digit 0', () => {
-    const result = composeDigits(NaN)
+    const result = composeDigits(Number.NaN)
     const expected = composeDigits(0)
     expect(result.text).toBe(expected.text)
     expect(result.width).toBe(DIGIT_WIDTH)
   })
 
   test('Infinity input produces digit 0', () => {
-    const result = composeDigits(Infinity)
+    const result = composeDigits(Number.POSITIVE_INFINITY)
     const expected = composeDigits(0)
     expect(result.text).toBe(expected.text)
     expect(result.width).toBe(DIGIT_WIDTH)
   })
 
   test('negative Infinity input produces digit 0', () => {
-    const result = composeDigits(-Infinity)
+    const result = composeDigits(Number.NEGATIVE_INFINITY)
     const expected = composeDigits(0)
     expect(result.text).toBe(expected.text)
     expect(result.width).toBe(DIGIT_WIDTH)

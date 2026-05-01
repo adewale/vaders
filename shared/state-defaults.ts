@@ -33,11 +33,7 @@ export const ALL_GAME_STATUSES: readonly GameStatus[] = [
 // Type-level assertion: ALL_GAME_STATUSES must contain exactly all GameStatus values
 // If this line has a type error, the array is out of sync with the type
 type StatusArrayType = (typeof ALL_GAME_STATUSES)[number]
-type StatusesMatch = StatusArrayType extends GameStatus
-  ? GameStatus extends StatusArrayType
-    ? true
-    : never
-  : never
+type StatusesMatch = StatusArrayType extends GameStatus ? (GameStatus extends StatusArrayType ? true : never) : never
 const _typeCheckStatuses: StatusesMatch = true
 
 /**

@@ -9,12 +9,8 @@
 // Screen is 120×36 cells (columns × rows)
 
 interface Position {
-  x: number  // Top-left x coordinate
-  y: number  // Top-left y coordinate
-}
-
-interface GameEntity extends Position {
-  id: string  // Monotonic string ID: "e_1", "e_2", etc.
+  x: number // Top-left x coordinate
+  y: number // Top-left y coordinate
 }
 
 // ─── Layout Constants ─────────────────────────────────────────────────────────
@@ -25,34 +21,34 @@ export const STANDARD_HEIGHT = 36
 
 /** Layout constants for the 120×36 game grid */
 export const LAYOUT = {
-  PLAYER_Y: 31,              // Y position for player ships (5 rows from bottom)
-  PLAYER_MIN_X: 3,           // Left boundary for player movement (center-based: left edge = 3-3 = 0)
-  PLAYER_MAX_X: 112,         // Right boundary for player movement (120 - 7 - 1)
-  PLAYER_WIDTH: 7,           // Width of player sprite (2-line braille sprite)
-  PLAYER_HEIGHT: 2,          // Height of player sprite
-  BULLET_SPAWN_OFFSET: 2,    // Bullet spawns this far above player
-  BARRIER_Y: 25,             // Y position for barrier row
-  ALIEN_START_Y: 3,          // Initial Y position for top alien row
-  ALIEN_COL_SPACING: 9,      // Horizontal spacing between alien columns (7-char sprites + 2 gap)
-  ALIEN_ROW_SPACING: 3,      // Vertical spacing between alien rows (for 2-line sprites)
-  ALIEN_MIN_X: 2,            // Left boundary for alien movement
-  ALIEN_MAX_X: 112,          // Right boundary for alien movement (120 - 7 - 1)
-  ALIEN_WIDTH: 7,            // Width of alien sprite
-  ALIEN_HEIGHT: 2,           // Height of alien sprite
-  GAME_OVER_Y: 28,           // If aliens reach this Y, game over
-  COLLISION_H: 4,            // Horizontal collision threshold (for 7-wide sprites)
-  COLLISION_V: 2,            // Vertical collision threshold (for 2-tall sprites)
+  PLAYER_Y: 31, // Y position for player ships (5 rows from bottom)
+  PLAYER_MIN_X: 3, // Left boundary for player movement (center-based: left edge = 3-3 = 0)
+  PLAYER_MAX_X: 112, // Right boundary for player movement (120 - 7 - 1)
+  PLAYER_WIDTH: 7, // Width of player sprite (2-line braille sprite)
+  PLAYER_HEIGHT: 2, // Height of player sprite
+  BULLET_SPAWN_OFFSET: 2, // Bullet spawns this far above player
+  BARRIER_Y: 25, // Y position for barrier row
+  ALIEN_START_Y: 3, // Initial Y position for top alien row
+  ALIEN_COL_SPACING: 9, // Horizontal spacing between alien columns (7-char sprites + 2 gap)
+  ALIEN_ROW_SPACING: 3, // Vertical spacing between alien rows (for 2-line sprites)
+  ALIEN_MIN_X: 2, // Left boundary for alien movement
+  ALIEN_MAX_X: 112, // Right boundary for alien movement (120 - 7 - 1)
+  ALIEN_WIDTH: 7, // Width of alien sprite
+  ALIEN_HEIGHT: 2, // Height of alien sprite
+  GAME_OVER_Y: 28, // If aliens reach this Y, game over
+  COLLISION_H: 4, // Horizontal collision threshold (for 7-wide sprites)
+  COLLISION_V: 2, // Vertical collision threshold (for 2-tall sprites)
 } as const
 
 // ─── Hitbox Constants ────────────────────────────────────────────────────────
 // These match the visual sprite sizes for accurate collision detection
 
 export const HITBOX = {
-  PLAYER_HALF_WIDTH: 3,      // Player.x is center, sprite width 7, so half is 3
-  ALIEN_WIDTH: 7,            // Left-edge based, full sprite width
-  ALIEN_HEIGHT: 2,           // Full sprite height (used in alien-barrier collision)
-  UFO_WIDTH: 7,              // Left-edge based, full sprite width
-  BARRIER_SEGMENT_WIDTH: 3,  // Each segment is 3 braille chars wide
+  PLAYER_HALF_WIDTH: 3, // Player.x is center, sprite width 7, so half is 3
+  ALIEN_WIDTH: 7, // Left-edge based, full sprite width
+  ALIEN_HEIGHT: 2, // Full sprite height (used in alien-barrier collision)
+  UFO_WIDTH: 7, // Left-edge based, full sprite width
+  BARRIER_SEGMENT_WIDTH: 3, // Each segment is 3 braille chars wide
   BARRIER_SEGMENT_HEIGHT: 2, // Each segment is 2 rows tall
 } as const
 
@@ -71,17 +67,17 @@ export const PLAYER_COLORS: Record<PlayerSlot, PlayerColor> = {
 export interface Player {
   id: string
   name: string
-  x: number                         // Horizontal position CENTER of sprite (y is always LAYOUT.PLAYER_Y)
+  x: number // Horizontal position CENTER of sprite (y is always LAYOUT.PLAYER_Y)
   slot: PlayerSlot
   color: PlayerColor
-  lastShotTick: number              // Tick of last shot (for cooldown)
+  lastShotTick: number // Tick of last shot (for cooldown)
   alive: boolean
-  lives: number                     // CANONICAL per-player life counter: decremented on death in
-                                    // the reducer, controls respawn (player respawns if lives > 0).
-                                    // Game ends when ALL players have lives <= 0 and are dead.
-                                    // Default: 3. See also GameState.lives (display-only).
-  respawnAtTick: number | null      // Tick to respawn after death
-  invulnerableUntilTick: number | null  // Tick until which player is invulnerable (after respawn)
+  lives: number // CANONICAL per-player life counter: decremented on death in
+  // the reducer, controls respawn (player respawns if lives > 0).
+  // Game ends when ALL players have lives <= 0 and are dead.
+  // Default: 3. See also GameState.lives (display-only).
+  respawnAtTick: number | null // Tick to respawn after death
+  invulnerableUntilTick: number | null // Tick until which player is invulnerable (after respawn)
   kills: number
   // Heartbeat: tick of the last inbound message from this player's WS.
   // Refreshed on every webSocketMessage. Server reaps players whose
@@ -91,7 +87,7 @@ export interface Player {
   // across eviction). `null` means "unknown" (e.g. migrated from a
   // pre-heartbeat persisted state) and is lazily initialised on first
   // observation.
-  lastActiveTick: number | null
+  lastActiveTick?: number | null
 
   // Input state (server-authoritative, updated from client input messages)
   inputState: {
@@ -107,8 +103,8 @@ export type ClassicAlienType = 'squid' | 'crab' | 'octopus'
 // ─── Alien Registry ──────────────────────────────────────────────────────────
 
 export const ALIEN_REGISTRY = {
-  squid:   { points: 30, sprite: '╔═╗', color: 'red' },
-  crab:    { points: 20, sprite: '/°\\', color: 'orange' },
+  squid: { points: 30, sprite: '╔═╗', color: 'red' },
+  crab: { points: 20, sprite: '/°\\', color: 'orange' },
   octopus: { points: 10, sprite: '{ö}', color: 'green' },
 } as const
 
@@ -119,55 +115,51 @@ const FORMATION_ROWS: ClassicAlienType[] = ['squid', 'crab', 'crab', 'octopus', 
 export interface AlienEntity {
   kind: 'alien'
   id: string
-  x: number  // LEFT EDGE of sprite (unlike Player which uses CENTER)
+  x: number // LEFT EDGE of sprite (unlike Player which uses CENTER)
   y: number
   type: ClassicAlienType
   alive: boolean
   row: number
   col: number
   points: number
-  entering: boolean  // True during wipe_reveal phase, prevents shooting
+  entering: boolean // True during wipe_reveal phase, prevents shooting
 }
 
 export interface BulletEntity {
   kind: 'bullet'
   id: string
-  x: number  // CENTER of bullet (spawns from center of player/alien)
+  x: number // CENTER of bullet (spawns from center of player/alien)
   y: number
-  ownerId: string | null  // null = alien bullet
-  dy: -1 | 1              // -1 = up (player), 1 = down (alien)
+  ownerId: string | null // null = alien bullet
+  dy: -1 | 1 // -1 = up (player), 1 = down (alien)
 }
 
 export interface BarrierSegment {
   offsetX: number
   offsetY: number
-  health: 0 | 1 | 2 | 3 | 4  // 4=full → 3 → 2 → 1 → 0=destroyed
-                              // Visual: █(4) → ▓(3) → ▒(2) → ░(1) → gone(0)
+  health: 0 | 1 | 2 | 3 | 4 // 4=full → 3 → 2 → 1 → 0=destroyed
+  // Visual: █(4) → ▓(3) → ▒(2) → ░(1) → gone(0)
 }
 
 export interface BarrierEntity {
   kind: 'barrier'
   id: string
-  x: number  // LEFT EDGE of barrier (unlike Player which uses CENTER)
+  x: number // LEFT EDGE of barrier (unlike Player which uses CENTER)
   segments: BarrierSegment[]
 }
 
 export interface UFOEntity {
   kind: 'ufo'
   id: string
-  x: number  // LEFT EDGE of sprite (unlike Player which uses CENTER)
-  y: number  // Always 1 (top row)
-  direction: 1 | -1  // 1 = right, -1 = left
+  x: number // LEFT EDGE of sprite (unlike Player which uses CENTER)
+  y: number // Always 1 (top row)
+  direction: 1 | -1 // 1 = right, -1 = left
   alive: boolean
-  points: number     // 50-300 (mystery score)
+  points: number // 50-300 (mystery score)
 }
 
 // Unified entity type for all game objects
-export type Entity =
-  | AlienEntity
-  | BulletEntity
-  | BarrierEntity
-  | UFOEntity
+export type Entity = AlienEntity | BulletEntity | BarrierEntity | UFOEntity
 
 // ─── Entity Filter Helpers ────────────────────────────────────────────────────
 
@@ -198,11 +190,7 @@ export function getUFOs(entities: Entity[]): UFOEntity[] {
  * @param speed - Movement speed in cells
  * @returns New X position constrained to [PLAYER_MIN_X, PLAYER_MAX_X]
  */
-export function constrainPlayerX(
-  currentX: number,
-  direction: 'left' | 'right',
-  speed: number
-): number {
+export function constrainPlayerX(currentX: number, direction: 'left' | 'right', speed: number): number {
   if (direction === 'left') {
     return Math.max(LAYOUT.PLAYER_MIN_X, currentX - speed)
   }
@@ -218,11 +206,7 @@ export function constrainPlayerX(
  * @param speed - Movement speed in cells
  * @returns New X position
  */
-export function applyPlayerInput(
-  currentX: number,
-  input: { left: boolean; right: boolean },
-  speed: number
-): number {
+export function applyPlayerInput(currentX: number, input: { left: boolean; right: boolean }, speed: number): number {
   let x = currentX
   if (input.left) {
     x = Math.max(LAYOUT.PLAYER_MIN_X, x - speed)
@@ -243,9 +227,11 @@ export function applyPlayerInput(
  * Y uses tolerance (COLLISION_V=2) to account for bullet movement.
  */
 export function checkPlayerHit(bX: number, bY: number, pX: number, pY: number): boolean {
-  return bX >= pX - HITBOX.PLAYER_HALF_WIDTH &&
-         bX < pX + HITBOX.PLAYER_HALF_WIDTH + 1 &&
-         Math.abs(bY - pY) < LAYOUT.COLLISION_V  // Keep Y tolerance for bullet movement
+  return (
+    bX >= pX - HITBOX.PLAYER_HALF_WIDTH &&
+    bX < pX + HITBOX.PLAYER_HALF_WIDTH + 1 &&
+    Math.abs(bY - pY) < LAYOUT.COLLISION_V
+  ) // Keep Y tolerance for bullet movement
 }
 
 /**
@@ -254,8 +240,7 @@ export function checkPlayerHit(bX: number, bY: number, pX: number, pY: number): 
  * Y uses tolerance (COLLISION_V=2) to account for bullet movement.
  */
 export function checkAlienHit(bX: number, bY: number, aX: number, aY: number): boolean {
-  return bX >= aX && bX < aX + HITBOX.ALIEN_WIDTH &&
-         Math.abs(bY - aY) < LAYOUT.COLLISION_V  // Keep Y tolerance for bullet movement
+  return bX >= aX && bX < aX + HITBOX.ALIEN_WIDTH && Math.abs(bY - aY) < LAYOUT.COLLISION_V // Keep Y tolerance for bullet movement
 }
 
 /**
@@ -264,8 +249,7 @@ export function checkAlienHit(bX: number, bY: number, aX: number, aY: number): b
  * Y uses tolerance (COLLISION_V=2) to account for bullet movement.
  */
 export function checkUfoHit(bX: number, bY: number, uX: number, uY: number): boolean {
-  return bX >= uX && bX < uX + HITBOX.UFO_WIDTH &&
-         Math.abs(bY - uY) < LAYOUT.COLLISION_V  // Keep Y tolerance for bullet movement
+  return bX >= uX && bX < uX + HITBOX.UFO_WIDTH && Math.abs(bY - uY) < LAYOUT.COLLISION_V // Keep Y tolerance for bullet movement
 }
 
 /**
@@ -274,8 +258,9 @@ export function checkUfoHit(bX: number, bY: number, uX: number, uY: number): boo
  * Uses point collision (< 1 tolerance) for precise barrier hits.
  */
 export function checkBarrierSegmentHit(bX: number, bY: number, segX: number, segY: number): boolean {
-  return bX >= segX && bX < segX + HITBOX.BARRIER_SEGMENT_WIDTH &&
-         bY >= segY && bY < segY + HITBOX.BARRIER_SEGMENT_HEIGHT
+  return (
+    bX >= segX && bX < segX + HITBOX.BARRIER_SEGMENT_WIDTH && bY >= segY && bY < segY + HITBOX.BARRIER_SEGMENT_HEIGHT
+  )
 }
 
 // ─── Game Constants ──────────────────────────────────────────────────────────
@@ -307,44 +292,44 @@ export const COUNTDOWN_SECONDS = 1
 // ─── Game Config ──────────────────────────────────────────────────────────────
 
 export interface GameConfig {
-  width: number                        // Default: 120
-  height: number                       // Default: 36
-  maxPlayers: number                   // Default: 4
-  tickIntervalMs: number               // Default: 33 (~30Hz tick rate)
+  width: number // Default: 120
+  height: number // Default: 36
+  maxPlayers: number // Default: 4
+  tickIntervalMs: number // Default: 33 (~30Hz tick rate)
 
   // Tick-based timing (game loop)
-  baseAlienMoveIntervalTicks: number   // Ticks between alien moves
-  baseBulletSpeed: number              // Cells per tick
-  baseAlienShootRate: number           // Probability per tick (use getScaledConfig)
-  playerCooldownTicks: number          // Ticks between shots
-  playerMoveSpeed: number              // Cells per tick when holding move key
-  respawnDelayTicks: number            // Ticks until respawn (30 = 1s at 30Hz)
-  invulnerabilityTicks: number         // Ticks of invulnerability after respawn (15 = 0.5s at 30Hz)
+  baseAlienMoveIntervalTicks: number // Ticks between alien moves
+  baseBulletSpeed: number // Cells per tick
+  baseAlienShootRate: number // Probability per tick (use getScaledConfig)
+  playerCooldownTicks: number // Ticks between shots
+  playerMoveSpeed: number // Cells per tick when holding move key
+  respawnDelayTicks: number // Ticks until respawn (30 = 1s at 30Hz)
+  invulnerabilityTicks: number // Ticks of invulnerability after respawn (15 = 0.5s at 30Hz)
 }
 
 export const DEFAULT_CONFIG: GameConfig = {
-  width: STANDARD_WIDTH,               // 120 (standard size)
-  height: STANDARD_HEIGHT,             // 36 (standard size)
+  width: STANDARD_WIDTH, // 120 (standard size)
+  height: STANDARD_HEIGHT, // 36 (standard size)
   maxPlayers: 4,
-  tickIntervalMs: 33,                  // ~30Hz server tick
+  tickIntervalMs: 33, // ~30Hz server tick
 
   // Tick-based timing
-  baseAlienMoveIntervalTicks: 18,      // Move every 18 ticks (20% slower than 15)
-  baseBulletSpeed: 1,                  // 1 cell per tick (player bullets)
-  baseAlienShootRate: 0.016,           // 20% slower shooting (was 0.02)
-  playerCooldownTicks: 6,              // ~200ms between shots
-  playerMoveSpeed: 1,                  // 1 cell per tick when holding key (Space Invaders style)
-  respawnDelayTicks: 30,               // 1 second at 30Hz
-  invulnerabilityTicks: 15,            // 0.5 seconds at 30Hz
+  baseAlienMoveIntervalTicks: 18, // Move every 18 ticks (20% slower than 15)
+  baseBulletSpeed: 1, // 1 cell per tick (player bullets)
+  baseAlienShootRate: 0.016, // 20% slower shooting (was 0.02)
+  playerCooldownTicks: 6, // ~200ms between shots
+  playerMoveSpeed: 1, // 1 cell per tick when holding key (Space Invaders style)
+  respawnDelayTicks: 30, // 1 second at 30Hz
+  invulnerabilityTicks: 15, // 0.5 seconds at 30Hz
 }
 
 /** Return type of getScaledConfig() - player-count-scaled game parameters */
 export interface ScaledConfig {
-  alienMoveIntervalTicks: number    // Ticks between alien moves (scaled from base)
-  alienShootProbability: number     // Probability per tick (~0.017 to 0.042)
-  alienCols: number                 // Grid columns (11-15 based on player count)
-  alienRows: number                 // Grid rows (5-6 based on player count)
-  lives: number                     // Shared lives (3 solo, 5 coop)
+  alienMoveIntervalTicks: number // Ticks between alien moves (scaled from base)
+  alienShootProbability: number // Probability per tick (~0.017 to 0.042)
+  alienCols: number // Grid columns (11-15 based on player count)
+  alienRows: number // Grid rows (5-6 based on player count)
+  lives: number // Shared lives (3 solo, 5 coop)
 }
 
 /** Event names that can be emitted during gameplay (matches ServerEvent.name) */
@@ -370,37 +355,37 @@ export type GameEvent =
 export type GameStatus = 'waiting' | 'countdown' | 'wipe_exit' | 'wipe_hold' | 'wipe_reveal' | 'playing' | 'game_over'
 
 export interface GameState {
-  roomCode: string                  // 6-char base36 (0-9, A-Z) user-visible room code
+  roomCode: string // 6-char base36 (0-9, A-Z) user-visible room code
   mode: 'solo' | 'coop'
   status: GameStatus
   tick: number
-  rngSeed: number                   // Seeded RNG state for determinism
+  rngSeed: number // Seeded RNG state for determinism
 
   // Countdown state (only valid when status === 'countdown')
-  countdownRemaining: number | null  // 3, 2, 1, or null
+  countdownRemaining: number | null // 3, 2, 1, or null
 
   players: Record<string, Player>
-  readyPlayerIds: string[]          // Array for JSON serialization
+  readyPlayerIds: string[] // Array for JSON serialization
 
   // All game entities in a single array with discriminated union
   entities: Entity[]
 
   wave: number
-  maxLives: number                  // Maximum lives per player (3 solo, 5 co-op). Set at game
-                                    // start from ScaledConfig.lives. Never changes during gameplay.
-                                    // Used by client to render empty heart indicators.
-  lives: number                     // Display/initial value only (3 solo, 5 co-op). Set at game
-                                    // start from ScaledConfig.lives and on invasion (set to 0).
-                                    // NOT decremented on player death — the reducer decrements
-                                    // Player.lives instead. Used by GameRoom.endGame() to
-                                    // distinguish victory vs defeat. TODO: consider removing this
-                                    // in favor of deriving from Player.lives to avoid ambiguity.
+  maxLives: number // Maximum lives per player (3 solo, 5 co-op). Set at game
+  // start from ScaledConfig.lives. Never changes during gameplay.
+  // Used by client to render empty heart indicators.
+  lives: number // Display/initial value only (3 solo, 5 co-op). Set at game
+  // start from ScaledConfig.lives and on invasion (set to 0).
+  // NOT decremented on player death — the reducer decrements
+  // Player.lives instead. Used by GameRoom.endGame() to
+  // distinguish victory vs defeat. TODO: consider removing this
+  // in favor of deriving from Player.lives to avoid ambiguity.
   score: number
   alienDirection: 1 | -1
 
   // Wipe state: server-controlled transition timing
-  wipeTicksRemaining: number | null  // Countdown for current wipe phase
-  wipeWaveNumber: number | null      // Wave number to display during wipe
+  wipeTicksRemaining: number | null // Countdown for current wipe phase
+  wipeWaveNumber: number | null // Wave number to display during wipe
 
   // Debug flag: completely disable alien shooting
   alienShootingDisabled: boolean
@@ -425,8 +410,8 @@ export const WIPE_TIMING = {
 
 /** Canonical barrier shape - arch with gap in center bottom */
 const BARRIER_SHAPE = [
-  [1, 1, 1, 1, 1],  // Top row: solid
-  [1, 1, 0, 1, 1],  // Bottom row: gap in center (arch)
+  [1, 1, 1, 1, 1], // Top row: solid
+  [1, 1, 0, 1, 1], // Bottom row: gap in center (arch)
 ] as const
 
 /**
@@ -461,7 +446,7 @@ export function createAlienFormation(
   cols: number,
   rows: number,
   screenWidth: number = STANDARD_WIDTH,
-  idGenerator?: () => string
+  idGenerator?: () => string,
 ): AlienEntity[] {
   const aliens: AlienEntity[] = []
   // Calculate grid width using sprite width
@@ -498,7 +483,8 @@ export function createAlienFormation(
  * Mutates state.rngSeed and returns value in [0, 1)
  */
 export function seededRandom(state: GameState): number {
-  let t = (state.rngSeed += 0x6d2b79f5)
+  state.rngSeed += 0x6d2b79f5
+  let t = state.rngSeed
   t = Math.imul(t ^ (t >>> 15), t | 1)
   t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
   state.rngSeed = t

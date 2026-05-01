@@ -55,9 +55,7 @@ describe('ControlsCheatsheet', () => {
     expect(gameSection).toBeDefined()
     // Collect all rows inside the GAME section only.
     const gameTable = gameSection!.parentElement!.querySelector('table')!
-    const keyCells = Array.from(gameTable.querySelectorAll('td:first-child')).map(
-      (td) => td.textContent?.trim(),
-    )
+    const keyCells = Array.from(gameTable.querySelectorAll('td:first-child')).map((td) => td.textContent?.trim())
     // ENTER must not appear as a GAME action.
     expect(keyCells).not.toContain('ENTER')
   })
@@ -71,9 +69,7 @@ describe('ControlsCheatsheet', () => {
     render(<ControlsCheatsheet />)
     fireEvent.keyDown(window, { key: '?' })
     const root = screen.getByTestId('controls-cheatsheet')
-    const allCellText = Array.from(root.querySelectorAll('td')).map(
-      (td) => td.textContent?.trim() ?? '',
-    )
+    const allCellText = Array.from(root.querySelectorAll('td')).map((td) => td.textContent?.trim() ?? '')
     // Both labels should be present somewhere in the modal.
     expect(allCellText.some((t) => /forfeit/i.test(t))).toBe(true)
     expect(allCellText.some((t) => /share score/i.test(t))).toBe(true)

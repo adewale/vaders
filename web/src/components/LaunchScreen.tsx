@@ -217,21 +217,25 @@ export function LaunchScreen({
           activateIndex(selectedIndex)
           return
         case '1':
+          e.preventDefault()
           onMenuSound?.('select')
           setSelectedIndex(0)
           onStartSolo()
           break
         case '2':
+          e.preventDefault()
           onMenuSound?.('select')
           setSelectedIndex(1)
           onCreateRoom()
           break
         case '3':
+          e.preventDefault()
           onMenuSound?.('select')
           setSelectedIndex(2)
           enterJoinMode()
           break
         case '4':
+          e.preventDefault()
           onMenuSound?.('select')
           setSelectedIndex(3)
           onMatchmake()
@@ -388,7 +392,6 @@ export function LaunchScreen({
                 onChange={handleRoomChange}
                 onPaste={handleRoomPaste}
                 maxLength={6}
-                autoFocus
                 style={{
                   background: 'rgba(0, 0, 0, 0.65)',
                   color: COLORS.ui.success,
@@ -524,7 +527,6 @@ function MenuItem({
       className="vaders-menu-item"
       data-testid="menu-item"
       data-selected={selected ? 'true' : 'false'}
-      aria-selected={selected}
       onClick={onClick}
       style={selected ? SELECTED_STYLE : undefined}
     >

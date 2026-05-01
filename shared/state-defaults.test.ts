@@ -2,17 +2,12 @@
 // Tests for the single source of truth for GameState defaults
 
 import { describe, it, expect } from 'bun:test'
-import {
-  GAME_STATE_DEFAULTS,
-  createDefaultGameState,
-  migrateGameState,
-  validateGameState,
-} from './state-defaults'
-import { DEFAULT_CONFIG, type GameState } from './types'
+import { GAME_STATE_DEFAULTS, createDefaultGameState, migrateGameState, validateGameState } from './state-defaults'
+import { DEFAULT_CONFIG } from './types'
 
 describe('GAME_STATE_DEFAULTS', () => {
   it('has no undefined values', () => {
-    for (const [key, value] of Object.entries(GAME_STATE_DEFAULTS)) {
+    for (const [_key, value] of Object.entries(GAME_STATE_DEFAULTS)) {
       expect(value).not.toBeUndefined()
     }
   })
@@ -87,7 +82,7 @@ describe('createDefaultGameState', () => {
     const state2 = createDefaultGameState('ROOM2')
 
     // Modify state1
-    state1.players['p1'] = { id: 'p1' } as any
+    state1.players.p1 = { id: 'p1' } as any
     state1.entities.push({ kind: 'bullet' } as any)
 
     // state2 should be unaffected
@@ -174,7 +169,7 @@ describe('validateGameState', () => {
     const incomplete = { roomCode: 'BAD' }
     const issues = validateGameState(incomplete)
     expect(issues.length).toBeGreaterThan(0)
-    expect(issues.some(i => i.includes('Missing field'))).toBe(true)
+    expect(issues.some((i) => i.includes('Missing field'))).toBe(true)
   })
 
   it('detects undefined fields', () => {
@@ -196,7 +191,7 @@ describe('validateGameState', () => {
   it('checks all 18 required fields', () => {
     const issues = validateGameState({})
     // Should have 18 missing field errors (including roomCode and maxLives)
-    expect(issues.filter(i => i.includes('Missing field')).length).toBe(18)
+    expect(issues.filter((i) => i.includes('Missing field')).length).toBe(18)
   })
 })
 

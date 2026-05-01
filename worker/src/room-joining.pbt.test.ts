@@ -72,18 +72,18 @@ function createMockDurableObjectContext() {
         exec: vi.fn((query: string, ...params: unknown[]) => {
           if (query.includes('CREATE TABLE')) return { toArray: () => [] }
           if (query.includes('SELECT')) {
-            if (sqlData['game_state']) return { toArray: () => [sqlData['game_state']] }
+            if (sqlData.game_state) return { toArray: () => [sqlData.game_state] }
             return { toArray: () => [] }
           }
           if (query.includes('INSERT OR REPLACE')) {
-            sqlData['game_state'] = {
+            sqlData.game_state = {
               data: params[0] as string,
               next_entity_id: params[1] as number,
             }
             return { toArray: () => [] }
           }
           if (query.includes('DELETE')) {
-            delete sqlData['game_state']
+            sqlData.game_state = undefined
             return { toArray: () => [] }
           }
           return { toArray: () => [] }
@@ -102,7 +102,7 @@ function createMockDurableObjectContext() {
     acceptWebSocket: vi.fn((ws: MockWebSocket) => {
       webSockets.push(ws)
     }),
-    getWebSockets: vi.fn(() => webSockets.filter(ws => !ws._closed)),
+    getWebSockets: vi.fn(() => webSockets.filter((ws) => !ws._closed)),
     _sqlData: sqlData,
     _webSockets: webSockets,
     _alarm: () => alarm,
@@ -171,16 +171,20 @@ class RoomJoiningHarness {
       ASSETS: undefined as any,
     }
     const room = new GameRoom(ctx as unknown as DurableObjectState, env)
-    await new Promise(resolve => setTimeout(resolve, 0))
-    await room.fetch(new Request('https://internal/init', {
-      method: 'POST',
-      body: JSON.stringify({ roomCode }),
-    }))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await room.fetch(
+      new Request('https://internal/init', {
+        method: 'POST',
+        body: JSON.stringify({ roomCode }),
+      }),
+    )
     // Register with matchmaker (mirrors the Worker /room endpoint path).
-    await this.matchmaker.fetch(new Request('https://internal/register', {
-      method: 'POST',
-      body: JSON.stringify({ roomCode, playerCount: 0, status: 'waiting' }),
-    }))
+    await this.matchmaker.fetch(
+      new Request('https://internal/register', {
+        method: 'POST',
+        body: JSON.stringify({ roomCode, playerCount: 0, status: 'waiting' }),
+      }),
+    )
 
     const entry = { ctx, room }
     this.rooms.set(roomCode, entry)
@@ -203,10 +207,7 @@ class RoomJoiningHarness {
 
     const ws = createMockWebSocket()
     entry.ctx._webSockets.push(ws)
-    await entry.room.webSocketMessage(
-      ws as unknown as WebSocket,
-      JSON.stringify({ type: 'join', name }),
-    )
+    await entry.room.webSocketMessage(ws as unknown as WebSocket, JSON.stringify({ type: 'join', name }))
 
     // Scan messages for either a sync w/ playerId or an error.
     const messages = ws.send.mock.calls
@@ -219,16 +220,14 @@ class RoomJoiningHarness {
       })
       .filter((m): m is ServerMessage => m !== null)
 
-    const errorMsg = messages.find(
-      (m): m is { type: 'error'; code: string; message: string } => m.type === 'error',
-    )
+    const errorMsg = messages.find((m): m is { type: 'error'; code: string; message: string } => m.type === 'error')
     if (errorMsg) {
       return { ok: false, error: errorMsg.code, ws }
     }
 
     const syncWithId = messages.find((m) => {
       return m.type === 'sync' && 'playerId' in m && typeof m.playerId === 'string'
-    }) as ServerMessage & { playerId: string } | undefined
+    }) as (ServerMessage & { playerId: string }) | undefined
     if (!syncWithId) {
       return { ok: false, error: 'no_sync_with_playerId', ws }
     }
@@ -253,21 +252,19 @@ class RoomJoiningHarness {
   async rejoinOnSameWs(
     playerId: string,
     name: string,
-  ): Promise<
-    | { ok: true; playerId: string }
-    | { ok: false; error: string }
-  > {
+  ): Promise<{ ok: true; playerId: string } | { ok: false; error: string }> {
     const ref = this.players.get(playerId)
     if (!ref) return { ok: false, error: 'no_player' }
     const entry = this.rooms.get(ref.roomCode)!
     ref.ws.send.mockClear()
-    await entry.room.webSocketMessage(
-      ref.ws as unknown as WebSocket,
-      JSON.stringify({ type: 'join', name }),
-    )
+    await entry.room.webSocketMessage(ref.ws as unknown as WebSocket, JSON.stringify({ type: 'join', name }))
     const messages = ref.ws.send.mock.calls
       .map((call: unknown[]) => {
-        try { return JSON.parse(call[0] as string) } catch { return null }
+        try {
+          return JSON.parse(call[0] as string)
+        } catch {
+          return null
+        }
       })
       .filter(Boolean)
     const err = messages.find((m: { type?: string }) => m.type === 'error')
@@ -279,22 +276,14 @@ class RoomJoiningHarness {
     const ref = this.players.get(playerId)
     if (!ref) return
     const entry = this.rooms.get(ref.roomCode)!
-    await entry.room.webSocketMessage(
-      ref.ws as unknown as WebSocket,
-      JSON.stringify(message),
-    )
+    await entry.room.webSocketMessage(ref.ws as unknown as WebSocket, JSON.stringify(message))
   }
 
   async leavePlayer(playerId: string): Promise<void> {
     const ref = this.players.get(playerId)
     if (!ref) return
     const entry = this.rooms.get(ref.roomCode)!
-    await entry.room.webSocketClose(
-      ref.ws as unknown as WebSocket,
-      1000,
-      'Left',
-      true,
-    )
+    await entry.room.webSocketClose(ref.ws as unknown as WebSocket, 1000, 'Left', true)
     ref.ws._closed = true
     this.players.delete(playerId)
   }
@@ -310,23 +299,19 @@ class RoomJoiningHarness {
   getRoomState(roomCode: string): GameState | null {
     const entry = this.rooms.get(roomCode)
     if (!entry) return null
-    const row = entry.ctx._sqlData['game_state']
+    const row = entry.ctx._sqlData.game_state
     if (!row) return null
     return JSON.parse(row.data) as GameState
   }
 
-  async getMatchmakerInfo(
-    roomCode: string,
-  ): Promise<{ playerCount: number; status: string } | null> {
-    const response = await this.matchmaker.fetch(
-      new Request(`https://internal/info/${roomCode}`),
-    )
+  async getMatchmakerInfo(roomCode: string): Promise<{ playerCount: number; status: string } | null> {
+    const response = await this.matchmaker.fetch(new Request(`https://internal/info/${roomCode}`))
     if (response.status !== 200) return null
-    return await response.json() as { playerCount: number; status: string }
+    return (await response.json()) as { playerCount: number; status: string }
   }
 
   playersInRoom(roomCode: string): PlayerRef[] {
-    return Array.from(this.players.values()).filter(p => p.roomCode === roomCode)
+    return Array.from(this.players.values()).filter((p) => p.roomCode === roomCode)
   }
 }
 
@@ -420,14 +405,13 @@ async function assertJoinInvariants(harness: RoomJoiningHarness): Promise<Violat
         })
       } else if (info.playerCount !== playerCount) {
         // Allowed transient lag: re-check after a microtask.
-        await new Promise(r => setTimeout(r, 0))
+        await new Promise((r) => setTimeout(r, 0))
         const info2 = await harness.getMatchmakerInfo(roomCode)
         if (info2 && info2.playerCount !== playerCount) {
           violations.push({
             code: 'matchmaker_count_drift',
             detail:
-              `Room ${roomCode}: matchmaker playerCount=${info2.playerCount} ` +
-              `but real playerCount=${playerCount}`,
+              `Room ${roomCode}: matchmaker playerCount=${info2.playerCount} ` + `but real playerCount=${playerCount}`,
           })
         }
       }
@@ -464,10 +448,7 @@ const createRoomArb: fc.Arbitrary<JoinCommand> = smallInt.map((i): JoinCommand =
 })
 
 const joinArb: fc.Arbitrary<JoinCommand> = fc
-  .tuple(
-    smallInt,
-    fc.string({ minLength: 0, maxLength: 30 }),
-  )
+  .tuple(smallInt, fc.string({ minLength: 0, maxLength: 30 }))
   .map(([roomIdx, rawName]): JoinCommand => {
     const code = ROOM_CODE_POOL[roomIdx % ROOM_CODE_POOL.length]
     return {
@@ -482,35 +463,41 @@ const joinArb: fc.Arbitrary<JoinCommand> = fc
     }
   })
 
-const readyArb: fc.Arbitrary<JoinCommand> = smallInt.map((playerIdx): JoinCommand => ({
-  run: async ({ harness }) => {
-    const players = Array.from(harness.players.values())
-    if (players.length === 0) return
-    const target = players[playerIdx % players.length]
-    await harness.sendAs(target.id, { type: 'ready' })
-  },
-  toString: () => `Ready(${playerIdx})`,
-}))
+const readyArb: fc.Arbitrary<JoinCommand> = smallInt.map(
+  (playerIdx): JoinCommand => ({
+    run: async ({ harness }) => {
+      const players = Array.from(harness.players.values())
+      if (players.length === 0) return
+      const target = players[playerIdx % players.length]
+      await harness.sendAs(target.id, { type: 'ready' })
+    },
+    toString: () => `Ready(${playerIdx})`,
+  }),
+)
 
-const leaveArb: fc.Arbitrary<JoinCommand> = smallInt.map((playerIdx): JoinCommand => ({
-  run: async ({ harness }) => {
-    const players = Array.from(harness.players.values())
-    if (players.length === 0) return
-    const target = players[playerIdx % players.length]
-    await harness.leavePlayer(target.id)
-  },
-  toString: () => `Leave(${playerIdx})`,
-}))
+const leaveArb: fc.Arbitrary<JoinCommand> = smallInt.map(
+  (playerIdx): JoinCommand => ({
+    run: async ({ harness }) => {
+      const players = Array.from(harness.players.values())
+      if (players.length === 0) return
+      const target = players[playerIdx % players.length]
+      await harness.leavePlayer(target.id)
+    },
+    toString: () => `Leave(${playerIdx})`,
+  }),
+)
 
-const startSoloArb: fc.Arbitrary<JoinCommand> = smallInt.map((playerIdx): JoinCommand => ({
-  run: async ({ harness }) => {
-    const players = Array.from(harness.players.values())
-    if (players.length === 0) return
-    const target = players[playerIdx % players.length]
-    await harness.sendAs(target.id, { type: 'start_solo' })
-  },
-  toString: () => `StartSolo(${playerIdx})`,
-}))
+const startSoloArb: fc.Arbitrary<JoinCommand> = smallInt.map(
+  (playerIdx): JoinCommand => ({
+    run: async ({ harness }) => {
+      const players = Array.from(harness.players.values())
+      if (players.length === 0) return
+      const target = players[playerIdx % players.length]
+      await harness.sendAs(target.id, { type: 'start_solo' })
+    },
+    toString: () => `StartSolo(${playerIdx})`,
+  }),
+)
 
 const advanceTicksArb: fc.Arbitrary<JoinCommand> = fc
   .tuple(smallInt, fc.integer({ min: 1, max: 3 }))
@@ -533,9 +520,7 @@ const commandArb = fc.oneof(
   { weight: 2, arbitrary: advanceTicksArb },
 )
 
-async function runCommands(commands: JoinCommand[]): Promise<
-  { violations: Violation[]; trace: string[] }
-> {
+async function runCommands(commands: JoinCommand[]): Promise<{ violations: Violation[]; trace: string[] }> {
   const harness = new RoomJoiningHarness()
   const ctx: CmdCtx = { harness, nameCounter: { n: 0 } }
   const trace: string[] = []
@@ -555,18 +540,13 @@ async function runCommands(commands: JoinCommand[]): Promise<
 describe('PBT Room Joining: invariants across arbitrary sequences', () => {
   it('slots stay unique, ids are UUIDs, names truncate, matchmaker tracks count', async () => {
     await fc.assert(
-      fc.asyncProperty(
-        fc.array(commandArb, { minLength: 1, maxLength: 30 }),
-        async (commands) => {
-          const { violations, trace } = await runCommands(commands)
-          if (violations.length > 0) {
-            const v = violations[0]
-            throw new Error(
-              `${v.code}: ${v.detail}\n  After: [${trace.join(', ')}]`,
-            )
-          }
-        },
-      ),
+      fc.asyncProperty(fc.array(commandArb, { minLength: 1, maxLength: 30 }), async (commands) => {
+        const { violations, trace } = await runCommands(commands)
+        if (violations.length > 0) {
+          const v = violations[0]
+          throw new Error(`${v.code}: ${v.detail}\n  After: [${trace.join(', ')}]`)
+        }
+      }),
       { numRuns: 50 },
     )
   }, 180_000)
@@ -580,10 +560,7 @@ describe('PBT Room Joining: duplicate-join is rejected', () => {
   it('second join on SAME ws returns already_joined and does not grow the room', async () => {
     await fc.assert(
       fc.asyncProperty(
-        fc.array(
-          fc.string({ minLength: 1, maxLength: 20 }),
-          { minLength: 1, maxLength: 4 },
-        ),
+        fc.array(fc.string({ minLength: 1, maxLength: 20 }), { minLength: 1, maxLength: 4 }),
         async (names) => {
           const harness = new RoomJoiningHarness()
           await harness.createRoom('DUP001')
@@ -600,19 +577,14 @@ describe('PBT Room Joining: duplicate-join is rejected', () => {
             const after = Object.keys(harness.getRoomState('DUP001')!.players).length
             if (rejoin.ok) {
               throw new Error(
-                `Second join on same ws (player=${pid}) accepted; ` +
-                `player count went ${before} → ${after}`,
+                `Second join on same ws (player=${pid}) accepted; ` + `player count went ${before} → ${after}`,
               )
             }
             if (rejoin.error !== 'already_joined') {
-              throw new Error(
-                `Second join returned error=${rejoin.error}, expected 'already_joined'`,
-              )
+              throw new Error(`Second join returned error=${rejoin.error}, expected 'already_joined'`)
             }
             if (after !== before) {
-              throw new Error(
-                `Second join grew the room from ${before} → ${after}`,
-              )
+              throw new Error(`Second join grew the room from ${before} → ${after}`)
             }
           }
         },
@@ -653,8 +625,7 @@ describe('PBT Room Joining: late-join during non-waiting status is rejected', ()
 
           if (late.ok) {
             throw new Error(
-              `Late-join (status=${status}) accepted as new player; ` +
-              `count went ${countBefore} → ${countAfter}`,
+              `Late-join (status=${status}) accepted as new player; ` + `count went ${countBefore} → ${countAfter}`,
             )
           }
           // For countdown, current code uses 'countdown_in_progress'.
@@ -665,14 +636,12 @@ describe('PBT Room Joining: late-join during non-waiting status is rejected', ()
           const acceptable = ['countdown_in_progress', 'game_in_progress']
           if (!acceptable.includes(late.error)) {
             throw new Error(
-              `Late-join (status=${status}) returned error=${late.error}, ` +
-              `expected one of ${acceptable.join('|')}`,
+              `Late-join (status=${status}) returned error=${late.error}, ` + `expected one of ${acceptable.join('|')}`,
             )
           }
           if (countAfter !== countBefore) {
             throw new Error(
-              `Late-join grew the room from ${countBefore} → ${countAfter} ` +
-              `despite error=${late.error}`,
+              `Late-join grew the room from ${countBefore} → ${countAfter} ` + `despite error=${late.error}`,
             )
           }
         },
@@ -712,19 +681,13 @@ describe('PBT Room Joining: full-room join is rejected', () => {
           const stateAfter = harness.getRoomState('FULL01')!
 
           if (fifth.ok) {
-            throw new Error(
-              `5th join accepted into a full room; count=${Object.keys(stateAfter.players).length}`,
-            )
+            throw new Error(`5th join accepted into a full room; count=${Object.keys(stateAfter.players).length}`)
           }
           if (fifth.error !== 'room_full') {
-            throw new Error(
-              `5th join returned error=${fifth.error}, expected 'room_full'`,
-            )
+            throw new Error(`5th join returned error=${fifth.error}, expected 'room_full'`)
           }
           if (Object.keys(stateAfter.players).length !== 4) {
-            throw new Error(
-              `Full room grew after rejected 5th join: ${Object.keys(stateAfter.players).length}`,
-            )
+            throw new Error(`Full room grew after rejected 5th join: ${Object.keys(stateAfter.players).length}`)
           }
         },
       ),
@@ -740,35 +703,28 @@ describe('PBT Room Joining: full-room join is rejected', () => {
 describe('PBT Room Joining: slot re-use after leave', () => {
   it('after a player leaves, their slot is assigned to the next new joiner', async () => {
     await fc.assert(
-      fc.asyncProperty(
-        fc.integer({ min: 0, max: 3 }),
-        async (leaveIdx) => {
-          const harness = new RoomJoiningHarness()
-          await harness.createRoom('SLOT01')
-          const oks: { id: string; slot: PlayerSlot }[] = []
-          for (let i = 0; i < 4; i++) {
-            const res = await harness.joinAsNewPlayer('SLOT01', `P${i}`)
-            if (res.ok) oks.push({ id: res.playerId, slot: res.slot })
-          }
-          if (oks.length !== 4) return
-          const leavingSlot = oks[leaveIdx % oks.length].slot
-          const leavingId = oks[leaveIdx % oks.length].id
-          await harness.leavePlayer(leavingId)
+      fc.asyncProperty(fc.integer({ min: 0, max: 3 }), async (leaveIdx) => {
+        const harness = new RoomJoiningHarness()
+        await harness.createRoom('SLOT01')
+        const oks: { id: string; slot: PlayerSlot }[] = []
+        for (let i = 0; i < 4; i++) {
+          const res = await harness.joinAsNewPlayer('SLOT01', `P${i}`)
+          if (res.ok) oks.push({ id: res.playerId, slot: res.slot })
+        }
+        if (oks.length !== 4) return
+        const leavingSlot = oks[leaveIdx % oks.length].slot
+        const leavingId = oks[leaveIdx % oks.length].id
+        await harness.leavePlayer(leavingId)
 
-          // Next join should fill the vacated slot.
-          const next = await harness.joinAsNewPlayer('SLOT01', 'replacement')
-          if (!next.ok) {
-            throw new Error(
-              `Replacement join failed after leave (slot=${leavingSlot}): ${next.error}`,
-            )
-          }
-          if (next.slot !== leavingSlot) {
-            throw new Error(
-              `Slot-reuse violated: leaver slot=${leavingSlot}, replacement got slot=${next.slot}`,
-            )
-          }
-        },
-      ),
+        // Next join should fill the vacated slot.
+        const next = await harness.joinAsNewPlayer('SLOT01', 'replacement')
+        if (!next.ok) {
+          throw new Error(`Replacement join failed after leave (slot=${leavingSlot}): ${next.error}`)
+        }
+        if (next.slot !== leavingSlot) {
+          throw new Error(`Slot-reuse violated: leaver slot=${leavingSlot}, replacement got slot=${next.slot}`)
+        }
+      }),
       { numRuns: 50 },
     )
   }, 120_000)
@@ -810,10 +766,8 @@ describe('Characterisation: matchmaker view after everyone leaves', () => {
     expect(info!.status).toBe('waiting')
 
     // But /find MUST exclude it (playerCount > 0 guard in Matchmaker.ts).
-    const find = await harness.matchmaker.fetch(
-      new Request('https://internal/find'),
-    )
-    const { roomCode } = await find.json() as { roomCode: string | null }
+    const find = await harness.matchmaker.fetch(new Request('https://internal/find'))
+    const { roomCode } = (await find.json()) as { roomCode: string | null }
     expect(roomCode).not.toBe('EMPTY1')
   })
 })

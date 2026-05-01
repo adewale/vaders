@@ -8,7 +8,7 @@ import { describe, test, expect } from 'bun:test'
 // We replicate this here to test navigation logic without rendering.
 
 const MENU_ITEMS = ['solo', 'create', 'join', 'matchmake'] as const
-type MenuItem = typeof MENU_ITEMS[number]
+type MenuItem = (typeof MENU_ITEMS)[number]
 
 describe('LaunchScreen Menu Items', () => {
   test('has exactly 4 menu items', () => {
@@ -37,7 +37,7 @@ describe('LaunchScreen Menu Items', () => {
     }
 
     for (const [hotkey, expected] of Object.entries(hotkeyMap)) {
-      const index = parseInt(hotkey) - 1
+      const index = Number.parseInt(hotkey, 10) - 1
       expect(MENU_ITEMS[index]).toBe(expected)
     }
   })
@@ -318,10 +318,10 @@ function displayWidth(s: string): number {
     const cp = ch.codePointAt(0)!
     // Fullwidth forms (FF01-FF60), CJK unified, geometric shapes (25A0-25FF)
     if (
-      (cp >= 0x25A0 && cp <= 0x25FF) || // Geometric Shapes (includes ▶ U+25B6)
-      (cp >= 0xFF01 && cp <= 0xFF60) || // Fullwidth Latin
-      (cp >= 0x4E00 && cp <= 0x9FFF) || // CJK Unified Ideographs
-      (cp >= 0x2E80 && cp <= 0x303F)    // CJK Radicals, Kangxi, CJK Symbols
+      (cp >= 0x25a0 && cp <= 0x25ff) || // Geometric Shapes (includes ▶ U+25B6)
+      (cp >= 0xff01 && cp <= 0xff60) || // Fullwidth Latin
+      (cp >= 0x4e00 && cp <= 0x9fff) || // CJK Unified Ideographs
+      (cp >= 0x2e80 && cp <= 0x303f) // CJK Radicals, Kangxi, CJK Symbols
     ) {
       w += 2
     } else {
@@ -370,7 +370,7 @@ describe('Menu Item Display Configuration', () => {
   })
 
   test('all hotkeys are numeric 1-4', () => {
-    const hotkeys = displayConfig.map(i => i.hotkey)
+    const hotkeys = displayConfig.map((i) => i.hotkey)
     expect(hotkeys).toEqual(['1', '2', '3', '4'])
   })
 

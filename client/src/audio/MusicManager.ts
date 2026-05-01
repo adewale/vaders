@@ -71,9 +71,7 @@ class MusicManager {
       try {
         // Use afplay on macOS, mpv or aplay on Linux
         const player = process.platform === 'darwin' ? 'afplay' : 'mpv'
-        const args = process.platform === 'darwin'
-          ? [MUSIC_PATH]
-          : ['--no-video', '--really-quiet', MUSIC_PATH]
+        const args = process.platform === 'darwin' ? [MUSIC_PATH] : ['--no-video', '--really-quiet', MUSIC_PATH]
 
         this.process = spawn({
           cmd: [player, ...args],
@@ -92,7 +90,7 @@ class MusicManager {
 
         // Small delay before looping
         if (this.shouldLoop && this.isPlaying) {
-          await new Promise(r => setTimeout(r, 100))
+          await new Promise((r) => setTimeout(r, 100))
         }
       } catch (err) {
         this.lastError_ = `Music playback failed: ${err instanceof Error ? err.message : String(err)}`

@@ -32,11 +32,13 @@ function createMockPlayer(overrides: Partial<Player> = {}): Player {
  * Create multiple mock players with sequential slots.
  */
 function createMockPlayers(count: number): Player[] {
-  return Array.from({ length: count }, (_, i) => createMockPlayer({
-    id: `player-${i + 1}`,
-    name: `Player${i + 1}`,
-    slot: (i + 1) as PlayerSlot,
-  }))
+  return Array.from({ length: count }, (_, i) =>
+    createMockPlayer({
+      id: `player-${i + 1}`,
+      name: `Player${i + 1}`,
+      slot: (i + 1) as PlayerSlot,
+    }),
+  )
 }
 
 /**
@@ -50,7 +52,7 @@ function sortPlayersBySlot(players: Player[]): Player[] {
  * Simulate the empty slots calculation from PlayerList component.
  */
 function calculateEmptySlots(players: Player[], maxPlayers: number = 4): PlayerSlot[] {
-  const takenSlots = new Set(players.map(p => p.slot))
+  const takenSlots = new Set(players.map((p) => p.slot))
   const emptySlots: PlayerSlot[] = []
   for (let i = 1; i <= maxPlayers; i++) {
     if (!takenSlots.has(i as PlayerSlot)) {
@@ -86,13 +88,13 @@ describe('Player Color Assignment', () => {
   })
 
   test('each slot has a unique color', () => {
-    const colors = [1, 2, 3, 4].map(slot => COLORS.player[slot as 1 | 2 | 3 | 4])
+    const colors = [1, 2, 3, 4].map((slot) => COLORS.player[slot as 1 | 2 | 3 | 4])
     const uniqueColors = new Set(colors)
     expect(uniqueColors.size).toBe(4)
   })
 
   test('player colors are different from UI colors', () => {
-    const playerColors = [1, 2, 3, 4].map(slot => COLORS.player[slot as 1 | 2 | 3 | 4])
+    const playerColors = [1, 2, 3, 4].map((slot) => COLORS.player[slot as 1 | 2 | 3 | 4])
     // Player colors should not be the same as common UI colors
     expect(playerColors).not.toContain(COLORS.ui.unselected)
     expect(playerColors).not.toContain(COLORS.ui.dim)
@@ -194,10 +196,7 @@ describe('Empty Slots Calculation', () => {
   })
 
   test('2 empty slots when 2 players', () => {
-    const players = [
-      createMockPlayer({ id: 'p1', slot: 1 }),
-      createMockPlayer({ id: 'p2', slot: 2 }),
-    ]
+    const players = [createMockPlayer({ id: 'p1', slot: 1 }), createMockPlayer({ id: 'p2', slot: 2 })]
     const emptySlots = calculateEmptySlots(players)
     expect(emptySlots).toEqual([3, 4])
   })
@@ -209,10 +208,7 @@ describe('Empty Slots Calculation', () => {
   })
 
   test('handles non-sequential slots correctly', () => {
-    const players = [
-      createMockPlayer({ id: 'p1', slot: 1 }),
-      createMockPlayer({ id: 'p4', slot: 4 }),
-    ]
+    const players = [createMockPlayer({ id: 'p1', slot: 1 }), createMockPlayer({ id: 'p4', slot: 4 })]
     const emptySlots = calculateEmptySlots(players)
     expect(emptySlots).toEqual([2, 3])
   })
@@ -245,7 +241,7 @@ describe('Ready Status Display', () => {
     const players = createMockPlayers(4)
     const readyPlayerIds = ['player-1', 'player-2', 'player-4']
 
-    const readyStatuses = players.map(p => readyPlayerIds.includes(p.id))
+    const readyStatuses = players.map((p) => readyPlayerIds.includes(p.id))
     expect(readyStatuses).toEqual([true, true, false, true])
   })
 
@@ -253,7 +249,7 @@ describe('Ready Status Display', () => {
     const players = createMockPlayers(4)
     const readyPlayerIds: string[] = []
 
-    const anyReady = players.some(p => readyPlayerIds.includes(p.id))
+    const anyReady = players.some((p) => readyPlayerIds.includes(p.id))
     expect(anyReady).toBe(false)
   })
 })
@@ -265,7 +261,7 @@ describe('Current Player Identification', () => {
     const players = createMockPlayers(3)
     const currentPlayerId = 'player-2'
 
-    const currentPlayer = players.find(p => p.id === currentPlayerId)
+    const currentPlayer = players.find((p) => p.id === currentPlayerId)
     expect(currentPlayer).toBeDefined()
     expect(currentPlayer?.id).toBe('player-2')
   })
@@ -290,7 +286,7 @@ describe('Current Player Identification', () => {
     const players = createMockPlayers(4)
     const currentPlayerId = 'player-3'
 
-    const currentPlayerCount = players.filter(p => p.id === currentPlayerId).length
+    const currentPlayerCount = players.filter((p) => p.id === currentPlayerId).length
     expect(currentPlayerCount).toBe(1)
   })
 })
@@ -375,7 +371,7 @@ describe('Full Player Row Data', () => {
     })
     const isReady = true
     const isCurrentPlayer = true
-    const currentPlayerId = 'test-player'
+    const _currentPlayerId = 'test-player'
 
     const sprites = getSprites()
     const playerColor = getTerminalPlayerColor(player.slot)

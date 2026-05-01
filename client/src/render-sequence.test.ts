@@ -25,7 +25,9 @@ function createMockState(overrides: Partial<GameState> = {}): GameState {
  * Simulate what App.tsx would render for a given state.
  * Returns the component type that would be rendered.
  */
-function getRenderedComponent(state: GameState): 'connecting' | 'lobby' | 'wipe_hold_screen' | 'game' | 'game_over' | 'null' {
+function getRenderedComponent(
+  state: GameState,
+): 'connecting' | 'lobby' | 'wipe_hold_screen' | 'game' | 'game_over' | 'null' {
   // This mirrors the logic in App.tsx
   // If this gets out of sync with App.tsx, the static analysis test will catch it
 
@@ -50,7 +52,10 @@ function getRenderedComponent(state: GameState): 'connecting' | 'lobby' | 'wipe_
  * Check if a component type could cause a "flash" when transitioning.
  * A flash occurs when game UI (borders, etc) appears before the mask is ready.
  */
-function couldCauseFlash(from: ReturnType<typeof getRenderedComponent>, to: ReturnType<typeof getRenderedComponent>): boolean {
+function couldCauseFlash(
+  from: ReturnType<typeof getRenderedComponent>,
+  to: ReturnType<typeof getRenderedComponent>,
+): boolean {
   // Transitioning TO 'game' could cause flash if mask isn't ready
   // But transitioning TO 'wipe_hold_screen' should NOT cause flash (it's a simple black screen)
   // Transitioning FROM anything TO 'wipe_hold_screen' is safe
@@ -153,7 +158,13 @@ describe('Render sequence during wave transition', () => {
 
   test('full wave transition sequence', () => {
     const sequence: GameStatus[] = ['playing', 'wipe_exit', 'wipe_hold', 'wipe_reveal', 'playing']
-    const expectedComponents: ReturnType<typeof getRenderedComponent>[] = ['game', 'game', 'wipe_hold_screen', 'game', 'game']
+    const expectedComponents: ReturnType<typeof getRenderedComponent>[] = [
+      'game',
+      'game',
+      'wipe_hold_screen',
+      'game',
+      'game',
+    ]
 
     for (let i = 0; i < sequence.length; i++) {
       const state = createMockState({ status: sequence[i] })
@@ -173,7 +184,7 @@ describe('App.tsx render logic matches test expectations', () => {
     const source = fs.readFileSync(appPath, 'utf-8')
 
     // Find the wipe_hold case
-    const wipeHoldMatch = source.match(/case\s+'wipe_hold':\s*\n([^]*?)(?=case\s+'wipe_exit'|case\s+'wipe_reveal')/s)
+    const wipeHoldMatch = source.match(/case\s+'wipe_hold':\s*\n([\s\S]*?)(?=case\s+'wipe_exit'|case\s+'wipe_reveal')/)
     expect(wipeHoldMatch).not.toBeNull()
 
     const wipeHoldBlock = wipeHoldMatch![1]
@@ -193,7 +204,7 @@ describe('App.tsx render logic matches test expectations', () => {
     const source = fs.readFileSync(appPath, 'utf-8')
 
     // Find cases that render GameScreen
-    const gameScreenCases = source.match(/case\s+'(wipe_reveal|playing)':[^]*?<GameScreen/s)
+    const gameScreenCases = source.match(/case\s+'(wipe_reveal|playing)':[\s\S]*?<GameScreen/)
     expect(gameScreenCases).not.toBeNull()
   })
 
@@ -218,8 +229,14 @@ describe('App.tsx render logic matches test expectations', () => {
 // ─── Invariant: No flash during any valid transition ─────────────────────────
 
 describe('No flash invariant', () => {
-  const allStatuses: GameStatus[] = [
-    'waiting', 'countdown', 'wipe_exit', 'wipe_hold', 'wipe_reveal', 'playing', 'game_over'
+  const _allStatuses: GameStatus[] = [
+    'waiting',
+    'countdown',
+    'wipe_exit',
+    'wipe_hold',
+    'wipe_reveal',
+    'playing',
+    'game_over',
   ]
 
   // Valid transitions (from -> to)

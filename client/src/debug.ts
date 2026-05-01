@@ -19,7 +19,7 @@ export function debugLog(category: string, message: string, data?: Record<string
   }
 
   try {
-    appendFileSync(LOG_FILE, JSON.stringify(entry) + '\n')
+    appendFileSync(LOG_FILE, `${JSON.stringify(entry)}\n`)
   } catch {
     // Ignore write errors
   }

@@ -13,14 +13,22 @@ import {
   supportsBraille,
   type TerminalCapabilities,
 } from './compatibility'
-import { SPRITES, SPRITE_SIZE, ASCII_SPRITES, COLORS, getSprites } from '../sprites'
+import { SPRITES, SPRITE_SIZE, ASCII_SPRITES, COLORS } from '../sprites'
 
 // All terminal-related env vars — must match the list in compatibility.test.ts
 const TERMINAL_ENV_KEYS = [
-  'TERM', 'TERM_PROGRAM', 'COLORTERM',
-  'KITTY_WINDOW_ID', 'ITERM_SESSION_ID', 'ALACRITTY_WINDOW_ID',
-  'VSCODE_INJECTION', 'TMUX', 'STY',
-  'LANG', 'LC_ALL', 'VADERS_ASCII',
+  'TERM',
+  'TERM_PROGRAM',
+  'COLORTERM',
+  'KITTY_WINDOW_ID',
+  'ITERM_SESSION_ID',
+  'ALACRITTY_WINDOW_ID',
+  'VSCODE_INJECTION',
+  'TMUX',
+  'STY',
+  'LANG',
+  'LC_ALL',
+  'VADERS_ASCII',
 ]
 
 // Helper to mock environment for specific terminal
@@ -61,7 +69,6 @@ function mockTerminalEnv(terminal: 'ghostty' | 'apple-terminal') {
 }
 
 describe('Cross-Terminal Consistency', () => {
-  
   describe('Terminal Detection', () => {
     test('correctly identifies Ghostty', () => {
       const restore = mockTerminalEnv('ghostty')
@@ -152,7 +159,7 @@ describe('Cross-Terminal Consistency', () => {
         expect(idx).toBeGreaterThanOrEqual(16)
         expect(idx).toBeLessThanOrEqual(255)
       }
-      
+
       // Test alien colors
       for (const color of Object.values(COLORS.alien)) {
         const idx = hexTo256Color(color)
@@ -162,17 +169,25 @@ describe('Cross-Terminal Consistency', () => {
     })
 
     test('formatColor produces valid escape sequences for both terminals', () => {
-      const ghosttyCaps = { supportsTrueColor: true, supports256Color: true, terminal: 'ghostty' } as TerminalCapabilities
-      const appleCaps = { supportsTrueColor: false, supports256Color: true, terminal: 'apple-terminal' } as TerminalCapabilities
-      
+      const ghosttyCaps = {
+        supportsTrueColor: true,
+        supports256Color: true,
+        terminal: 'ghostty',
+      } as TerminalCapabilities
+      const appleCaps = {
+        supportsTrueColor: false,
+        supports256Color: true,
+        terminal: 'apple-terminal',
+      } as TerminalCapabilities
+
       const testColor = '#00ffff' // Cyan (player 1)
-      
+
       const ghosttySeq = formatColor(testColor, ghosttyCaps)
       const appleSeq = formatColor(testColor, appleCaps)
-      
+
       // Ghostty uses truecolor (24-bit)
       expect(ghosttySeq).toMatch(/^\x1b\[38;2;\d+;\d+;\d+m$/)
-      
+
       // Apple Terminal uses 256-color
       expect(appleSeq).toMatch(/^\x1b\[38;5;\d+m$/)
     })
@@ -180,7 +195,6 @@ describe('Cross-Terminal Consistency', () => {
 })
 
 describe('Sprite Consistency Constraints', () => {
-  
   describe('Player Ship Dimensions', () => {
     test('player sprite is exactly 7 chars wide', () => {
       expect(SPRITES.player.a[0].length).toBe(7)
@@ -274,7 +288,6 @@ describe('Sprite Consistency Constraints', () => {
 })
 
 describe('Visual Alignment Constraints', () => {
-  
   test('all 2-line sprites have consistent line lengths', () => {
     // Each sprite's two lines must be the same width for proper alignment
     expect(SPRITES.player.a[0].length).toBe(SPRITES.player.a[1].length)
@@ -310,7 +323,6 @@ describe('Visual Alignment Constraints', () => {
 })
 
 describe('Terminal-Specific Rendering', () => {
-
   test('Unicode-capable terminals should select Unicode sprites', () => {
     const restore = mockTerminalEnv('ghostty')
     try {
@@ -332,11 +344,19 @@ describe('Terminal-Specific Rendering', () => {
     expect(getColorDepth(ghosttyCaps)).toBe('truecolor')
 
     // Apple Terminal: 256 color
-    const appleCaps = { supportsTrueColor: false, supports256Color: true, terminal: 'apple-terminal' } as TerminalCapabilities
+    const appleCaps = {
+      supportsTrueColor: false,
+      supports256Color: true,
+      terminal: 'apple-terminal',
+    } as TerminalCapabilities
     expect(getColorDepth(appleCaps)).toBe('256')
 
     // Linux console: 16 color
-    const linuxCaps = { supportsTrueColor: false, supports256Color: false, terminal: 'linux-console' } as TerminalCapabilities
+    const linuxCaps = {
+      supportsTrueColor: false,
+      supports256Color: false,
+      terminal: 'linux-console',
+    } as TerminalCapabilities
     expect(getColorDepth(linuxCaps)).toBe('16')
   })
 })
@@ -376,10 +396,7 @@ describe('Cross-Terminal Movement Handling', () => {
 describe('Color Conversion Cross-Terminal', () => {
   test('game colors produce valid 256-color indices for all terminals', () => {
     // All game colors must map to valid 256-color range (16-255)
-    const gameColors = [
-      ...Object.values(COLORS.player),
-      ...Object.values(COLORS.alien),
-    ]
+    const gameColors = [...Object.values(COLORS.player), ...Object.values(COLORS.alien)]
     for (const hex of gameColors) {
       const idx = hexTo256Color(hex)
       expect(idx).toBeGreaterThanOrEqual(16)
@@ -389,8 +406,16 @@ describe('Color Conversion Cross-Terminal', () => {
 
   test('formatColor returns non-empty strings for all color depths', () => {
     const ghosttyCaps = { supportsTrueColor: true, supports256Color: true, terminal: 'ghostty' } as TerminalCapabilities
-    const appleCaps = { supportsTrueColor: false, supports256Color: true, terminal: 'apple-terminal' } as TerminalCapabilities
-    const linuxCaps = { supportsTrueColor: false, supports256Color: false, terminal: 'linux-console' } as TerminalCapabilities
+    const appleCaps = {
+      supportsTrueColor: false,
+      supports256Color: true,
+      terminal: 'apple-terminal',
+    } as TerminalCapabilities
+    const linuxCaps = {
+      supportsTrueColor: false,
+      supports256Color: false,
+      terminal: 'linux-console',
+    } as TerminalCapabilities
 
     const testColor = '#55ff55'
 
@@ -401,14 +426,18 @@ describe('Color Conversion Cross-Terminal', () => {
 
   test('truecolor and 256-color produce different escape sequences', () => {
     const ghosttyCaps = { supportsTrueColor: true, supports256Color: true, terminal: 'ghostty' } as TerminalCapabilities
-    const appleCaps = { supportsTrueColor: false, supports256Color: true, terminal: 'apple-terminal' } as TerminalCapabilities
+    const appleCaps = {
+      supportsTrueColor: false,
+      supports256Color: true,
+      terminal: 'apple-terminal',
+    } as TerminalCapabilities
 
     const trueSeq = formatColor('#55ff55', ghosttyCaps)
     const c256Seq = formatColor('#55ff55', appleCaps)
 
     // They should use different format prefixes
-    expect(trueSeq).toContain('38;2;')   // True color: 38;2;R;G;B
-    expect(c256Seq).toContain('38;5;')   // 256 color: 38;5;N
+    expect(trueSeq).toContain('38;2;') // True color: 38;2;R;G;B
+    expect(c256Seq).toContain('38;5;') // 256 color: 38;5;N
   })
 })
 
@@ -485,17 +514,29 @@ describe('Cross-Terminal Animation Features', () => {
     }
 
     // Tier 2: Apple Terminal gets Unicode visuals but flat colors
-    const appleCaps = { supportsUnicode: true, supportsTrueColor: false, terminal: 'apple-terminal' } as TerminalCapabilities
+    const appleCaps = {
+      supportsUnicode: true,
+      supportsTrueColor: false,
+      terminal: 'apple-terminal',
+    } as TerminalCapabilities
     expect(supportsBraille(appleCaps)).toBe(true)
     expect(supportsRichColor(appleCaps)).toBe(false)
 
     // Tier 3: Linux console gets ASCII-only fallbacks
-    const linuxCaps = { supportsUnicode: false, supportsTrueColor: false, terminal: 'linux-console' } as TerminalCapabilities
+    const linuxCaps = {
+      supportsUnicode: false,
+      supportsTrueColor: false,
+      terminal: 'linux-console',
+    } as TerminalCapabilities
     expect(supportsBraille(linuxCaps)).toBe(false)
     expect(supportsRichColor(linuxCaps)).toBe(false)
 
     // Linux console with UTF-8 still cannot render braille
-    const linuxUtf8Caps = { supportsUnicode: true, supportsTrueColor: false, terminal: 'linux-console' } as TerminalCapabilities
+    const linuxUtf8Caps = {
+      supportsUnicode: true,
+      supportsTrueColor: false,
+      terminal: 'linux-console',
+    } as TerminalCapabilities
     expect(supportsBraille(linuxUtf8Caps)).toBe(false)
   })
 })

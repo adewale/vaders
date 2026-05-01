@@ -108,7 +108,6 @@ export class InterpolationManager {
   private config: InterpolationConfig
   private entities: Map<string, InterpolatedPosition> = new Map()
   private halfBlocks: typeof HALF_BLOCKS | typeof HALF_BLOCKS_ASCII
-  private lastGameTick: number = 0
   private lastTickTimestamp: number = 0
 
   constructor(config: Partial<InterpolationConfig> = {}) {
@@ -173,8 +172,7 @@ export class InterpolationManager {
    *
    * @param gameTick - Current game tick number
    */
-  startTick(gameTick: number): void {
-    this.lastGameTick = gameTick
+  startTick(_gameTick: number): void {
     this.lastTickTimestamp = performance.now()
   }
 

@@ -13,10 +13,7 @@ import type { GameState } from '../../../shared/types'
  * @param currentState - Current game state
  * @param playerId - Current player's ID (for player-specific sounds)
  */
-export function useGameAudio(
-  currentState: GameState | null,
-  playerId: string | null
-): void {
+export function useGameAudio(currentState: GameState | null, playerId: string | null): void {
   const prevStateRef = useRef<GameState | null>(null)
   const audio = AudioManager.getInstance()
   const music = MusicManager.getInstance()

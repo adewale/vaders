@@ -57,10 +57,7 @@ type RectCmd = DrawCommand & { type: 'rect' }
 type SpriteCmd = DrawCommand & { type: 'sprite' }
 
 function filterKind(cmds: DrawCommand[], kind: string): RectCmd[] {
-  return cmds.filter(
-    (c): c is RectCmd =>
-      c.type === 'rect' && (c as { kind?: string }).kind === kind,
-  )
+  return cmds.filter((c): c is RectCmd => c.type === 'rect' && (c as { kind?: string }).kind === kind)
 }
 
 function hexToRgb(hex: string): [number, number, number] | null {
@@ -91,14 +88,8 @@ function dominantChannel(hex: string): 'r' | 'g' | 'b' | 'none' {
 
 describe('bug #5: impact shield burst tinted per slot', () => {
   it('slot 2 impact shield rings are orange-leaning, not blue', () => {
-    const prev = stateWith(
-      { p1: makePlayer({ id: 'p1', slot: 2, x: 50, invulnerableUntilTick: null }) },
-      { tick: 10 },
-    )
-    const curr = stateWith(
-      { p1: makePlayer({ id: 'p1', slot: 2, x: 50, invulnerableUntilTick: 50 }) },
-      { tick: 11 },
-    )
+    const prev = stateWith({ p1: makePlayer({ id: 'p1', slot: 2, x: 50, invulnerableUntilTick: null }) }, { tick: 10 })
+    const curr = stateWith({ p1: makePlayer({ id: 'p1', slot: 2, x: 50, invulnerableUntilTick: 50 }) }, { tick: 11 })
     const cmds = buildDrawCommands(curr, 'p1', prev)
     const rings = filterKind(cmds, 'player-impact-shield')
     expect(rings.length).toBeGreaterThan(0)
@@ -142,33 +133,28 @@ describe('bug #5: impact shield burst tinted per slot', () => {
 describe('bug #7: invulnerability pulse retains slot identity', () => {
   it('PBT: during invulnerability, the sprite colour never loses the slot hue entirely', () => {
     fc.assert(
-      fc.property(
-        fc.constantFrom<PlayerSlot>(1, 2, 3, 4),
-        fc.integer({ min: 0, max: 100 }),
-        (slot, tick) => {
-          resetEffects()
-          const state = stateWith(
-            { p1: makePlayer({ id: 'p1', slot, x: 50, invulnerableUntilTick: tick + 10 }) },
-            { tick },
-          )
-          const cmds = buildDrawCommands(state, 'p1')
-          const spriteCmd = cmds.find(
-            (c): c is SpriteCmd =>
-              c.type === 'sprite' && (c as { color?: string }).color !== undefined,
-          )
-          if (!spriteCmd) return false
-          // Slot hue must remain detectable — either the sprite colour IS
-          // the slot, or it's a blend that still has the slot's dominant
-          // channel (no collapse to pure '#ffffff').
-          if (spriteCmd.color === '#ffffff') return false
-          const slotDom = dominantChannel(COLORS.player[slot])
-          if (slotDom === 'none') return true
-          const spriteDom = dominantChannel(spriteCmd.color)
-          // Sprite dominant channel must align with slot's dominant channel
-          // (or at least not be the opposite).
-          return spriteDom !== 'none'
-        },
-      ),
+      fc.property(fc.constantFrom<PlayerSlot>(1, 2, 3, 4), fc.integer({ min: 0, max: 100 }), (slot, tick) => {
+        resetEffects()
+        const state = stateWith(
+          { p1: makePlayer({ id: 'p1', slot, x: 50, invulnerableUntilTick: tick + 10 }) },
+          { tick },
+        )
+        const cmds = buildDrawCommands(state, 'p1')
+        const spriteCmd = cmds.find(
+          (c): c is SpriteCmd => c.type === 'sprite' && (c as { color?: string }).color !== undefined,
+        )
+        if (!spriteCmd) return false
+        // Slot hue must remain detectable — either the sprite colour IS
+        // the slot, or it's a blend that still has the slot's dominant
+        // channel (no collapse to pure '#ffffff').
+        if (spriteCmd.color === '#ffffff') return false
+        const slotDom = dominantChannel(COLORS.player[slot])
+        if (slotDom === 'none') return true
+        const spriteDom = dominantChannel(spriteCmd.color)
+        // Sprite dominant channel must align with slot's dominant channel
+        // (or at least not be the opposite).
+        return spriteDom !== 'none'
+      }),
       { numRuns: 30 },
     )
   })
@@ -186,10 +172,7 @@ describe('bug #7: invulnerability pulse retains slot identity', () => {
     expect(spriteCmd!.color).not.toBe('#ffffff')
 
     // Also check the bright phase (invulnBright true): tick 0 → floor(0/3)=0 → 0%2=0 → bright
-    const state2 = stateWith(
-      { p1: makePlayer({ id: 'p1', slot: 2, x: 50, invulnerableUntilTick: 30 }) },
-      { tick: 0 },
-    )
+    const state2 = stateWith({ p1: makePlayer({ id: 'p1', slot: 2, x: 50, invulnerableUntilTick: 30 }) }, { tick: 0 })
     const cmds2 = buildDrawCommands(state2, 'p1')
     const sprite2 = cmds2.find(
       (c): c is SpriteCmd => c.type === 'sprite' && (c as { color?: string }).color !== undefined,
@@ -236,10 +219,7 @@ describe('bug #8: wing-tip highlights per slot', () => {
     // When invulnBright is true, the wing retains white-ish for the flash
     // phase. This is the sole exception — we document it here so a later
     // change doesn't accidentally drop it.
-    const state = stateWith(
-      { p1: makePlayer({ id: 'p1', slot: 2, x: 50, invulnerableUntilTick: 30 }) },
-      { tick: 0 },
-    )
+    const state = stateWith({ p1: makePlayer({ id: 'p1', slot: 2, x: 50, invulnerableUntilTick: 30 }) }, { tick: 0 })
     const cmds = buildDrawCommands(state, 'p1')
     const wings = filterKind(cmds, 'player-wing')
     expect(wings.length).toBeGreaterThan(0)
@@ -287,31 +267,27 @@ describe('bug #9: player decorations vary by slot', () => {
 
   it('PBT: for any two distinct slots a != b, the combined tinted-decor fills differ', () => {
     fc.assert(
-      fc.property(
-        fc.constantFrom<PlayerSlot>(1, 2, 3, 4),
-        fc.constantFrom<PlayerSlot>(1, 2, 3, 4),
-        (slotA, slotB) => {
-          if (slotA === slotB) return true // trivially ok
-          resetEffects()
-          const sA = stateWith({ p1: makePlayer({ id: 'p1', slot: slotA, x: 50 }) }, { tick: 10 })
-          const sB = stateWith({ p1: makePlayer({ id: 'p1', slot: slotB, x: 50 }) }, { tick: 10 })
-          const cA = buildDrawCommands(sA, 'p1')
-          const cB = buildDrawCommands(sB, 'p1')
+      fc.property(fc.constantFrom<PlayerSlot>(1, 2, 3, 4), fc.constantFrom<PlayerSlot>(1, 2, 3, 4), (slotA, slotB) => {
+        if (slotA === slotB) return true // trivially ok
+        resetEffects()
+        const sA = stateWith({ p1: makePlayer({ id: 'p1', slot: slotA, x: 50 }) }, { tick: 10 })
+        const sB = stateWith({ p1: makePlayer({ id: 'p1', slot: slotB, x: 50 }) }, { tick: 10 })
+        const cA = buildDrawCommands(sA, 'p1')
+        const cB = buildDrawCommands(sB, 'p1')
 
-          // Collect fills across every tinted-decor kind
-          const fillsA = new Set<string>()
-          const fillsB = new Set<string>()
-          for (const kind of TINTED_DECOR_KINDS) {
-            for (const r of filterKind(cA, kind)) fillsA.add(r.fill.toLowerCase())
-            for (const r of filterKind(cB, kind)) fillsB.add(r.fill.toLowerCase())
-          }
-          // The two fill sets must not be identical.
-          if (fillsA.size === 0 || fillsB.size === 0) return false
-          const symDiff = [...fillsA].filter((f) => !fillsB.has(f)).length +
-            [...fillsB].filter((f) => !fillsA.has(f)).length
-          return symDiff >= 2
-        },
-      ),
+        // Collect fills across every tinted-decor kind
+        const fillsA = new Set<string>()
+        const fillsB = new Set<string>()
+        for (const kind of TINTED_DECOR_KINDS) {
+          for (const r of filterKind(cA, kind)) fillsA.add(r.fill.toLowerCase())
+          for (const r of filterKind(cB, kind)) fillsB.add(r.fill.toLowerCase())
+        }
+        // The two fill sets must not be identical.
+        if (fillsA.size === 0 || fillsB.size === 0) return false
+        const symDiff =
+          [...fillsA].filter((f) => !fillsB.has(f)).length + [...fillsB].filter((f) => !fillsA.has(f)).length
+        return symDiff >= 2
+      }),
       { numRuns: 20 },
     )
   })

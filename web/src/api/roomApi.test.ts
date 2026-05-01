@@ -34,7 +34,7 @@ describe('createRoom', () => {
     expect(result.wsUrl).toMatch(/^wss?:\/\//)
     expect(result.wsUrl).toMatch(/\/room\/ABC123\/ws$/)
 
-    const fetchCall = (fetch as ReturnType<typeof vi.fn>).mock.calls[0]
+    const fetchCall = vi.mocked(fetch).mock.calls[0]
     expect(fetchCall[0]).toContain('/room')
     expect(fetchCall[1]).toEqual({ method: 'POST' })
   })
@@ -47,7 +47,7 @@ describe('createRoom', () => {
     await expect(createRoom()).rejects.toThrow('Failed to create room: 500')
     expect(fetch).toHaveBeenCalledTimes(1)
 
-    const fetchCall = (fetch as ReturnType<typeof vi.fn>).mock.calls[0]
+    const fetchCall = vi.mocked(fetch).mock.calls[0]
     expect(fetchCall[1]).toEqual({ method: 'POST' })
   })
 
@@ -72,7 +72,7 @@ describe('matchmake', () => {
     expect(result.wsUrl).toContain('MATCH42')
     expect(result.wsUrl).toMatch(/\/room\/MATCH42\/ws$/)
 
-    const fetchCall = (fetch as ReturnType<typeof vi.fn>).mock.calls[0]
+    const fetchCall = vi.mocked(fetch).mock.calls[0]
     expect(fetchCall[0]).toContain('/matchmake')
     // GET is the default method, so no explicit method should be set
     expect(fetchCall[1]).toBeUndefined()
@@ -83,7 +83,7 @@ describe('matchmake', () => {
 
     await expect(matchmake()).rejects.toThrow('Failed to matchmake: 502')
     expect(fetch).toHaveBeenCalledTimes(1)
-    expect((fetch as ReturnType<typeof vi.fn>).mock.calls[0][0]).toContain('/matchmake')
+    expect(vi.mocked(fetch).mock.calls[0][0]).toContain('/matchmake')
   })
 })
 
@@ -97,7 +97,7 @@ describe('getRoomInfo', () => {
 
     expect(result).toBeNull()
     expect(fetch).toHaveBeenCalledTimes(1)
-    expect((fetch as ReturnType<typeof vi.fn>).mock.calls[0][0]).toContain('/room/NONEXIST')
+    expect(vi.mocked(fetch).mock.calls[0][0]).toContain('/room/NONEXIST')
   })
 
   // ─── 5. getRoomInfo returns data on 200 ───────────────────────────────────
@@ -110,7 +110,7 @@ describe('getRoomInfo', () => {
     expect(result).not.toBeNull()
     expect(result!.status).toBe('waiting')
     expect(result!.playerCount).toBe(2)
-    expect((fetch as ReturnType<typeof vi.fn>).mock.calls[0][0]).toContain('/room/XYZ789')
+    expect(vi.mocked(fetch).mock.calls[0][0]).toContain('/room/XYZ789')
   })
 
   it('returns null on any non-OK status (e.g. 500)', async () => {
@@ -120,7 +120,7 @@ describe('getRoomInfo', () => {
 
     expect(result).toBeNull()
     expect(fetch).toHaveBeenCalledTimes(1)
-    expect((fetch as ReturnType<typeof vi.fn>).mock.calls[0][0]).toContain('/room/BROKEN')
+    expect(vi.mocked(fetch).mock.calls[0][0]).toContain('/room/BROKEN')
   })
 })
 

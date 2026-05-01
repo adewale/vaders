@@ -70,9 +70,7 @@ type RectCmd = DrawCommand & { type: 'rect' }
 const isRect = (cmd: DrawCommand): cmd is RectCmd => cmd.type === 'rect'
 
 function filterKind(cmds: DrawCommand[], kind: string): RectCmd[] {
-  return cmds.filter(
-    (c): c is RectCmd => isRect(c) && (c as { kind?: string }).kind === kind,
-  )
+  return cmds.filter((c): c is RectCmd => isRect(c) && (c as { kind?: string }).kind === kind)
 }
 
 /** Hex → [r, g, b] triple; handles #rrggbb. Returns null on malformed input. */
@@ -146,27 +144,23 @@ describe('bullet #1: slot-coloured bullets', () => {
     // from the slot-1 rendering of the same layer. Enforces the
     // "colours-disjoint-across-slots" invariant layer-by-layer.
     fc.assert(
-      fc.property(
-        fc.constantFrom<PlayerSlot>(2, 3, 4),
-        fc.integer({ min: 0, max: 200 }),
-        (slot, tick) => {
-          const slotCmds = renderBulletForSlot(slot, tick)
-          const s1Cmds = renderBulletForSlot(1, tick)
+      fc.property(fc.constantFrom<PlayerSlot>(2, 3, 4), fc.integer({ min: 0, max: 200 }), (slot, tick) => {
+        const slotCmds = renderBulletForSlot(slot, tick)
+        const s1Cmds = renderBulletForSlot(1, tick)
 
-          for (const layer of SLOT_TINTED_LAYERS) {
-            const slotFills = new Set(filterKind(slotCmds, layer).map((c) => c.fill.toLowerCase()))
-            const s1Fills = new Set(filterKind(s1Cmds, layer).map((c) => c.fill.toLowerCase()))
-            // At least one slot fill should differ from the slot-1 fill for this layer.
-            // (If either set is empty for a tick where the layer doesn't emit,
-            // e.g. muzzle-flash requires a NEW bullet, skip the disjointness check.)
-            if (slotFills.size === 0 || s1Fills.size === 0) continue
-            // Difference: any slot-N fill not present in slot-1's fills for this layer.
-            const anyDifferent = [...slotFills].some((f) => !s1Fills.has(f))
-            if (!anyDifferent) return false
-          }
-          return true
-        },
-      ),
+        for (const layer of SLOT_TINTED_LAYERS) {
+          const slotFills = new Set(filterKind(slotCmds, layer).map((c) => c.fill.toLowerCase()))
+          const s1Fills = new Set(filterKind(s1Cmds, layer).map((c) => c.fill.toLowerCase()))
+          // At least one slot fill should differ from the slot-1 fill for this layer.
+          // (If either set is empty for a tick where the layer doesn't emit,
+          // e.g. muzzle-flash requires a NEW bullet, skip the disjointness check.)
+          if (slotFills.size === 0 || s1Fills.size === 0) continue
+          // Difference: any slot-N fill not present in slot-1's fills for this layer.
+          const anyDifferent = [...slotFills].some((f) => !s1Fills.has(f))
+          if (!anyDifferent) return false
+        }
+        return true
+      }),
       { numRuns: 30 },
     )
   })
@@ -218,11 +212,7 @@ describe('bullet #1: slot-coloured bullets', () => {
     // across all slots so existing hitbox/position tests keep finding it.
     const s2 = renderBulletForSlot(2)
     const mainRects = s2.filter(
-      (c): c is RectCmd =>
-        isRect(c) &&
-        c.fill === COLORS.bullet.player &&
-        c.width === CELL_W &&
-        c.height === CELL_H,
+      (c): c is RectCmd => isRect(c) && c.fill === COLORS.bullet.player && c.width === CELL_W && c.height === CELL_H,
     )
     expect(mainRects.length).toBeGreaterThanOrEqual(1)
   })

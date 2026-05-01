@@ -57,24 +57,11 @@ import {
   type GameEvent,
 } from './types'
 
-import type {
-  ClientMessage,
-  ServerMessage,
-  ServerEvent,
-  ErrorCode,
-  InputState,
-} from './protocol'
+import type { ClientMessage, ServerMessage, ServerEvent, ErrorCode, InputState } from './protocol'
 
-import {
-  PIXEL_ART,
-  SPRITE_SIZE,
-} from '../client-core/src/sprites/bitmaps'
+import { PIXEL_ART, SPRITE_SIZE } from '../client-core/src/sprites/bitmaps'
 
-import {
-  COLORS,
-  GRADIENT_COLORS,
-  getPlayerColor,
-} from '../client-core/src/sprites/colors'
+import { COLORS, GRADIENT_COLORS, getPlayerColor } from '../client-core/src/sprites/colors'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -163,19 +150,16 @@ describe('Contract · sprite dimensions are frozen', () => {
   test('every "on" pixel value is exactly 1, every "off" is exactly 0 — PBT', () => {
     const sprites = allSpriteBitmaps()
     fc.assert(
-      fc.property(
-        fc.constantFrom(...sprites.map((_, i) => i)),
-        (idx) => {
-          const { bitmap } = sprites[idx]
-          for (const row of bitmap) {
-            for (const px of row) {
-              // Must be strictly 0 or 1 — not truthy-but-not-1, not 0.5, not null
-              if (px !== 0 && px !== 1) return false
-            }
+      fc.property(fc.constantFrom(...sprites.map((_, i) => i)), (idx) => {
+        const { bitmap } = sprites[idx]
+        for (const row of bitmap) {
+          for (const px of row) {
+            // Must be strictly 0 or 1 — not truthy-but-not-1, not 0.5, not null
+            if (px !== 0 && px !== 1) return false
           }
-          return true
-        },
-      ),
+        }
+        return true
+      }),
       { numRuns: 100 },
     )
     // Also assert explicitly for the fixed sprite set
@@ -424,22 +408,26 @@ describe('Contract · WebSocket protocol shapes', () => {
 
   test('ServerEvent discriminants align with the GameEvent union', () => {
     // Spot-check: every event we construct has a name that's in the GameEvent list
-    const sample: ServerEvent = { type: 'event', name: 'player_joined', data: {
-      player: {
-        id: 'p1',
-        name: 'Alice',
-        x: 60,
-        slot: 1,
-        color: 'cyan',
-        lastShotTick: 0,
-        alive: true,
-        lives: 3,
-        respawnAtTick: null,
-        invulnerableUntilTick: null,
-        kills: 0,
-        inputState: { left: false, right: false },
+    const sample: ServerEvent = {
+      type: 'event',
+      name: 'player_joined',
+      data: {
+        player: {
+          id: 'p1',
+          name: 'Alice',
+          x: 60,
+          slot: 1,
+          color: 'cyan',
+          lastShotTick: 0,
+          alive: true,
+          lives: 3,
+          respawnAtTick: null,
+          invulnerableUntilTick: null,
+          kills: 0,
+          inputState: { left: false, right: false },
+        },
       },
-    } }
+    }
     expect(sample.type).toBe('event')
     expect(sample.name).toBe('player_joined')
     expect(typeof sample.data).toBe('object')
@@ -454,16 +442,13 @@ describe('Contract · pixel art encoding invariants', () => {
   test('every sprite bitmap is non-blank (≥ 20% pixels "on") — PBT', () => {
     const sprites = allSpriteBitmaps()
     fc.assert(
-      fc.property(
-        fc.constantFrom(...sprites.map((_, i) => i)),
-        (idx) => {
-          const { bitmap } = sprites[idx]
-          const total = bitmap.length * bitmap[0].length
-          let on = 0
-          for (const row of bitmap) for (const px of row) if (px === 1) on++
-          return on / total >= 0.2
-        },
-      ),
+      fc.property(fc.constantFrom(...sprites.map((_, i) => i)), (idx) => {
+        const { bitmap } = sprites[idx]
+        const total = bitmap.length * bitmap[0].length
+        let on = 0
+        for (const row of bitmap) for (const px of row) if (px === 1) on++
+        return on / total >= 0.2
+      }),
       { numRuns: 50 },
     )
     // Also do an explicit pass so we get a human-readable failure message
@@ -486,14 +471,11 @@ describe('Contract · pixel art encoding invariants', () => {
   test('every sprite bitmap is rectangular (all rows same column count) — PBT', () => {
     const sprites = allSpriteBitmaps()
     fc.assert(
-      fc.property(
-        fc.constantFrom(...sprites.map((_, i) => i)),
-        (idx) => {
-          const { bitmap } = sprites[idx]
-          const cols = bitmap[0].length
-          return bitmap.every((row) => row.length === cols)
-        },
-      ),
+      fc.property(fc.constantFrom(...sprites.map((_, i) => i)), (idx) => {
+        const { bitmap } = sprites[idx]
+        const cols = bitmap[0].length
+        return bitmap.every((row) => row.length === cols)
+      }),
       { numRuns: 50 },
     )
     for (const { bitmap } of sprites) {

@@ -6,10 +6,7 @@
 // to render nothing (return null) for that status.
 
 import { describe, test, expect } from 'bun:test'
-import {
-  ALL_GAME_STATUSES,
-  STATUS_RENDER_MAP,
-} from '../../shared/state-defaults'
+import { ALL_GAME_STATUSES, STATUS_RENDER_MAP } from '../../shared/state-defaults'
 
 // ─── Status Coverage Tests ───────────────────────────────────────────────────
 
@@ -27,11 +24,7 @@ describe('GameStatus Coverage', () => {
   })
 
   test('STATUS_RENDER_MAP covers all statuses', () => {
-    const allMapped = [
-      ...STATUS_RENDER_MAP.lobby,
-      ...STATUS_RENDER_MAP.game,
-      ...STATUS_RENDER_MAP.gameOver,
-    ]
+    const allMapped = [...STATUS_RENDER_MAP.lobby, ...STATUS_RENDER_MAP.game, ...STATUS_RENDER_MAP.gameOver]
 
     // Every status must be in the render map
     for (const status of ALL_GAME_STATUSES) {
@@ -74,7 +67,7 @@ describe('App.tsx Status Switch Coverage', () => {
     if (missingStatuses.length > 0) {
       throw new Error(
         `App.tsx missing case statements for: ${missingStatuses.join(', ')}\n` +
-        `\nTo fix: Add case statements for these statuses in App.tsx.`
+          `\nTo fix: Add case statements for these statuses in App.tsx.`,
       )
     }
   })
@@ -87,7 +80,7 @@ describe('App.tsx Status Switch Coverage', () => {
     const appSource = fs.readFileSync(appPath, 'utf-8')
 
     // Find the switch statement on state.status specifically
-    const switchMatch = appSource.match(/switch\s*\(\s*state\.status\s*\)\s*\{([^]*?)\n\s*\}/)
+    const switchMatch = appSource.match(/switch\s*\(\s*state\.status\s*\)\s*\{([\s\S]*?)\n\s*\}/)
     expect(switchMatch).not.toBeNull()
 
     const switchBlock = switchMatch![1]
@@ -113,7 +106,7 @@ describe('App.tsx Status Switch Coverage', () => {
     if (unknownStatuses.length > 0) {
       throw new Error(
         `App.tsx switch statement has cases for unknown statuses: ${unknownStatuses.join(', ')}\n` +
-        `These statuses are not in the GameStatus type.`
+          `These statuses are not in the GameStatus type.`,
       )
     }
   })
@@ -153,7 +146,7 @@ describe('Wipe Hold Flash Prevention', () => {
 
     // wipe_hold should NOT be grouped with GameScreen rendering
     // It should have its own case that renders a simple black screen
-    const wipeHoldCase = appSource.match(/case\s+'wipe_hold':\s*\n([^]*?)(?=case\s+'|default:)/s)
+    const wipeHoldCase = appSource.match(/case\s+'wipe_hold':\s*\n([\s\S]*?)(?=case\s+'|default:)/)
     expect(wipeHoldCase).not.toBeNull()
 
     const wipeHoldBlock = wipeHoldCase![1]

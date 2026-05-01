@@ -2,9 +2,23 @@
 // Unit tests for the pure game reducer
 
 import { describe, it, expect, beforeEach } from 'vitest'
-import { gameReducer, canTransition, type GameAction } from './reducer'
-import type { GameState, Player, AlienEntity, BulletEntity, BarrierEntity } from '../../../shared/types'
-import { LAYOUT, DEFAULT_CONFIG, WIPE_TIMING, HITBOX, COUNTDOWN_SECONDS, getBullets, getAliens, getUFOs, getBarriers, checkBarrierSegmentHit, checkAlienHit, checkPlayerHit, checkUfoHit, ALIEN_BULLET_SKIP_INTERVAL } from '../../../shared/types'
+import { gameReducer, canTransition } from './reducer'
+import type { GameState, Player, BarrierEntity } from '../../../shared/types'
+import {
+  LAYOUT,
+  DEFAULT_CONFIG,
+  WIPE_TIMING,
+  HITBOX,
+  COUNTDOWN_SECONDS,
+  getBullets,
+  getAliens,
+  getUFOs,
+  getBarriers,
+  checkBarrierSegmentHit,
+  checkAlienHit,
+  checkPlayerHit,
+  checkUfoHit,
+} from '../../../shared/types'
 import { getScaledConfig } from './scaling'
 import {
   createTestGameState,
@@ -16,7 +30,6 @@ import {
   createTestPlayingState,
   createTestGameStateWithPlayer,
   createTestGameStateWithPlayers,
-  createTestAlienFormation,
   hasEvent,
   getEventData,
 } from '../test-utils'
@@ -138,10 +151,10 @@ describe('PLAYER_JOIN action', () => {
     const player = createTestPlayer({ id: 'p1', name: 'Alice', slot: 1 })
     const result = gameReducer(state, { type: 'PLAYER_JOIN', player })
 
-    expect(result.state.players['p1']).toBeDefined()
-    expect(result.state.players['p1'].name).toBe('Alice')
-    expect(result.state.players['p1'].slot).toBe(1)
-    expect(result.state.players['p1'].alive).toBe(true)
+    expect(result.state.players.p1).toBeDefined()
+    expect(result.state.players.p1.name).toBe('Alice')
+    expect(result.state.players.p1.slot).toBe(1)
+    expect(result.state.players.p1.alive).toBe(true)
   })
 
   it('emits player_joined event', () => {
@@ -183,7 +196,7 @@ describe('PLAYER_JOIN action', () => {
     const player = createTestPlayer({ id: 'p1' })
     const result = gameReducer(playingState, { type: 'PLAYER_JOIN', player })
 
-    expect(result.state.players['p1']).toBeUndefined()
+    expect(result.state.players.p1).toBeUndefined()
     expect(result.events.length).toBe(0)
     expect(result.persist).toBe(false)
   })
@@ -198,7 +211,7 @@ describe('PLAYER_LEAVE action', () => {
     const { state, player } = createTestGameStateWithPlayer({ id: 'p1' })
     const result = gameReducer(state, { type: 'PLAYER_LEAVE', playerId: 'p1' })
 
-    expect(result.state.players['p1']).toBeUndefined()
+    expect(result.state.players.p1).toBeUndefined()
     expect(Object.keys(result.state.players).length).toBe(0)
   })
 
@@ -254,9 +267,9 @@ describe('PLAYER_LEAVE action', () => {
     // p1's bullet should be removed, p2's bullet and alien bullet should remain
     const bullets = getBullets(result.state.entities)
     expect(bullets.length).toBe(2)
-    expect(bullets.find(b => b.id === 'b1')).toBeUndefined()
-    expect(bullets.find(b => b.id === 'b2')).toBeDefined()
-    expect(bullets.find(b => b.id === 'ab1')).toBeDefined()
+    expect(bullets.find((b) => b.id === 'b1')).toBeUndefined()
+    expect(bullets.find((b) => b.id === 'b2')).toBeDefined()
+    expect(bullets.find((b) => b.id === 'ab1')).toBeDefined()
   })
 
   it('does not remove alien bullets when player leaves', () => {
@@ -274,7 +287,7 @@ describe('PLAYER_LEAVE action', () => {
     // Both alien bullets should remain, player's bullet removed
     const bullets = getBullets(result.state.entities)
     expect(bullets.length).toBe(2)
-    expect(bullets.every(b => b.ownerId === null)).toBe(true)
+    expect(bullets.every((b) => b.ownerId === null)).toBe(true)
   })
 
   it('preserves other entities (aliens, barriers) when player leaves', () => {
@@ -290,9 +303,9 @@ describe('PLAYER_LEAVE action', () => {
 
     // Alien and barrier should remain, bullet removed
     expect(result.state.entities.length).toBe(2)
-    expect(result.state.entities.find(e => e.kind === 'alien')).toBeDefined()
-    expect(result.state.entities.find(e => e.kind === 'barrier')).toBeDefined()
-    expect(result.state.entities.find(e => e.kind === 'bullet')).toBeUndefined()
+    expect(result.state.entities.find((e) => e.kind === 'alien')).toBeDefined()
+    expect(result.state.entities.find((e) => e.kind === 'barrier')).toBeDefined()
+    expect(result.state.entities.find((e) => e.kind === 'bullet')).toBeUndefined()
   })
 })
 
@@ -323,7 +336,7 @@ describe('PLAYER_READY action', () => {
 
     const result = gameReducer(state, { type: 'PLAYER_READY', playerId: 'p1' })
 
-    expect(result.state.readyPlayerIds.filter(id => id === 'p1').length).toBe(1)
+    expect(result.state.readyPlayerIds.filter((id) => id === 'p1').length).toBe(1)
     expect(result.events.length).toBe(0)
     expect(result.persist).toBe(false)
   })
@@ -400,13 +413,13 @@ describe('PLAYER_INPUT action', () => {
       input: { left: true, right: false },
     })
 
-    expect(result.state.players['p1'].inputState).toEqual({ left: true, right: false })
+    expect(result.state.players.p1.inputState).toEqual({ left: true, right: false })
   })
 
   it('ignored for dead players (alive: false)', () => {
     const { state, player } = createTestGameStateWithPlayer({ id: 'p1', alive: false })
     state.status = 'playing'
-    const originalInput = { ...state.players['p1'].inputState }
+    const originalInput = { ...state.players.p1.inputState }
 
     const result = gameReducer(state, {
       type: 'PLAYER_INPUT',
@@ -414,7 +427,7 @@ describe('PLAYER_INPUT action', () => {
       input: { left: true, right: true },
     })
 
-    expect(result.state.players['p1'].inputState).toEqual(originalInput)
+    expect(result.state.players.p1.inputState).toEqual(originalInput)
     expect(result.persist).toBe(false)
   })
 
@@ -441,7 +454,7 @@ describe('PLAYER_INPUT action', () => {
       input: { left: true, right: false },
     })
 
-    expect(result.state.players['p1'].inputState).toEqual({ left: true, right: false })
+    expect(result.state.players.p1.inputState).toEqual({ left: true, right: false })
   })
 })
 
@@ -517,7 +530,7 @@ describe('PLAYER_SHOOT action', () => {
     const player = players[0]
     player.x = 60
     player.lastShotTick = 0
-    state.tick = 10  // Past cooldown (6 ticks)
+    state.tick = 10 // Past cooldown (6 ticks)
     state.players[player.id] = player
 
     const result = gameReducer(state, { type: 'PLAYER_SHOOT', playerId: player.id })
@@ -615,7 +628,7 @@ describe('bullet spawn position centering', () => {
     it('bullet.x equals player.x (player.x is CENTER, not left edge)', () => {
       const { state, players } = createTestPlayingState(1)
       const player = players[0]
-      player.x = 50  // This is the CENTER of the sprite
+      player.x = 50 // This is the CENTER of the sprite
       state.tick = 100
       state.players[player.id] = player
 
@@ -635,7 +648,7 @@ describe('bullet spawn position centering', () => {
       for (const playerX of testPositions) {
         const { state, players } = createTestPlayingState(1)
         const player = players[0]
-        player.x = playerX  // Center position
+        player.x = playerX // Center position
         state.tick = 100
         state.players[player.id] = player
 
@@ -652,13 +665,13 @@ describe('bullet spawn position centering', () => {
     it('DOCUMENTS: adding SPRITE_WIDTH/2 offset would be WRONG', () => {
       // This test documents WHY the old formula was wrong
       const playerX = 50
-      const spriteWidth = LAYOUT.PLAYER_WIDTH  // 7
+      const spriteWidth = LAYOUT.PLAYER_WIDTH // 7
 
       // WRONG: This assumes player.x is left edge
-      const wrongBulletX = playerX + Math.floor(spriteWidth / 2)  // 50 + 3 = 53
+      const wrongBulletX = playerX + Math.floor(spriteWidth / 2) // 50 + 3 = 53
 
       // CORRECT: player.x IS the center, no offset needed
-      const correctBulletX = playerX  // 50
+      const correctBulletX = playerX // 50
 
       // The wrong formula places bullet 3 columns to the right
       expect(wrongBulletX - correctBulletX).toBe(3)
@@ -1048,7 +1061,7 @@ describe('TICK action (tickReducer)', () => {
       const result = gameReducer(state, { type: 'TICK' })
 
       const bullets = getBullets(result.state.entities)
-      const movedBullet = bullets.find(b => b.id === 'b1')
+      const movedBullet = bullets.find((b) => b.id === 'b1')
       expect(movedBullet?.y).toBe(20 - state.config.baseBulletSpeed)
     })
 
@@ -1061,7 +1074,7 @@ describe('TICK action (tickReducer)', () => {
       const result = gameReducer(state, { type: 'TICK' })
 
       const bullets = getBullets(result.state.entities)
-      const movedBullet = bullets.find(b => b.id === 'ab1')
+      const movedBullet = bullets.find((b) => b.id === 'ab1')
       expect(movedBullet?.y).toBe(10 + state.config.baseBulletSpeed)
     })
 
@@ -1074,7 +1087,7 @@ describe('TICK action (tickReducer)', () => {
       const result = gameReducer(state, { type: 'TICK' })
 
       const bullets = getBullets(result.state.entities)
-      const movedBullet = bullets.find(b => b.id === 'ab1')
+      const movedBullet = bullets.find((b) => b.id === 'ab1')
       expect(movedBullet?.y).toBe(10) // Did not move
     })
 
@@ -1086,7 +1099,7 @@ describe('TICK action (tickReducer)', () => {
       const result = gameReducer(state, { type: 'TICK' })
 
       const bullets = getBullets(result.state.entities)
-      expect(bullets.find(b => b.id === 'b1')).toBeUndefined()
+      expect(bullets.find((b) => b.id === 'b1')).toBeUndefined()
     })
 
     it('off-screen bullets are removed (y >= height)', () => {
@@ -1097,7 +1110,7 @@ describe('TICK action (tickReducer)', () => {
       const result = gameReducer(state, { type: 'TICK' })
 
       const bullets = getBullets(result.state.entities)
-      expect(bullets.find(b => b.id === 'ab1')).toBeUndefined()
+      expect(bullets.find((b) => b.id === 'ab1')).toBeUndefined()
     })
   })
 
@@ -1112,7 +1125,7 @@ describe('TICK action (tickReducer)', () => {
 
       // Dead aliens are cleaned up at end of tick (like UFOs)
       const aliens = getAliens(result.state.entities)
-      expect(aliens.find(a => a.id === 'alien1')).toBeUndefined()
+      expect(aliens.find((a) => a.id === 'alien1')).toBeUndefined()
     })
 
     it('score is increased by alien points', () => {
@@ -1138,10 +1151,7 @@ describe('TICK action (tickReducer)', () => {
       expect(hasEvent(result.events, 'alien_killed')).toBe(true)
       expect(hasEvent(result.events, 'score_awarded')).toBe(true)
 
-      const alienKilledData = getEventData<{ alienId: string; playerId: string | null }>(
-        result.events,
-        'alien_killed'
-      )
+      const alienKilledData = getEventData<{ alienId: string; playerId: string | null }>(result.events, 'alien_killed')
       expect(alienKilledData?.alienId).toBe('alien1')
       expect(alienKilledData?.playerId).toBe(players[0].id)
     })
@@ -1218,9 +1228,7 @@ describe('TICK action (tickReducer)', () => {
 
       const result = gameReducer(state, { type: 'TICK' })
 
-      expect(result.state.players[player.id].respawnAtTick).toBe(
-        101 + state.config.respawnDelayTicks
-      )
+      expect(result.state.players[player.id].respawnAtTick).toBe(101 + state.config.respawnDelayTicks)
     })
 
     it('inputState is cleared on death', () => {
@@ -1250,8 +1258,8 @@ describe('TICK action (tickReducer)', () => {
 
       const result = gameReducer(state, { type: 'TICK' })
 
-      const barriers = result.state.entities.filter(e => e.kind === 'barrier')
-      const updatedBarrier = barriers.find(b => b.id === 'barrier1')
+      const barriers = result.state.entities.filter((e) => e.kind === 'barrier')
+      const updatedBarrier = barriers.find((b) => b.id === 'barrier1')
       expect((updatedBarrier as any).segments[0].health).toBe(3)
     })
 
@@ -1265,7 +1273,7 @@ describe('TICK action (tickReducer)', () => {
       const result = gameReducer(state, { type: 'TICK' })
 
       const bullets = getBullets(result.state.entities)
-      expect(bullets.find(b => b.id === 'b1')).toBeUndefined()
+      expect(bullets.find((b) => b.id === 'b1')).toBeUndefined()
     })
   })
 
@@ -1408,7 +1416,7 @@ describe('UFO spawning and movement', () => {
 
     const result = gameReducer(state, { type: 'TICK' })
 
-    const ufos = result.state.entities.filter(e => e.kind === 'ufo')
+    const ufos = result.state.entities.filter((e) => e.kind === 'ufo')
     expect(ufos.length).toBe(1)
     expect(ufos[0].x).toBe(51) // Moved right by 1
   })
@@ -1421,7 +1429,7 @@ describe('UFO spawning and movement', () => {
 
     const result = gameReducer(state, { type: 'TICK' })
 
-    const ufos = result.state.entities.filter(e => e.kind === 'ufo')
+    const ufos = result.state.entities.filter((e) => e.kind === 'ufo')
     expect(ufos.length).toBe(0)
   })
 
@@ -1433,7 +1441,7 @@ describe('UFO spawning and movement', () => {
 
     const result = gameReducer(state, { type: 'TICK' })
 
-    const ufos = result.state.entities.filter(e => e.kind === 'ufo')
+    const ufos = result.state.entities.filter((e) => e.kind === 'ufo')
     expect(ufos.length).toBe(0)
   })
 
@@ -1449,7 +1457,7 @@ describe('UFO spawning and movement', () => {
     for (let i = 0; i < 1000 && !spawned; i++) {
       const result = gameReducer(currentState, { type: 'TICK' })
       currentState = result.state
-      const ufos = result.state.entities.filter(e => e.kind === 'ufo')
+      const ufos = result.state.entities.filter((e) => e.kind === 'ufo')
       if (ufos.length > 0) {
         spawned = true
         expect(ufos[0].y).toBe(1) // UFO spawns at y=1
@@ -1470,7 +1478,7 @@ describe('UFO-bullet collision', () => {
 
     const result = gameReducer(state, { type: 'TICK' })
 
-    const ufos = result.state.entities.filter(e => e.kind === 'ufo')
+    const ufos = result.state.entities.filter((e) => e.kind === 'ufo')
     expect(ufos.length).toBe(0) // UFO removed when killed
   })
 
@@ -1511,7 +1519,7 @@ describe('UFO-bullet collision', () => {
     expect(hasEvent(result.events, 'score_awarded')).toBe(true)
     const scoreEvent = getEventData<{ playerId: string; points: number; source: string }>(
       result.events,
-      'score_awarded'
+      'score_awarded',
     )
     expect(scoreEvent?.source).toBe('ufo')
     expect(scoreEvent?.points).toBe(100)
@@ -1532,7 +1540,7 @@ describe('barrier segment damage progression', () => {
 
     const result = gameReducer(state, { type: 'TICK' })
 
-    const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as any
+    const updatedBarrier = result.state.entities.find((e) => e.id === 'barrier1') as any
     expect(updatedBarrier.segments[0].health).toBe(3)
   })
 
@@ -1545,7 +1553,7 @@ describe('barrier segment damage progression', () => {
 
     const result = gameReducer(state, { type: 'TICK' })
 
-    const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as any
+    const updatedBarrier = result.state.entities.find((e) => e.id === 'barrier1') as any
     expect(updatedBarrier.segments[0].health).toBe(2)
   })
 
@@ -1558,7 +1566,7 @@ describe('barrier segment damage progression', () => {
 
     const result = gameReducer(state, { type: 'TICK' })
 
-    const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as any
+    const updatedBarrier = result.state.entities.find((e) => e.id === 'barrier1') as any
     expect(updatedBarrier.segments[0].health).toBe(1)
   })
 
@@ -1571,7 +1579,7 @@ describe('barrier segment damage progression', () => {
 
     const result = gameReducer(state, { type: 'TICK' })
 
-    const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as any
+    const updatedBarrier = result.state.entities.find((e) => e.id === 'barrier1') as any
     expect(updatedBarrier.segments[0].health).toBe(0)
   })
 
@@ -1587,12 +1595,12 @@ describe('barrier segment damage progression', () => {
     // Bullet should pass through destroyed segment (health=0)
     const bullets = getBullets(result.state.entities)
     // The bullet continues moving upward (was not absorbed by destroyed segment)
-    const movedBullet = bullets.find(b => b.id === 'b1')
+    const movedBullet = bullets.find((b) => b.id === 'b1')
     expect(movedBullet).toBeDefined()
     expect(movedBullet!.y).toBe(LAYOUT.BARRIER_Y) // Moved up by 1
 
     // Segment health stays at 0
-    const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as any
+    const updatedBarrier = result.state.entities.find((e) => e.id === 'barrier1') as any
     expect(updatedBarrier.segments[0].health).toBe(0)
   })
 
@@ -1606,7 +1614,7 @@ describe('barrier segment damage progression', () => {
 
     const result = gameReducer(state, { type: 'TICK' })
 
-    const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as any
+    const updatedBarrier = result.state.entities.find((e) => e.id === 'barrier1') as any
     expect(updatedBarrier.segments[0].health).toBe(3)
   })
 
@@ -1624,7 +1632,7 @@ describe('barrier segment damage progression', () => {
     state1.entities = [barrier1, bulletOutsideLeft]
 
     const result1 = gameReducer(state1, { type: 'TICK' })
-    const updatedBarrier1 = result1.state.entities.find(e => e.id === 'barrier1') as any
+    const updatedBarrier1 = result1.state.entities.find((e) => e.id === 'barrier1') as any
     // Segment at x=50 should be undamaged - bullet at x=49 is outside barrier
     expect(updatedBarrier1.segments[0].health).toBe(4)
 
@@ -1635,7 +1643,7 @@ describe('barrier segment damage progression', () => {
     state2.entities = [barrier2, bulletAligned]
 
     const result2 = gameReducer(state2, { type: 'TICK' })
-    const updatedBarrier2 = result2.state.entities.find(e => e.id === 'barrier2') as any
+    const updatedBarrier2 = result2.state.entities.find((e) => e.id === 'barrier2') as any
     // Segment[0] at x=50 should be damaged
     expect(updatedBarrier2.segments[0].health).toBe(3)
 
@@ -1646,7 +1654,7 @@ describe('barrier segment damage progression', () => {
     state3.entities = [barrier3, bulletOutsideRight]
 
     const result3 = gameReducer(state3, { type: 'TICK' })
-    const updatedBarrier3 = result3.state.entities.find(e => e.id === 'barrier3') as any
+    const updatedBarrier3 = result3.state.entities.find((e) => e.id === 'barrier3') as any
     // Segment at x=56 should be undamaged - bullet at x=59 is outside barrier (only 3 segments wide in test)
     expect(updatedBarrier3.segments[2].health).toBe(4)
   })
@@ -1701,7 +1709,7 @@ describe('barrier protection vs player hitbox mismatch', () => {
 
     const { state, players } = createTestPlayingState(1)
     const player = players[0]
-    player.x = 52  // Center player behind barrier
+    player.x = 52 // Center player behind barrier
     state.players[player.id] = player
 
     const barrier = createFullBarrier('barrier1', 50)
@@ -1755,9 +1763,9 @@ describe('barrier protection vs player hitbox mismatch', () => {
 
     // Verify bullet misses barrier (bullet is below barrier Y)
     const result = gameReducer(state, { type: 'TICK' })
-    const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
-    const allSegmentsUndamaged = updatedBarrier.segments.every(s => s.health === 4)
-    expect(allSegmentsUndamaged).toBe(true)  // Bullet missed barrier
+    const updatedBarrier = result.state.entities.find((e) => e.id === 'barrier1') as BarrierEntity
+    const allSegmentsUndamaged = updatedBarrier.segments.every((s) => s.health === 4)
+    expect(allSegmentsUndamaged).toBe(true) // Bullet missed barrier
 
     // Player should still be protected
     const playerAfter = result.state.players[player.id]
@@ -1779,9 +1787,9 @@ describe('barrier protection vs player hitbox mismatch', () => {
     const result = gameReducer(state, { type: 'TICK' })
 
     // Bullet should hit barrier segment at offsetX=2 (x = 50 + 2*3 = 56)
-    const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
-    const hitSegment = updatedBarrier.segments.find(s => s.health === 3)
-    expect(hitSegment?.offsetX).toBe(2)  // Segment 2 is at x=56
+    const updatedBarrier = result.state.entities.find((e) => e.id === 'barrier1') as BarrierEntity
+    const hitSegment = updatedBarrier.segments.find((s) => s.health === 3)
+    expect(hitSegment?.offsetX).toBe(2) // Segment 2 is at x=56
 
     // Player should be unharmed
     const playerAfter = result.state.players[player.id]
@@ -1811,7 +1819,7 @@ describe('multiple players shooting simultaneously', () => {
 
     const bullets = getBullets(result.state.entities)
     expect(bullets.length).toBe(2)
-    expect(bullets.map(b => b.ownerId).sort()).toEqual([player1.id, player2.id].sort())
+    expect(bullets.map((b) => b.ownerId).sort()).toEqual([player1.id, player2.id].sort())
   })
 
   it('each player can kill different aliens', () => {
@@ -1910,7 +1918,7 @@ describe('invulnerability after respawn', () => {
     const centerX = Math.floor(DEFAULT_CONFIG.width / 2)
     player.x = centerX
     player.lives = 2
-    player.invulnerableUntilTick = 100  // Invulnerable until tick 100
+    player.invulnerableUntilTick = 100 // Invulnerable until tick 100
     state.tick = 50
     state.players[player.id] = player
 
@@ -1931,7 +1939,7 @@ describe('invulnerability after respawn', () => {
     const centerX = Math.floor(DEFAULT_CONFIG.width / 2)
     player.x = centerX
     player.lives = 2
-    player.invulnerableUntilTick = 50  // Invulnerability expired
+    player.invulnerableUntilTick = 50 // Invulnerability expired
     state.tick = 50
     state.players[player.id] = player
 
@@ -1969,12 +1977,12 @@ describe('bottom-row-only alien shooting', () => {
 
     for (let i = 0; i < 2000; i++) {
       const result = gameReducer(currentState, { type: 'TICK' })
-      const newBullets = getBullets(result.state.entities).filter(b => b.ownerId === null)
+      const newBullets = getBullets(result.state.entities).filter((b) => b.ownerId === null)
       bulletsCreated += newBullets.length
 
       // Clear bullets for next iteration
       currentState = structuredClone(result.state)
-      currentState.entities = currentState.entities.filter(e => e.kind !== 'bullet')
+      currentState.entities = currentState.entities.filter((e) => e.kind !== 'bullet')
     }
 
     // Should have created some alien bullets over 2000 ticks
@@ -1997,7 +2005,7 @@ describe('bottom-row-only alien shooting', () => {
 
     for (let i = 0; i < 500; i++) {
       const result = gameReducer(currentState, { type: 'TICK' })
-      const newBullets = getBullets(result.state.entities).filter(b => b.ownerId === null)
+      const newBullets = getBullets(result.state.entities).filter((b) => b.ownerId === null)
       bulletsCreated += newBullets.length
       currentState = structuredClone(result.state)
     }
@@ -2022,14 +2030,14 @@ describe('bottom-row-only alien shooting', () => {
 
     for (let i = 0; i < 2000 && !alienBulletFired; i++) {
       const result = gameReducer(currentState, { type: 'TICK' })
-      const newBullets = getBullets(result.state.entities).filter(b => b.ownerId === null)
+      const newBullets = getBullets(result.state.entities).filter((b) => b.ownerId === null)
 
       if (newBullets.length > 0) {
         alienBulletFired = true
       }
 
       currentState = structuredClone(result.state)
-      currentState.entities = currentState.entities.filter(e => e.kind !== 'bullet')
+      currentState.entities = currentState.entities.filter((e) => e.kind !== 'bullet')
     }
 
     // The surviving alien should be able to fire
@@ -2094,7 +2102,7 @@ describe('4-player game scenarios', () => {
     expect(bullets.length).toBe(4)
 
     // Each bullet should be owned by a different player
-    const ownerIds = bullets.map(b => b.ownerId).sort()
+    const ownerIds = bullets.map((b) => b.ownerId).sort()
     const playerIds = [p1.id, p2.id, p3.id, p4.id].sort()
     expect(ownerIds).toEqual(playerIds)
   })
@@ -2134,7 +2142,7 @@ describe('4-player game scenarios', () => {
 
     // All 4 aliens should be killed
     const remainingAliens = getAliens(result.state.entities)
-    const liveAliens = remainingAliens.filter(a => a.alive)
+    const liveAliens = remainingAliens.filter((a) => a.alive)
     expect(liveAliens.length).toBe(0)
 
     // Total score should be 10+20+30+10 = 70
@@ -2147,12 +2155,8 @@ describe('4-player game scenarios', () => {
     expect(result.state.players[p4.id].kills).toBe(1)
 
     // Should emit 4 alien_killed events and 4 score_awarded events
-    const alienKilledEvents = result.events.filter(
-      e => e.type === 'event' && e.name === 'alien_killed'
-    )
-    const scoreEvents = result.events.filter(
-      e => e.type === 'event' && e.name === 'score_awarded'
-    )
+    const alienKilledEvents = result.events.filter((e) => e.type === 'event' && e.name === 'alien_killed')
+    const scoreEvents = result.events.filter((e) => e.type === 'event' && e.name === 'score_awarded')
     expect(alienKilledEvents.length).toBe(4)
     expect(scoreEvents.length).toBe(4)
   })
@@ -2388,7 +2392,7 @@ describe('alien entering flag (prevents shooting during wipe_reveal)', () => {
       // Run many ticks with entering aliens
       for (let i = 0; i < 100; i++) {
         const result = gameReducer(currentState, { type: 'TICK' })
-        const newBullets = getBullets(result.state.entities).filter(b => b.ownerId === null)
+        const newBullets = getBullets(result.state.entities).filter((b) => b.ownerId === null)
         bulletsCreated += newBullets.length
         currentState = structuredClone(result.state)
         // Keep entering flag set
@@ -2414,10 +2418,10 @@ describe('alien entering flag (prevents shooting during wipe_reveal)', () => {
       // Run many ticks with normal aliens
       for (let i = 0; i < 2000; i++) {
         const result = gameReducer(currentState, { type: 'TICK' })
-        const newBullets = getBullets(result.state.entities).filter(b => b.ownerId === null)
+        const newBullets = getBullets(result.state.entities).filter((b) => b.ownerId === null)
         bulletsCreated += newBullets.length
         currentState = structuredClone(result.state)
-        currentState.entities = currentState.entities.filter(e => e.kind !== 'bullet')
+        currentState.entities = currentState.entities.filter((e) => e.kind !== 'bullet')
       }
 
       // Aliens should have fired during the period
@@ -2438,7 +2442,7 @@ describe('alien entering flag (prevents shooting during wipe_reveal)', () => {
       // Run many ticks with mixed aliens
       for (let i = 0; i < 100; i++) {
         const result = gameReducer(currentState, { type: 'TICK' })
-        const newBullets = getBullets(result.state.entities).filter(b => b.ownerId === null)
+        const newBullets = getBullets(result.state.entities).filter((b) => b.ownerId === null)
         bulletsCreated += newBullets.length
         currentState = structuredClone(result.state)
       }
@@ -2660,7 +2664,7 @@ describe('Sprite shape vs hitbox alignment', () => {
 
       const { state, players } = createTestPlayingState(1)
       const player = players[0]
-      player.x = 50  // Center at 50, visual: [47, 53]
+      player.x = 50 // Center at 50, visual: [47, 53]
       state.players[player.id] = player
 
       // Bullet at x=54 is 1 char past visual right edge - should MISS
@@ -2671,7 +2675,7 @@ describe('Sprite shape vs hitbox alignment', () => {
       const playerAfter = result.state.players[player.id]
 
       // checkPlayerHit: 54 >= 47 && 54 < 54 → false (54 not < 54)
-      expect(playerAfter.alive).toBe(true)  // Correctly misses!
+      expect(playerAfter.alive).toBe(true) // Correctly misses!
     })
 
     it('player hitbox now matches visual sprite', () => {
@@ -2698,7 +2702,7 @@ describe('Sprite shape vs hitbox alignment', () => {
 
       const result1 = gameReducer(state1, { type: 'TICK' })
       // FIXED: 47 >= 47 && 47 < 54 -> HIT
-      expect(result1.state.players[player1.id].alive).toBe(false)  // Bullet at visual left edge now HITS
+      expect(result1.state.players[player1.id].alive).toBe(false) // Bullet at visual left edge now HITS
     })
 
     it('documents correct hitbox boundaries for player', () => {
@@ -2731,7 +2735,7 @@ describe('Sprite shape vs hitbox alignment', () => {
         const result = gameReducer(state, { type: 'TICK' })
         const hit = !result.state.players[player.id].alive
 
-        expect(hit).toBe(tc.expectedHit)  // Correct behavior
+        expect(hit).toBe(tc.expectedHit) // Correct behavior
       }
     })
   })
@@ -2771,40 +2775,40 @@ describe('Sprite shape vs hitbox alignment', () => {
 
         const result = gameReducer(state, { type: 'TICK' })
         // Dead aliens are cleaned up at end of tick, so check if alien is removed (undefined)
-        const alienAfter = getAliens(result.state.entities).find(a => a.id === 'alien1')
-        const hit = alienAfter === undefined  // Alien removed = was hit
+        const alienAfter = getAliens(result.state.entities).find((a) => a.id === 'alien1')
+        const hit = alienAfter === undefined // Alien removed = was hit
 
-        expect(hit).toBe(tc.expectedHit)  // Correct behavior
+        expect(hit).toBe(tc.expectedHit) // Correct behavior
       }
     })
 
     it('bullet left of visual alien sprite now correctly misses', () => {
       const { state, players } = createTestPlayingState(1)
-      const alien = createTestAlien('alien1', 50, 10)  // Visual: [50, 56]
-      const bullet = createTestBullet('b1', 49, 10, players[0].id, -1)  // 1 char LEFT of visual
+      const alien = createTestAlien('alien1', 50, 10) // Visual: [50, 56]
+      const bullet = createTestBullet('b1', 49, 10, players[0].id, -1) // 1 char LEFT of visual
       state.entities = [alien, bullet]
 
       const result = gameReducer(state, { type: 'TICK' })
-      const alienAfter = getAliens(result.state.entities).find(a => a.id === 'alien1')
+      const alienAfter = getAliens(result.state.entities).find((a) => a.id === 'alien1')
 
       // 49 < 50 -> MISS
       // x=49 is visually LEFT of alien sprite, correctly misses
-      expect(alienAfter?.alive).toBe(true)  // Correctly misses!
+      expect(alienAfter?.alive).toBe(true) // Correctly misses!
     })
 
     it('bullet at visual right edge now correctly hits alien', () => {
       const { state, players } = createTestPlayingState(1)
-      const alien = createTestAlien('alien1', 50, 10)  // Visual: [50, 56]
-      const bullet = createTestBullet('b1', 56, 10, players[0].id, -1)  // Visual right edge
+      const alien = createTestAlien('alien1', 50, 10) // Visual: [50, 56]
+      const bullet = createTestBullet('b1', 56, 10, players[0].id, -1) // Visual right edge
       state.entities = [alien, bullet]
 
       const result = gameReducer(state, { type: 'TICK' })
       // Dead aliens are cleaned up at end of tick
-      const alienAfter = getAliens(result.state.entities).find(a => a.id === 'alien1')
+      const alienAfter = getAliens(result.state.entities).find((a) => a.id === 'alien1')
 
       // 56 >= 50 && 56 < 57 -> HIT
       // x=56 is visually ON the alien sprite, correctly hits
-      expect(alienAfter).toBeUndefined()  // Alien removed = was hit correctly!
+      expect(alienAfter).toBeUndefined() // Alien removed = was hit correctly!
     })
   })
 
@@ -2836,7 +2840,7 @@ describe('Sprite shape vs hitbox alignment', () => {
         state.entities = [ufo, bullet, createTestAlien('a1', 20, 5)]
 
         const result = gameReducer(state, { type: 'TICK' })
-        const ufoAfter = getUFOs(result.state.entities).find(u => u.id === 'ufo1')
+        const ufoAfter = getUFOs(result.state.entities).find((u) => u.id === 'ufo1')
         const hit = !ufoAfter?.alive
 
         expect(hit).toBe(tc.expectedHit)
@@ -2884,10 +2888,10 @@ describe('Sprite shape vs hitbox alignment', () => {
       state.entities = [barrier, bullet]
 
       const result = gameReducer(state, { type: 'TICK' })
-      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
+      const updatedBarrier = result.state.entities.find((e) => e.id === 'barrier1') as BarrierEntity
 
       // Collision: bullet x=53 is in segment offsetX=1 (spans [53, 56))
-      const hitSegment = updatedBarrier.segments.find(s => s.health === 3)
+      const hitSegment = updatedBarrier.segments.find((s) => s.health === 3)
       expect(hitSegment?.offsetX).toBe(1)
     })
 
@@ -2913,10 +2917,10 @@ describe('Sprite shape vs hitbox alignment', () => {
       state.entities = [barrier, bullet]
 
       const result = gameReducer(state, { type: 'TICK' })
-      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
+      const updatedBarrier = result.state.entities.find((e) => e.id === 'barrier1') as BarrierEntity
 
       // Collision hits segment at offsetX=0 (spans [50, 53), bullet at 52 is inside)
-      const hitSegment = updatedBarrier.segments.find(s => s.health === 3)
+      const hitSegment = updatedBarrier.segments.find((s) => s.health === 3)
       expect(hitSegment?.offsetX).toBe(0)
     })
 
@@ -2990,10 +2994,10 @@ describe('Sprite shape vs hitbox alignment', () => {
       state.entities = [barrier, bullet]
 
       const result = gameReducer(state, { type: 'TICK' })
-      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
+      const updatedBarrier = result.state.entities.find((e) => e.id === 'barrier1') as BarrierEntity
 
       // Should hit segment at offsetX=2 (visually at x=56-58)
-      const hitSegment = updatedBarrier.segments.find(s => s.health === 3)
+      const hitSegment = updatedBarrier.segments.find((s) => s.health === 3)
       expect(hitSegment?.offsetX).toBe(2)
     })
 
@@ -3021,11 +3025,11 @@ describe('Sprite shape vs hitbox alignment', () => {
       state.entities = [barrier, bullet]
 
       const result = gameReducer(state, { type: 'TICK' })
-      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as BarrierEntity
-      const remainingBullets = result.state.entities.filter(e => e.kind === 'bullet')
+      const updatedBarrier = result.state.entities.find((e) => e.id === 'barrier1') as BarrierEntity
+      const remainingBullets = result.state.entities.filter((e) => e.kind === 'bullet')
 
       // Bullet should be destroyed, segment at offsetX=3 should be damaged
-      const hitSegment = updatedBarrier.segments.find(s => s.health === 3)
+      const hitSegment = updatedBarrier.segments.find((s) => s.health === 3)
       expect(hitSegment?.offsetX).toBe(3)
       expect(remainingBullets.length).toBe(0)
     })
@@ -3120,13 +3124,13 @@ describe('collision edge cases', () => {
 
       // Alien should be killed
       const aliens = getAliens(result.state.entities)
-      expect(aliens.find(a => a.id === 'alien1')).toBeUndefined()
+      expect(aliens.find((a) => a.id === 'alien1')).toBeUndefined()
 
       // Score awarded for alien kill
       expect(result.state.score).toBe(10)
 
       // Barrier should NOT be damaged (bullet was consumed by alien)
-      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as any
+      const updatedBarrier = result.state.entities.find((e) => e.id === 'barrier1') as any
       expect(updatedBarrier.segments[0].health).toBe(4)
     })
 
@@ -3147,10 +3151,10 @@ describe('collision edge cases', () => {
 
       // Alien should still be alive
       const aliens = getAliens(result.state.entities)
-      expect(aliens.find(a => a.id === 'alien1')?.alive).toBe(true)
+      expect(aliens.find((a) => a.id === 'alien1')?.alive).toBe(true)
 
       // Barrier should be damaged
-      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as any
+      const updatedBarrier = result.state.entities.find((e) => e.id === 'barrier1') as any
       expect(updatedBarrier.segments[0].health).toBe(3)
     })
 
@@ -3173,7 +3177,7 @@ describe('collision edge cases', () => {
       const result = gameReducer(state, { type: 'TICK' })
 
       // Barrier should be damaged
-      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as any
+      const updatedBarrier = result.state.entities.find((e) => e.id === 'barrier1') as any
       expect(updatedBarrier.segments[0].health).toBe(3)
 
       // Player should be alive (bullet was absorbed by barrier)
@@ -3200,9 +3204,7 @@ describe('collision edge cases', () => {
       const result = gameReducer(state, { type: 'TICK' })
 
       // Only one alien killed event should fire
-      const alienKilledEvents = result.events.filter(
-        e => e.type === 'event' && e.name === 'alien_killed'
-      )
+      const alienKilledEvents = result.events.filter((e) => e.type === 'event' && e.name === 'alien_killed')
       expect(alienKilledEvents.length).toBe(1)
 
       // Score should be awarded only once
@@ -3230,7 +3232,7 @@ describe('collision edge cases', () => {
 
       // Second bullet should still exist (was not consumed because alien was already dead)
       const bullets = getBullets(result.state.entities)
-      const remainingBullet = bullets.find(b => b.id === 'b2')
+      const remainingBullet = bullets.find((b) => b.id === 'b2')
       expect(remainingBullet).toBeDefined()
       // It should have moved up by baseBulletSpeed
       expect(remainingBullet!.y).toBe(10) // 11 - 1
@@ -3258,8 +3260,8 @@ describe('collision edge cases', () => {
 
       // Both bullets should still exist (they pass through each other)
       const bullets = getBullets(result.state.entities)
-      const pb = bullets.find(b => b.id === 'pb1')
-      const ab = bullets.find(b => b.id === 'ab1')
+      const pb = bullets.find((b) => b.id === 'pb1')
+      const ab = bullets.find((b) => b.id === 'ab1')
 
       expect(pb).toBeDefined()
       expect(ab).toBeDefined()
@@ -3341,7 +3343,7 @@ describe('collision edge cases', () => {
 
       // UFO at y=1, alien also nearby
       const ufo = createTestUFO('ufo1', 50, { points: 100 })
-      const alien = createTestAlien('alien1', 50, 2) // Close to UFO
+      const _alien = createTestAlien('alien1', 50, 2) // Close to UFO
       // Bullet at y=1 will collide with UFO first (aliens checked first, but bullet at y=0 after move)
       // Actually: bullets move first, then alien check, then UFO check
       // Bullet at y=2, moves to y=1, checks aliens (alien at y=2, bullet now at y=1, |1-2|=1 < 2 so HIT)
@@ -3520,11 +3522,11 @@ describe('collision edge cases', () => {
 
       // Alien should be hit (checked first)
       const aliens = getAliens(result.state.entities)
-      expect(aliens.find(a => a.id === 'alien1')).toBeUndefined()
+      expect(aliens.find((a) => a.id === 'alien1')).toBeUndefined()
       expect(result.state.score).toBeGreaterThan(0)
 
       // Barrier should NOT be damaged (bullet was consumed by alien)
-      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as any
+      const updatedBarrier = result.state.entities.find((e) => e.id === 'barrier1') as any
       expect(updatedBarrier.segments[0].health).toBe(4)
     })
 
@@ -3545,7 +3547,7 @@ describe('collision edge cases', () => {
 
       // Alien should be hit (checked first)
       const aliens = getAliens(result.state.entities)
-      expect(aliens.find(a => a.id === 'alien1')).toBeUndefined()
+      expect(aliens.find((a) => a.id === 'alien1')).toBeUndefined()
 
       // UFO should still be alive (bullet was consumed by alien)
       const ufos = getUFOs(result.state.entities)
@@ -3643,7 +3645,7 @@ describe('boundary conditions', () => {
       // Discrete move speed is 2, so moving left from MIN_X + 1 should clamp to MIN_X
       const { state, players } = createTestPlayingState(1)
       const player = players[0]
-      player.x = LAYOUT.PLAYER_MIN_X + 1  // x = 4
+      player.x = LAYOUT.PLAYER_MIN_X + 1 // x = 4
       state.players[player.id] = player
 
       const result = gameReducer(state, { type: 'PLAYER_MOVE', playerId: player.id, direction: 'left' })
@@ -3656,7 +3658,7 @@ describe('boundary conditions', () => {
       // Discrete move speed is 2, so moving right from MAX_X - 1 should clamp to MAX_X
       const { state, players } = createTestPlayingState(1)
       const player = players[0]
-      player.x = LAYOUT.PLAYER_MAX_X - 1  // x = 113
+      player.x = LAYOUT.PLAYER_MAX_X - 1 // x = 113
       state.players[player.id] = player
 
       const result = gameReducer(state, { type: 'PLAYER_MOVE', playerId: player.id, direction: 'right' })
@@ -3736,10 +3738,7 @@ describe('boundary conditions', () => {
 
     it('multiple aliens: rightmost one triggers reversal for all', () => {
       const { state, players } = createTestPlayingState(1, {
-        aliens: [
-          createTestAlien('alien1', 50, 10),
-          createTestAlien('alien2', LAYOUT.ALIEN_MAX_X - 1, 10),
-        ],
+        aliens: [createTestAlien('alien1', 50, 10), createTestAlien('alien2', LAYOUT.ALIEN_MAX_X - 1, 10)],
       })
       state.alienDirection = 1
       state.tick = DEFAULT_CONFIG.baseAlienMoveIntervalTicks - 1
@@ -3770,7 +3769,7 @@ describe('boundary conditions', () => {
       expect(result.state.alienDirection).toBe(1)
       // Living alien should move right
       const aliens = getAliens(result.state.entities)
-      const aliveAlien = aliens.find(a => a.id === 'alive')
+      const aliveAlien = aliens.find((a) => a.id === 'alive')
       expect(aliveAlien!.x).toBe(52) // 50 + 2
     })
   })
@@ -3784,7 +3783,7 @@ describe('boundary conditions', () => {
       const result = gameReducer(state, { type: 'TICK' })
 
       const bullets = getBullets(result.state.entities)
-      expect(bullets.find(b => b.id === 'b1')).toBeUndefined()
+      expect(bullets.find((b) => b.id === 'b1')).toBeUndefined()
     })
 
     it('alien bullet at y=height-1 moves to y=height and is removed (y >= height)', () => {
@@ -3796,7 +3795,7 @@ describe('boundary conditions', () => {
       const result = gameReducer(state, { type: 'TICK' })
 
       const bullets = getBullets(result.state.entities)
-      expect(bullets.find(b => b.id === 'ab1')).toBeUndefined()
+      expect(bullets.find((b) => b.id === 'ab1')).toBeUndefined()
     })
 
     it('bullet at y=0 is removed (exactly at boundary)', () => {
@@ -3809,7 +3808,7 @@ describe('boundary conditions', () => {
       const result = gameReducer(state, { type: 'TICK' })
 
       const bullets = getBullets(result.state.entities)
-      expect(bullets.find(b => b.id === 'b1')).toBeUndefined()
+      expect(bullets.find((b) => b.id === 'b1')).toBeUndefined()
     })
 
     it('bullet at y=2 survives (well within bounds)', () => {
@@ -3821,7 +3820,7 @@ describe('boundary conditions', () => {
 
       // y = 2 - 1 = 1, which is > 0, so bullet survives
       const bullets = getBullets(result.state.entities)
-      const b = bullets.find(b => b.id === 'b1')
+      const b = bullets.find((b) => b.id === 'b1')
       expect(b).toBeDefined()
       expect(b!.y).toBe(1)
     })
@@ -3837,7 +3836,7 @@ describe('boundary conditions', () => {
 
       // Bullet did NOT move (skipped), so y = height - 1 which is < height
       const bullets = getBullets(result.state.entities)
-      const ab = bullets.find(b => b.id === 'ab1')
+      const ab = bullets.find((b) => b.id === 'ab1')
       expect(ab).toBeDefined()
       expect(ab!.y).toBe(state.config.height - 1) // Still there
     })
@@ -3884,7 +3883,7 @@ describe('boundary conditions', () => {
       // Bullet moves from y=0 to y=-1, then checks collision with alien at y=0
       // |(-1) - 0| = 1 < COLLISION_V(2) -> HIT
       const aliens = getAliens(result.state.entities)
-      expect(aliens.find(a => a.id === 'alien1')).toBeUndefined() // Killed
+      expect(aliens.find((a) => a.id === 'alien1')).toBeUndefined() // Killed
     })
 
     it('alien at y=35 (bottom of screen) triggers game over via GAME_OVER_Y check', () => {
@@ -3913,7 +3912,7 @@ describe('boundary conditions', () => {
 
       const result = gameReducer(state, { type: 'TICK' })
 
-      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as any
+      const updatedBarrier = result.state.entities.find((e) => e.id === 'barrier1') as any
       // Player bullet should damage segment at offset (0,0)
       // Alien bullet at x=52 also hits segment at offset (0,0) (spans [50,53))
       // Both bullets should be consumed
@@ -3921,9 +3920,7 @@ describe('boundary conditions', () => {
       expect(bullets.length).toBe(0)
 
       // At least one segment should be damaged
-      const damagedSegments = updatedBarrier.segments.filter(
-        (s: any) => s.health < 4
-      )
+      const damagedSegments = updatedBarrier.segments.filter((s: any) => s.health < 4)
       expect(damagedSegments.length).toBeGreaterThanOrEqual(1)
     })
   })
@@ -3944,8 +3941,8 @@ describe('boundary conditions', () => {
 
       // First alien killed, second should survive
       const aliens = getAliens(result.state.entities)
-      expect(aliens.find(a => a.id === 'alien1')).toBeUndefined()
-      expect(aliens.find(a => a.id === 'alien2')?.alive).toBe(true)
+      expect(aliens.find((a) => a.id === 'alien1')).toBeUndefined()
+      expect(aliens.find((a) => a.id === 'alien2')?.alive).toBe(true)
       expect(result.state.score).toBe(10)
     })
 
@@ -4003,7 +4000,7 @@ describe('boundary conditions', () => {
 
       // After move: x = -3 + (-1)*1 = -4, -4 < -3, so removed
       const ufos = getUFOs(result.state.entities)
-      expect(ufos.find(u => u.id === 'ufo-left')).toBeUndefined()
+      expect(ufos.find((u) => u.id === 'ufo-left')).toBeUndefined()
     })
 
     it('UFO at x=-2 moving left is NOT removed yet (still within buffer)', () => {
@@ -4017,7 +4014,7 @@ describe('boundary conditions', () => {
 
       // After move: x = -2 + (-1) = -3, -3 < -3 is false
       const ufos = getUFOs(result.state.entities)
-      expect(ufos.find(u => u.id === 'ufo1')).toBeDefined()
+      expect(ufos.find((u) => u.id === 'ufo1')).toBeDefined()
     })
   })
 
@@ -4041,10 +4038,8 @@ describe('boundary conditions', () => {
       // Alien bottom = BARRIER_Y - 1 + 2 = BARRIER_Y + 1
       // Overlap check: alien.y(24) < segBottom(27) && alienBottom(26) > segY(25) -> true
       // So segments overlapping with alien should be destroyed
-      const updatedBarrier = result.state.entities.find(e => e.id === 'barrier1') as any
-      const destroyedSegments = updatedBarrier.segments.filter(
-        (s: any) => s.health === 0
-      )
+      const updatedBarrier = result.state.entities.find((e) => e.id === 'barrier1') as any
+      const destroyedSegments = updatedBarrier.segments.filter((s: any) => s.health === 0)
       expect(destroyedSegments.length).toBeGreaterThan(0)
     })
 
@@ -4077,7 +4072,7 @@ describe('boundary conditions', () => {
 describe('Bullet-Barrier Property-Based Tests', () => {
   // Seeded PRNG for reproducible randomness (mulberry32)
   function mulberry32(seed: number) {
-    return function () {
+    return () => {
       seed |= 0
       seed = (seed + 0x6d2b79f5) | 0
       let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
@@ -4117,7 +4112,7 @@ describe('Bullet-Barrier Property-Based Tests', () => {
     bulletX: number,
     bulletY: number,
     bulletDy: -1 | 1,
-    bulletOwnerId: string | null = 'player-1'
+    bulletOwnerId: string | null = 'player-1',
   ) {
     const { state, players } = createTestPlayingState(1, {
       aliens: [], // No aliens to avoid alien-related logic interfering
@@ -4152,7 +4147,7 @@ describe('Bullet-Barrier Property-Based Tests', () => {
     it('a player bullet at any x within a fully intact barrier footprint must collide', () => {
       const rng = mulberry32(42)
       const segments = createFullBarrierSegments(4)
-      let failures: number[] = []
+      const failures: number[] = []
 
       for (let trial = 0; trial < 120; trial++) {
         // Random x within [BARRIER_X, BARRIER_X + BARRIER_FOOTPRINT - 1]
@@ -4167,7 +4162,7 @@ describe('Bullet-Barrier Property-Based Tests', () => {
 
         // Bullet should have been consumed (removed or marked off-screen)
         const bulletStillActive = remainingBullets.some(
-          (b) => b.id === 'bullet-1' && b.y > 0 && b.y < finalState.config.height
+          (b) => b.id === 'bullet-1' && b.y > 0 && b.y < finalState.config.height,
         )
         if (bulletStillActive) {
           failures.push(x)
@@ -4400,9 +4395,7 @@ describe('Bullet-Barrier Property-Based Tests', () => {
         const col = Math.floor((bulletX - barrierX) / SEG_W)
 
         // Check if there's a live segment in that column
-        const hasLiveSegInColumn = segments.some(
-          (s) => s.offsetX === col && s.health > 0
-        )
+        const hasLiveSegInColumn = segments.some((s) => s.offsetX === col && s.health > 0)
 
         const { state } = createBarrierTestState(barrierX, segments, bulletX, startY, -1)
         const finalState = advanceTicks(state, startY + 10)
@@ -4455,7 +4448,7 @@ describe('Bullet-Barrier Property-Based Tests', () => {
 
         // The damaged segment should have lost exactly 1 health
         const damagedSeg = barrier.segments.find(
-          (s) => s.offsetX === damagedSegment!.offsetX && s.offsetY === damagedSegment!.offsetY
+          (s) => s.offsetX === damagedSegment!.offsetX && s.offsetY === damagedSegment!.offsetY,
         )
         expect(damagedSeg!.health).toBe(3) // Was 4, now 3
 
@@ -4544,7 +4537,7 @@ describe('Bullet-Barrier Property-Based Tests', () => {
 describe('Collision Detection Property-Based Tests', () => {
   // Seeded PRNG for reproducible randomness (mulberry32)
   function mulberry32(seed: number) {
-    return function () {
+    return () => {
       seed |= 0
       seed = (seed + 0x6d2b79f5) | 0
       let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
@@ -4556,7 +4549,6 @@ describe('Collision Detection Property-Based Tests', () => {
   // ─── A. Bullet-Alien Collision Properties ─────────────────────────────────
 
   describe('A. Bullet-Alien Collision Properties', () => {
-
     // A1: Hitbox shape verification
     // For checkAlienHit with alien at (50, 10), test ALL bullet positions in a 20x10 grid
     // centered on the alien. Verify the exact set of (bX, bY) that register as hits matches
@@ -4635,15 +4627,16 @@ describe('Collision Detection Property-Based Tests', () => {
 
       const result1 = gameReducer(state, { type: 'TICK' })
 
-      const alienAfter1 = getAliens(result1.state.entities).find(a => a.id === 'alien1')
-      const bulletAfter1 = getBullets(result1.state.entities).find(b => b.id === 'b1')
+      const alienAfter1 = getAliens(result1.state.entities).find((a) => a.id === 'alien1')
+      const bulletAfter1 = getBullets(result1.state.entities).find((b) => b.id === 'b1')
 
       // If alien dropped to y=11 and bullet is at y=12, they visually overlap
       // but the collision check was against the OLD alien position (y=10)
       if (alienAfter1 && bulletAfter1) {
-        const visualOverlap = bulletAfter1.x >= alienAfter1.x &&
-                              bulletAfter1.x < alienAfter1.x + HITBOX.ALIEN_WIDTH &&
-                              Math.abs(bulletAfter1.y - alienAfter1.y) < LAYOUT.COLLISION_V
+        const visualOverlap =
+          bulletAfter1.x >= alienAfter1.x &&
+          bulletAfter1.x < alienAfter1.x + HITBOX.ALIEN_WIDTH &&
+          Math.abs(bulletAfter1.y - alienAfter1.y) < LAYOUT.COLLISION_V
 
         // If there's visual overlap but both still exist, we've found the bug
         if (visualOverlap) {
@@ -4658,8 +4651,8 @@ describe('Collision Detection Property-Based Tests', () => {
       // Verify the collision DOES happen on the next tick
       if (alienAfter1 && bulletAfter1) {
         const result2 = gameReducer(result1.state, { type: 'TICK' })
-        const alienAfter2 = getAliens(result2.state.entities).find(a => a.id === 'alien1')
-        const bulletAfter2 = getBullets(result2.state.entities).find(b => b.id === 'b1')
+        const alienAfter2 = getAliens(result2.state.entities).find((a) => a.id === 'alien1')
+        const bulletAfter2 = getBullets(result2.state.entities).find((b) => b.id === 'b1')
         // The hit should register on the second tick (bullet catches up)
         // Either alien is dead/removed or bullet is consumed
         const hitOnSecondTick = !alienAfter2 || !bulletAfter2
@@ -4771,7 +4764,7 @@ describe('Collision Detection Property-Based Tests', () => {
           const result = gameReducer(currentState, { type: 'TICK' })
           currentState = result.state
 
-          const alienStillAlive = getAliens(currentState.entities).find(a => a.id === 'a1')
+          const alienStillAlive = getAliens(currentState.entities).find((a) => a.id === 'a1')
           if (!alienStillAlive) {
             hitDetected = true
             break
@@ -4806,7 +4799,6 @@ describe('Collision Detection Property-Based Tests', () => {
   // ─── B. Bullet-Player Collision Properties ────────────────────────────────
 
   describe('B. Bullet-Player Collision Properties', () => {
-
     // B1: Hitbox shape for center-based player
     // Player at x=60 (center). Expected hit region: bX in [57, 64), bY in {30, 31, 32}
     // Wait - PLAYER_Y=31, abs(bY-31) < 2 => bY in {30, 31, 32}
@@ -4847,9 +4839,7 @@ describe('Collision Detection Property-Based Tests', () => {
       expect(falsePositives).toEqual([])
 
       // Expected count: 7 wide * 3 tall = 21
-      expect(actualHits.size).toBe(
-        (HITBOX.PLAYER_HALF_WIDTH * 2 + 1) * (2 * (LAYOUT.COLLISION_V - 1) + 1)
-      )
+      expect(actualHits.size).toBe((HITBOX.PLAYER_HALF_WIDTH * 2 + 1) * (2 * (LAYOUT.COLLISION_V - 1) + 1))
     })
 
     // B2: Invulnerability correctly blocks hits
@@ -4900,7 +4890,6 @@ describe('Collision Detection Property-Based Tests', () => {
   // ─── C. Bullet-UFO Collision Properties ───────────────────────────────────
 
   describe('C. Bullet-UFO Collision Properties', () => {
-
     // C1: UFO hitbox matches alien hitbox shape
     // UFO at (50, 2). Verify hit region: bX in [50, 57), bY in {1, 2, 3}
     it('C1: UFO hitbox matches expected rectangle', () => {
@@ -4944,7 +4933,6 @@ describe('Collision Detection Property-Based Tests', () => {
   // ─── D. Cross-Collision Ordering Properties ────────────────────────────────
 
   describe('D. Cross-Collision Ordering Properties', () => {
-
     // D1: Consumed bullet doesn't cascade
     // A bullet that hits an alien should NOT also hit a UFO, player, or barrier in same tick.
     it('D1: consumed bullet does not cascade to other targets', () => {
@@ -4981,16 +4969,16 @@ describe('Collision Detection Property-Based Tests', () => {
       const result = gameReducer(state, { type: 'TICK' })
 
       // Alien should be dead (hit by bullet)
-      const alienAfter = getAliens(result.state.entities).find(a => a.id === 'a1')
+      const alienAfter = getAliens(result.state.entities).find((a) => a.id === 'a1')
       expect(alienAfter).toBeUndefined() // Removed because dead
 
       // UFO should still be alive (bullet consumed by alien, didn't cascade)
-      const ufoAfter = getUFOs(result.state.entities).find(u => u.id === 'ufo1')
+      const ufoAfter = getUFOs(result.state.entities).find((u) => u.id === 'ufo1')
       expect(ufoAfter?.alive).toBe(true)
 
       // Barrier should be undamaged
-      const barrierAfter = getBarriers(result.state.entities).find(b => b.id === 'barrier1') as BarrierEntity
-      expect(barrierAfter.segments.every(s => s.health === 4)).toBe(true)
+      const barrierAfter = getBarriers(result.state.entities).find((b) => b.id === 'barrier1') as BarrierEntity
+      expect(barrierAfter.segments.every((s) => s.health === 4)).toBe(true)
 
       // Player should still be alive (it was a player bullet anyway, only alien bullets hit players)
       const playerAfter = Object.values(result.state.players)[0]
@@ -5025,7 +5013,7 @@ describe('Collision Detection Property-Based Tests', () => {
 
       // Single tick: alien drops then collision registers immediately
       const result = gameReducer(state, { type: 'TICK' })
-      const alienAfter = getAliens(result.state.entities).find(a => a.id === 'alien1')
+      const alienAfter = getAliens(result.state.entities).find((a) => a.id === 'alien1')
 
       // Alien should be killed on this tick (no 1-frame delay)
       expect(alienAfter).toBeUndefined()
@@ -5098,7 +5086,7 @@ describe('Collision Detection Property-Based Tests', () => {
           const result = gameReducer(currentState, { type: 'TICK' })
           currentState = result.state
 
-          const bulletStillExists = getBullets(currentState.entities).find(b => b.id === `ab_${bX}`)
+          const bulletStillExists = getBullets(currentState.entities).find((b) => b.id === `ab_${bX}`)
           if (!bulletStillExists) {
             bulletConsumed = true
             break
@@ -5126,12 +5114,12 @@ describe('Collision Detection Property-Based Tests', () => {
   // ─── E. Rendering Alignment Properties ─────────────────────────────────────
 
   describe('E. Rendering Alignment Properties', () => {
-
     // E1: Collision positions match rendering positions
     it('E1: collision region vs visual rendering region — document discrepancies', () => {
       // ALIEN: collision [aX, aX+7) x {aY-1, aY, aY+1}
       //        rendered at [aX, aX+7) x [aY, aY+2) = {aY, aY+1}
-      const aX = 50, aY = 10
+      const aX = 50,
+        aY = 10
       const alienCollisionRegion = {
         xMin: aX,
         xMax: aX + HITBOX.ALIEN_WIDTH, // exclusive
@@ -5156,7 +5144,8 @@ describe('Collision Detection Property-Based Tests', () => {
 
       // PLAYER: collision [pX-3, pX+4) x {pY-1, pY, pY+1}
       //         rendered at [pX-3, pX+4) x [pY, pY+2) = {pY, pY+1}
-      const pX = 60, pY = LAYOUT.PLAYER_Y
+      const pX = 60,
+        pY = LAYOUT.PLAYER_Y
       const playerCollisionRegion = {
         xMin: pX - HITBOX.PLAYER_HALF_WIDTH,
         xMax: pX + HITBOX.PLAYER_HALF_WIDTH + 1,
@@ -5185,7 +5174,8 @@ describe('Collision Detection Property-Based Tests', () => {
     // This means: 1 row ABOVE entity -> HIT (false positive from visual perspective)
     //             1 row BELOW entity bottom -> MISS (entityY+2 is outside)
     it('E2: asymmetric Y tolerance analysis — above vs below sprite', () => {
-      const aX = 50, aY = 10
+      const aX = 50,
+        aY = 10
       // Entity sprite occupies rows: aY (10) and aY+1 (11) — 2 rows tall
 
       // 1 row ABOVE sprite (entityY - 1 = 9): COLLISION says HIT
@@ -5234,16 +5224,18 @@ describe('Collision Detection Property-Based Tests', () => {
       //   - The "visual miss" frame is the problem, not the Y tolerance asymmetry
 
       // Verify same analysis for player
-      const pX = 60, pY = LAYOUT.PLAYER_Y
+      const pX = 60,
+        pY = LAYOUT.PLAYER_Y
       const hitPlayerAbove = checkPlayerHit(pX, pY - 1, pX, pY)
       const hitPlayerBottom = checkPlayerHit(pX, pY + 1, pX, pY)
       const missPlayerBelow = checkPlayerHit(pX, pY + 2, pX, pY)
-      expect(hitPlayerAbove).toBe(true)  // 1 row above sprite = HIT (extra)
+      expect(hitPlayerAbove).toBe(true) // 1 row above sprite = HIT (extra)
       expect(hitPlayerBottom).toBe(true) // Sprite bottom row = HIT
       expect(missPlayerBelow).toBe(false) // Below sprite = MISS
 
       // For UFO: same analysis applies
-      const uX = 50, uY = 2
+      const uX = 50,
+        uY = 2
       const hitUfoAbove = checkUfoHit(uX + 3, uY - 1, uX, uY)
       const hitUfoBottom = checkUfoHit(uX + 3, uY + 1, uX, uY)
       const missUfoBelow = checkUfoHit(uX + 3, uY + 2, uX, uY)
@@ -5279,7 +5271,7 @@ describe('Tick ordering: aliens move before collision checks', () => {
     state.alienShootingDisabled = true
 
     const result = gameReducer(state, { type: 'TICK' })
-    const alienAfter = getAliens(result.state.entities).find(a => a.id === 'alien1')
+    const alienAfter = getAliens(result.state.entities).find((a) => a.id === 'alien1')
 
     // With fix: alien moves to x=52 first, then collision checks against [52,57) → HIT
     expect(alienAfter).toBeUndefined()
@@ -5306,7 +5298,7 @@ describe('Tick ordering: aliens move before collision checks', () => {
     state.alienShootingDisabled = true
 
     const result = gameReducer(state, { type: 'TICK' })
-    const alienAfter = getAliens(result.state.entities).find(a => a.id === 'alien1')
+    const alienAfter = getAliens(result.state.entities).find((a) => a.id === 'alien1')
 
     // Alien killed on same tick as drop — no visual mismatch
     expect(alienAfter).toBeUndefined()
@@ -5329,7 +5321,7 @@ describe('Tick ordering: aliens move before collision checks', () => {
     state.alienShootingDisabled = true
 
     const result = gameReducer(state, { type: 'TICK' })
-    const alienAfter = getAliens(result.state.entities).find(a => a.id === 'alien1')
+    const alienAfter = getAliens(result.state.entities).find((a) => a.id === 'alien1')
 
     expect(alienAfter).toBeUndefined()
   })
@@ -5348,15 +5340,13 @@ describe('Tick ordering: aliens move before collision checks', () => {
 
     // After drop: alien.y = barrierY - 1, alien bottom = barrierY + 1
     // Barrier segment at barrierY: should overlap
-    const barrier = createTestBarrier('barrier1', LAYOUT.ALIEN_MAX_X - 2, [
-      { offsetX: 0, offsetY: 0, health: 4 },
-    ])
+    const barrier = createTestBarrier('barrier1', LAYOUT.ALIEN_MAX_X - 2, [{ offsetX: 0, offsetY: 0, health: 4 }])
 
     state.entities = [alien, barrier]
     state.alienShootingDisabled = true
 
     const result = gameReducer(state, { type: 'TICK' })
-    const resultBarrier = getBarriers(result.state.entities).find(b => b.id === 'barrier1')
+    const resultBarrier = getBarriers(result.state.entities).find((b) => b.id === 'barrier1')
 
     expect(resultBarrier).toBeDefined()
     if (resultBarrier) {
@@ -5389,11 +5379,11 @@ describe('Tick ordering: aliens move before collision checks', () => {
       state.alienShootingDisabled = true
 
       const result = gameReducer(state, { type: 'TICK' })
-      const alienAfter = getAliens(result.state.entities).find(a => a.id === 'alien1')
-      const bulletAfter = getBullets(result.state.entities).find(b => b.id === 'b1')
+      const alienAfter = getAliens(result.state.entities).find((a) => a.id === 'alien1')
+      const bulletAfter = getBullets(result.state.entities).find((b) => b.id === 'b1')
 
       // If both survive, verify they don't visually overlap
-      if (alienAfter && alienAfter.alive && bulletAfter) {
+      if (alienAfter?.alive && bulletAfter) {
         const wouldCollide = checkAlienHit(bulletAfter.x, bulletAfter.y, alienAfter.x, alienAfter.y)
         expect(wouldCollide).toBe(false)
       }

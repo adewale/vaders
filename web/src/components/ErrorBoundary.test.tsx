@@ -13,13 +13,7 @@ function Boom({ message = 'kaboom' }: { message?: string }): never {
 // Helper for the async-error negative test. We record whether the throw
 // "escaped" the boundary via a shared flag; we do NOT actually re-throw to
 // globals because vitest's unhandled-exception reporter would fail the run.
-function AsyncBoom({
-  onScheduled,
-  didThrow,
-}: {
-  onScheduled: () => void
-  didThrow: { value: boolean }
-}) {
+function AsyncBoom({ onScheduled, didThrow }: { onScheduled: () => void; didThrow: { value: boolean } }) {
   setTimeout(() => {
     try {
       didThrow.value = true
@@ -159,6 +153,7 @@ describe('ErrorBoundary', () => {
     function ClickBoom() {
       return (
         <button
+          type="button"
           data-testid="click-bomb"
           onClick={() => {
             handlerFired = true

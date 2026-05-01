@@ -1,7 +1,7 @@
 {
   "name": "vaders",
   "main": "src/index.ts",
-  "compatibility_date": "2026-01-24",
+  "compatibility_date": "2026-04-29",
   // Regenerate worker/src/buildInfo.ts (and the parallel web copy) with the
   // current git commit, package version, and UTC build time before every
   // deploy — fires even when invoked as `npx wrangler deploy`, not just
@@ -21,8 +21,5 @@
       { "name": "MATCHMAKER", "class_name": "Matchmaker" }
     ]
   },
-  "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["GameRoom"] },
-    { "tag": "v2", "new_classes": ["Matchmaker"] }
-  ]
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["GameRoom"] }, { "tag": "v2", "new_classes": ["Matchmaker"] }]
 }

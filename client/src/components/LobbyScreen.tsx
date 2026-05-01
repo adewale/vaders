@@ -24,7 +24,7 @@ export function LobbyScreen({
   selectedIndex,
   onReady,
   onUnready,
-  onStartSolo
+  onStartSolo,
 }: LobbyScreenProps) {
   const players = Object.values(state.players)
   const isReady = state.readyPlayerIds.includes(currentPlayerId)
@@ -35,14 +35,13 @@ export function LobbyScreen({
   const richColor = supportsRichColor()
 
   // Menu items depend on player count
-  const menuItems = playerCount === 1
-    ? [
-        { label: isReady ? 'Cancel Ready' : 'Ready Up', desc: '(wait for others)' },
-        { label: 'Start Solo', desc: '' },
-      ]
-    : [
-        { label: isReady ? 'Cancel Ready' : 'Ready Up', desc: '' },
-      ]
+  const menuItems =
+    playerCount === 1
+      ? [
+          { label: isReady ? 'Cancel Ready' : 'Ready Up', desc: '(wait for others)' },
+          { label: 'Start Solo', desc: '' },
+        ]
+      : [{ label: isReady ? 'Cancel Ready' : 'Ready Up', desc: '' }]
 
   // Center the lobby box in the game area
   const boxWidth = Math.min(80, gameWidth - 4)
@@ -61,64 +60,92 @@ export function LobbyScreen({
         paddingRight={2}
         paddingTop={1}
         paddingBottom={1}
-    >
-      {richColor
-        ? <GradientText text="VADERS" colors={GRADIENT_PRESETS.ocean} fallbackColor={COLORS.ui.title} richColor={richColor} />
-        : <text fg={COLORS.ui.title}><b>VADERS</b></text>
-      }
-      <box height={1} />
-      <text fg={COLORS.ui.selectedText}>Room: {richColor
-        ? (() => {
-            const colors = interpolateGradient(GRADIENT_PRESETS.victory, state.roomCode.length)
-            return state.roomCode.split('').map((ch, i) => <span key={i} fg={colors[i]}>{ch}</span>)
-          })()
-        : <span fg={COLORS.ui.score}>{state.roomCode}</span>
-      }</text>
-      <box height={1} />
-      {richColor
-        ? <GradientText text={`Players (${playerCount}/4):`} colors={GRADIENT_PRESETS.ocean} fallbackColor={COLORS.ui.score} richColor={richColor} />
-        : <text fg={COLORS.ui.score}>Players ({playerCount}/4):</text>
-      }
-      <box height={1} />
-
-      {/* Player list with ship sprites and colored ready indicators */}
-      <PlayerList
-        players={players}
-        readyPlayerIds={state.readyPlayerIds}
-        currentPlayerId={currentPlayerId}
-        maxPlayers={4}
-      />
-
-      <box flexGrow={1} />
-      <box borderStyle="single" borderColor={COLORS.ui.border} paddingLeft={1} paddingRight={1} flexDirection="column">
-        {menuItems.map((item, i) => {
-          const selected = selectedIndex === i
-          const labelColors = selected && richColor ? interpolateGradient(GRADIENT_PRESETS.vaders, item.label.length) : null
-          return (
-            <box key={i}>
-              <text fg={selected ? COLORS.ui.selected : COLORS.ui.unselected}>
-                {selected ? '▶' : '  '}
-              </text>
-              <text fg={selected ? COLORS.ui.selectedText : COLORS.ui.label}>
-                {labelColors
-                  ? item.label.split('').map((ch, ci) => <span key={ci} fg={labelColors[ci]}>{ch}</span>)
-                  : item.label
-                }
-              </text>
-              {item.desc && (
-                <text fg={COLORS.ui.unselected}> {item.desc}</text>
-              )}
-            </box>
-          )
-        })}
-        {playerCount > 1 && (
-          <text fg={readyCount === playerCount ? COLORS.ui.success : COLORS.ui.unselected}>
-            {readyCount}/{playerCount} ready{readyCount === playerCount ? ' - Starting...' : ''}
+      >
+        {richColor ? (
+          <GradientText
+            text="VADERS"
+            colors={GRADIENT_PRESETS.ocean}
+            fallbackColor={COLORS.ui.title}
+            richColor={richColor}
+          />
+        ) : (
+          <text fg={COLORS.ui.title}>
+            <b>VADERS</b>
           </text>
         )}
-      </box>
-      <box height={1} />
-      <text fg={COLORS.ui.unselected}>↑/↓ Navigate   ENTER Select   Q Quit</text>
+        <box height={1} />
+        <text fg={COLORS.ui.selectedText}>
+          Room:{' '}
+          {richColor ? (
+            (() => {
+              const colors = interpolateGradient(GRADIENT_PRESETS.victory, state.roomCode.length)
+              return state.roomCode.split('').map((ch, i) => (
+                <span key={i} fg={colors[i]}>
+                  {ch}
+                </span>
+              ))
+            })()
+          ) : (
+            <span fg={COLORS.ui.score}>{state.roomCode}</span>
+          )}
+        </text>
+        <box height={1} />
+        {richColor ? (
+          <GradientText
+            text={`Players (${playerCount}/4):`}
+            colors={GRADIENT_PRESETS.ocean}
+            fallbackColor={COLORS.ui.score}
+            richColor={richColor}
+          />
+        ) : (
+          <text fg={COLORS.ui.score}>Players ({playerCount}/4):</text>
+        )}
+        <box height={1} />
+
+        {/* Player list with ship sprites and colored ready indicators */}
+        <PlayerList
+          players={players}
+          readyPlayerIds={state.readyPlayerIds}
+          currentPlayerId={currentPlayerId}
+          maxPlayers={4}
+        />
+
+        <box flexGrow={1} />
+        <box
+          borderStyle="single"
+          borderColor={COLORS.ui.border}
+          paddingLeft={1}
+          paddingRight={1}
+          flexDirection="column"
+        >
+          {menuItems.map((item, i) => {
+            const selected = selectedIndex === i
+            const labelColors =
+              selected && richColor ? interpolateGradient(GRADIENT_PRESETS.vaders, item.label.length) : null
+            return (
+              <box key={i}>
+                <text fg={selected ? COLORS.ui.selected : COLORS.ui.unselected}>{selected ? '▶' : '  '}</text>
+                <text fg={selected ? COLORS.ui.selectedText : COLORS.ui.label}>
+                  {labelColors
+                    ? item.label.split('').map((ch, ci) => (
+                        <span key={ci} fg={labelColors[ci]}>
+                          {ch}
+                        </span>
+                      ))
+                    : item.label}
+                </text>
+                {item.desc && <text fg={COLORS.ui.unselected}> {item.desc}</text>}
+              </box>
+            )
+          })}
+          {playerCount > 1 && (
+            <text fg={readyCount === playerCount ? COLORS.ui.success : COLORS.ui.unselected}>
+              {readyCount}/{playerCount} ready{readyCount === playerCount ? ' - Starting...' : ''}
+            </text>
+          )}
+        </box>
+        <box height={1} />
+        <text fg={COLORS.ui.unselected}>↑/↓ Navigate ENTER Select Q Quit</text>
       </box>
     </box>
   )
