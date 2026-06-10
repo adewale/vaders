@@ -7,7 +7,7 @@
 // 3. Run tests - the type-level check will fail if coverage is incomplete
 // 4. Never add field initialization to startGame(), nextWave(), or other methods
 
-import { DEFAULT_CONFIG, type GameState, type GameStatus } from './types'
+import { DEFAULT_CONFIG, DEFAULT_DIFFICULTY, type GameState, type GameStatus } from './types'
 
 // ─── Status Registry ─────────────────────────────────────────────────────────
 // Single source of truth for all GameStatus values.
@@ -79,6 +79,8 @@ export const GAME_STATE_DEFAULTS: Omit<GameState, 'roomCode'> = {
   wipeTicksRemaining: null,
   wipeWaveNumber: null,
   alienShootingDisabled: false, // Set to true to disable alien shooting for debugging
+  nextEntityId: 1,
+  difficulty: DEFAULT_DIFFICULTY,
   config: DEFAULT_CONFIG,
 }
 
@@ -103,6 +105,7 @@ export function createDefaultGameState(roomCode: string): GameState {
     players: {},
     readyPlayerIds: [],
     entities: [],
+    difficulty: structuredClone(DEFAULT_DIFFICULTY),
     config: { ...DEFAULT_CONFIG },
   }
 }
@@ -113,15 +116,32 @@ export function createDefaultGameState(roomCode: string): GameState {
  * Existing values in persistedState are preserved.
  */
 export function migrateGameState(persistedState: Partial<GameState> & { roomCode: string }): GameState {
-  return {
+  const migrated: GameState = {
     ...GAME_STATE_DEFAULTS,
     ...persistedState,
+    // Old persisted states predate the difficulty snapshot — default them to
+    // the shipped config (clone so no room shares the module constant).
+    difficulty: persistedState.difficulty ?? structuredClone(DEFAULT_DIFFICULTY),
     // Ensure config doesn't lose new fields
     config: {
       ...DEFAULT_CONFIG,
       ...(persistedState.config ?? {}),
     },
   }
+
+  // nextEntityId used to live in Durable Object instance state, so older
+  // persisted states don't carry it. Derive a non-colliding default from any
+  // existing `e_<n>` entity ids so rehydrated rooms never reuse an id.
+  if (persistedState.nextEntityId === undefined) {
+    let maxEntityId = 0
+    for (const entity of persistedState.entities ?? []) {
+      const match = /^e_(\d+)$/.exec(entity.id)
+      if (match) maxEntityId = Math.max(maxEntityId, Number(match[1]))
+    }
+    migrated.nextEntityId = maxEntityId + 1
+  }
+
+  return migrated
 }
 
 /**
@@ -157,6 +177,8 @@ export function validateGameState(state: unknown): string[] {
     'wipeTicksRemaining',
     'wipeWaveNumber',
     'alienShootingDisabled',
+    'nextEntityId',
+    'difficulty',
     'config',
   ]
 

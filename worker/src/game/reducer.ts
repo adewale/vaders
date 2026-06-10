@@ -24,6 +24,7 @@ import {
   getBullets,
   getBarriers,
   getUFOs,
+  createAlienFormation,
   seededRandom,
   constrainPlayerX,
   applyPlayerInput,
@@ -297,8 +298,10 @@ function startSoloReducer(state: GameState): ReducerResult {
   const next = structuredClone(state)
   next.status = 'wipe_hold' // Skip exit, go straight to hold for game start
   next.mode = 'solo'
-  next.maxLives = 3
-  next.lives = 3
+  // Lives come from the difficulty snapshot (3 with DEFAULT_DIFFICULTY)
+  const scaled = getScaledConfig(1, 1, next.difficulty)
+  next.maxLives = scaled.lives
+  next.lives = scaled.lives
   // Patch all players' lives to match solo config
   for (const player of Object.values(next.players)) {
     player.lives = next.lives
@@ -392,11 +395,20 @@ function wipeTickReducer(state: GameState): ReducerResult {
           next.wipeTicksRemaining = WIPE_TIMING.HOLD_TICKS
           break
 
-        case 'wipe_hold':
+        case 'wipe_hold': {
           // Hold complete → reveal (create aliens with entering=true)
           next.status = 'wipe_reveal'
           next.wipeTicksRemaining = WIPE_TIMING.REVEAL_TICKS
-          // Aliens are created by GameRoom when entering wipe_reveal
+          // Spawn the wave's alien formation when entering wipe_reveal
+          const playerCount = Object.keys(next.players).length
+          const scaled = getScaledConfig(playerCount, next.wave, next.difficulty)
+          const aliens = createAlienFormation(
+            scaled.alienCols,
+            scaled.alienRows,
+            next.config.width,
+            () => `e_${next.nextEntityId++}`,
+          )
+          next.entities.push(...aliens)
           // Mark all aliens as entering
           for (const entity of next.entities) {
             if (entity.kind === 'alien') {
@@ -404,6 +416,7 @@ function wipeTickReducer(state: GameState): ReducerResult {
             }
           }
           break
+        }
 
         case 'wipe_reveal':
           // Reveal complete → playing (set entering=false)
@@ -444,7 +457,7 @@ function tickReducer(state: GameState): ReducerResult {
 
   const events: ServerEvent[] = []
   const playerCount = Object.keys(next.players).length
-  const scaled = getScaledConfig(playerCount, next.config)
+  const scaled = getScaledConfig(playerCount, next.wave, next.difficulty)
 
   // 1. Apply player movement from held input
   for (const player of Object.values(next.players)) {
@@ -758,9 +771,19 @@ function tickReducer(state: GameState): ReducerResult {
   // Game over when all players are dead AND have no lives remaining
   const allPlayersOutOfLives = Object.values(next.players).every((p) => !p.alive && p.lives <= 0)
 
+  let waveCompleted = false
   if (allAliensKilled) {
     events.push({ type: 'event', name: 'wave_complete', data: { wave: next.wave } })
-    // Wave transition handled by shell
+    // Advance to the next wave in the same tick. Keep only barriers (drop
+    // bullets and dead aliens) and start the wave transition wipe
+    // (exit → hold → reveal); the new formation spawns at wipe_reveal.
+    waveCompleted = true
+    next.wave++
+    next.entities = [...getBarriers(next.entities)]
+    next.alienDirection = 1
+    next.status = 'wipe_exit'
+    next.wipeTicksRemaining = WIPE_TIMING.EXIT_TICKS
+    next.wipeWaveNumber = next.wave
   } else if (aliensReachedBottom || allPlayersOutOfLives) {
     next.status = 'game_over'
     // B6: Ensure lives reflects actual state at game_over
@@ -771,6 +794,6 @@ function tickReducer(state: GameState): ReducerResult {
   return {
     state: next,
     events,
-    persist: false, // Only persist on key transitions
+    persist: waveCompleted, // Only persist on key transitions
   }
 }

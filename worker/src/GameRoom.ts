@@ -6,6 +6,7 @@ import type {
   GameState,
   Player,
   BarrierEntity,
+  DifficultyConfig,
   ServerMessage,
   ClientMessage,
   PlayerSlot,
@@ -16,13 +17,11 @@ import {
   HITBOX,
   WIPE_TIMING,
   PLAYER_COLORS,
-  MAX_BARRIER_COUNT,
-  BARRIER_PLAYER_OFFSET,
   BARRIER_SHAPE_COLS,
   COUNTDOWN_SECONDS,
-  getBarriers,
-  createAlienFormation,
+  DEFAULT_DIFFICULTY,
   createBarrierSegments,
+  validateDifficultyConfig,
 } from '../../shared/types'
 import { getScaledConfig, getPlayerSpawnX } from './game/scaling'
 import { gameReducer, type GameAction } from './game/reducer'
@@ -146,7 +145,6 @@ function isValidMoveDirection(direction: unknown): direction is 'left' | 'right'
  */
 export class GameRoom extends DurableObject<Env> {
   private game: GameState | null = null
-  private nextEntityId = 1
   private inputQueue: GameAction[] = []
   private rateLimits: Map<WebSocket, RateLimitState> = new Map()
   // Current request's correlation id — set by each entry point (fetch, ws
@@ -194,8 +192,14 @@ export class GameRoom extends DurableObject<Env> {
 
       if (rows.length > 0) {
         // Migrate persisted state to fill any missing fields with defaults
-        this.game = migrateGameState(JSON.parse(rows[0].data))
-        this.nextEntityId = rows[0].next_entity_id
+        const persisted = JSON.parse(rows[0].data) as Partial<GameState> & { roomCode: string }
+        // Backward compat: older persisted states kept the entity-id counter
+        // in the SQLite column rather than in GameState. Adopt the column
+        // value so rehydrated rooms keep generating non-colliding ids.
+        if (persisted.nextEntityId === undefined) {
+          persisted.nextEntityId = rows[0].next_entity_id
+        }
+        this.game = migrateGameState(persisted)
 
         // --- Phantom-player reconciliation (Option A) ---
         // After a DO eviction or hibernation wake, state.players is
@@ -236,15 +240,20 @@ export class GameRoom extends DurableObject<Env> {
   }
 
   private generateEntityId(): string {
-    return `e_${this.nextEntityId++}`
+    // Counter lives in GameState (not instance state) so the reducer can
+    // also generate ids — see specs/difficulty-tuning-spec.md §3.4.
+    if (!this.game) throw new Error('generateEntityId called before game state initialized')
+    return `e_${this.game.nextEntityId++}`
   }
 
   private persistState() {
     if (!this.game) return
+    // The next_entity_id column is retained for backward compat (older rows
+    // are read in the constructor); state.nextEntityId is the source of truth.
     this.ctx.storage.sql.exec(
       `INSERT OR REPLACE INTO game_state (id, data, next_entity_id) VALUES (1, ?, ?)`,
       JSON.stringify(this.game),
-      this.nextEntityId,
+      this.game.nextEntityId,
     )
   }
 
@@ -854,10 +863,42 @@ export class GameRoom extends DurableObject<Env> {
     })
   }
 
+  /**
+   * Resolve the difficulty document for a new game: the DIFFICULTY_CONFIG
+   * env var (JSON string) if present and valid, otherwise DEFAULT_DIFFICULTY.
+   * A bad config must never crash a room — log `difficulty_config_invalid`
+   * and fall back to the shipped defaults.
+   */
+  private resolveDifficultyConfig(): DifficultyConfig {
+    const raw = this.env.DIFFICULTY_CONFIG
+    if (!raw) return structuredClone(DEFAULT_DIFFICULTY)
+
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw)
+    } catch (err) {
+      this.log('difficulty_config_invalid', {
+        reason: 'json_parse_failed',
+        message: err instanceof Error ? err.message : String(err),
+      })
+      return structuredClone(DEFAULT_DIFFICULTY)
+    }
+
+    const issues = validateDifficultyConfig(parsed)
+    if (issues.length > 0) {
+      this.log('difficulty_config_invalid', { reason: 'validation_failed', issues })
+      return structuredClone(DEFAULT_DIFFICULTY)
+    }
+    return parsed as DifficultyConfig
+  }
+
   private async startGame() {
     if (!this.game) return
     const playerCount = Object.keys(this.game.players).length
-    const scaled = getScaledConfig(playerCount, this.game.config)
+    // Snapshot the resolved difficulty document into state so the running
+    // game is self-describing and the reducer reads it per tick.
+    this.game.difficulty = this.resolveDifficultyConfig()
+    const scaled = getScaledConfig(playerCount, 1, this.game.difficulty)
 
     debugLog('[GAME_START]', {
       players: Object.entries(this.game.players).map(([id, p]) => ({ id, name: p.name, slot: p.slot })),
@@ -895,7 +936,7 @@ export class GameRoom extends DurableObject<Env> {
     // Note: alienShootingDisabled is set via GAME_STATE_DEFAULTS in state-defaults.ts
 
     // Initialize barriers only - aliens created at wipe_hold→wipe_reveal transition
-    this.game.entities = [...this.createBarriers(playerCount)]
+    this.game.entities = [...this.createBarriers(scaled.barriers)]
 
     this.broadcast({ type: 'event', name: 'game_start', data: undefined })
     this.broadcastFullState()
@@ -907,6 +948,7 @@ export class GameRoom extends DurableObject<Env> {
       mode: this.game.mode,
       playerCount,
       wave: this.game.wave,
+      difficultyConfigName: this.game.difficulty.name,
     })
 
     // Use alarm for game tick (hibernation-compatible)
@@ -985,8 +1027,6 @@ export class GameRoom extends DurableObject<Env> {
     const activeStatuses = ['playing', 'wipe_exit', 'wipe_hold', 'wipe_reveal']
     if (!activeStatuses.includes(this.game.status)) return
 
-    const prevStatus = this.game.status
-
     // 0. Heartbeat reap (Option B): any player whose lastActiveTick is
     // > IDLE_STALE_TICKS behind the current tick is presumed phantom
     // (their WS is dead but Cloudflare's close event hasn't fired). Only
@@ -1056,25 +1096,13 @@ export class GameRoom extends DurableObject<Env> {
     }
     if (tickResult.persist) this.persistState()
 
-    // 3. Handle wipe phase transitions - create aliens when entering wipe_reveal
-    if (prevStatus === 'wipe_hold' && this.game.status === 'wipe_reveal') {
-      const playerCount = Object.keys(this.game.players).length
-      const scaled = getScaledConfig(playerCount, this.game.config)
-      const aliens = this.createAlienFormationWithIds(scaled.alienCols, scaled.alienRows)
-      // Mark all aliens as entering
-      for (const alien of aliens) {
-        alien.entering = true
-      }
-      this.game.entities.push(...aliens)
-    }
-
-    // 4. Handle game_over status
+    // 3. Handle game_over status
     if (this.game.status === 'game_over') {
       this.endGame(this.game.lives <= 0 ? 'defeat' : 'victory')
       return
     }
 
-    // 5. Heartbeat: update registry every ~60s (1800 ticks at 30Hz)
+    // 4. Heartbeat: update registry every ~60s (1800 ticks at 30Hz)
     if (this.game.tick % 1800 === 0) {
       this.fireAndForget('update_room_registry', this.updateRoomRegistry())
     }
@@ -1118,20 +1146,11 @@ export class GameRoom extends DurableObject<Env> {
 
   private nextWave() {
     if (!this.game) return
-    const completedWave = this.game.wave
-    this.game.wave++
-
-    // Remove bullets, keep barriers, remove old aliens (new ones created during wipe_reveal)
-    const barriers = getBarriers(this.game.entities)
-
-    this.game.entities = [...barriers]
-    this.game.alienDirection = 1
-
-    // Start wave transition wipe (exit → hold → reveal)
-    this.game.status = 'wipe_exit'
-    this.game.wipeTicksRemaining = WIPE_TIMING.EXIT_TICKS
-    this.game.wipeWaveNumber = this.game.wave
-
+    // The wave transition itself (wave increment, barrier-only entity prune,
+    // wipe_exit start) happens in the reducer in the same TICK that emits
+    // wave_complete — this method is only the side effects: persistence and
+    // the wide event. By the time we observe the event, this.game already
+    // holds the post-transition state.
     this.persistState()
 
     // Wide event: a wave was cleared and the next one is starting. Emitted
@@ -1139,7 +1158,7 @@ export class GameRoom extends DurableObject<Env> {
     // wave_complete reducer event).
     const survivors = Object.values(this.game.players).filter((p) => p.alive).length
     this.log('wave_complete', {
-      wave: completedWave,
+      wave: this.game.wave - 1,
       nextWave: this.game.wave,
       survivors,
     })
@@ -1172,16 +1191,9 @@ export class GameRoom extends DurableObject<Env> {
     this.fireAndForget('schedule_cleanup_alarm', this.ctx.storage.setAlarm(Date.now() + 5 * 60 * 1000))
   }
 
-  private createAlienFormationWithIds(cols: number, rows: number) {
-    if (!this.game) return []
-    // Use shared createAlienFormation with custom ID generator
-    return createAlienFormation(cols, rows, this.game.config.width, () => this.generateEntityId())
-  }
-
-  private createBarriers(playerCount: number): BarrierEntity[] {
+  private createBarriers(barrierCount: number): BarrierEntity[] {
     if (!this.game) return []
     const width = this.game.config.width
-    const barrierCount = Math.min(MAX_BARRIER_COUNT, playerCount + BARRIER_PLAYER_OFFSET)
     const barriers: BarrierEntity[] = []
     const spacing = width / (barrierCount + 1)
 

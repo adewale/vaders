@@ -16,6 +16,8 @@ import {
   seededRandom,
   createBarrierSegments,
   createAlienFormation,
+  validateDifficultyConfig,
+  DEFAULT_DIFFICULTY,
   type Entity,
   type AlienEntity,
   type BulletEntity,
@@ -653,5 +655,107 @@ describe('applyPlayerInput properties', () => {
         }
       }),
     )
+  })
+})
+
+// ─── validateDifficultyConfig Tests ──────────────────────────────────────────
+
+describe('validateDifficultyConfig', () => {
+  test('DEFAULT_DIFFICULTY is valid', () => {
+    expect(validateDifficultyConfig(DEFAULT_DIFFICULTY)).toEqual([])
+  })
+
+  test('DEFAULT_DIFFICULTY survives a JSON round-trip and stays valid', () => {
+    expect(validateDifficultyConfig(JSON.parse(JSON.stringify(DEFAULT_DIFFICULTY)))).toEqual([])
+  })
+
+  test('rejects non-object input', () => {
+    expect(validateDifficultyConfig(null)).toEqual(['Config is not an object'])
+    expect(validateDifficultyConfig(undefined)).toEqual(['Config is not an object'])
+    expect(validateDifficultyConfig('ship-v1')).toEqual(['Config is not an object'])
+    expect(validateDifficultyConfig(42)).toEqual(['Config is not an object'])
+    expect(validateDifficultyConfig([])).toEqual(['Config is not an object'])
+  })
+
+  test('rejects missing or empty name', () => {
+    const config = structuredClone(DEFAULT_DIFFICULTY) as Record<string, unknown>
+    config.name = ''
+    expect(validateDifficultyConfig(config)).toContain('name must be a non-empty string')
+    delete config.name
+    expect(validateDifficultyConfig(config)).toContain('name must be a non-empty string')
+  })
+
+  test('rejects missing base block and bad base numbers', () => {
+    const noBase = structuredClone(DEFAULT_DIFFICULTY) as Record<string, unknown>
+    delete noBase.base
+    expect(validateDifficultyConfig(noBase)).toContain('base must be an object')
+
+    const badRate = structuredClone(DEFAULT_DIFFICULTY)
+    badRate.base.alienShootRate = Number.NaN
+    expect(validateDifficultyConfig(badRate)).toContain('base.alienShootRate must be a finite number >= 0')
+
+    const zeroInterval = structuredClone(DEFAULT_DIFFICULTY)
+    zeroInterval.base.alienMoveIntervalTicks = 0
+    expect(validateDifficultyConfig(zeroInterval)).toContain('base.alienMoveIntervalTicks must be a finite number > 0')
+  })
+
+  test('rejects when any of the four player counts is missing', () => {
+    for (const count of [1, 2, 3, 4] as const) {
+      const config = structuredClone(DEFAULT_DIFFICULTY)
+      delete (config.perPlayerCount as Record<number, unknown>)[count]
+      expect(validateDifficultyConfig(config)).toContain(`perPlayerCount.${count} is missing`)
+    }
+  })
+
+  test('rejects non-finite and non-positive per-player-count numbers', () => {
+    const negSpeed = structuredClone(DEFAULT_DIFFICULTY)
+    negSpeed.perPlayerCount[2].speedMult = -1
+    expect(validateDifficultyConfig(negSpeed)).toContain('perPlayerCount.2.speedMult must be a finite number > 0')
+
+    const infCols = structuredClone(DEFAULT_DIFFICULTY)
+    infCols.perPlayerCount[3].cols = Number.POSITIVE_INFINITY
+    expect(validateDifficultyConfig(infCols)).toContain('perPlayerCount.3.cols must be a finite number > 0')
+
+    const zeroLives = structuredClone(DEFAULT_DIFFICULTY)
+    zeroLives.perPlayerCount[4].lives = 0
+    expect(validateDifficultyConfig(zeroLives)).toContain('perPlayerCount.4.lives must be a finite number > 0')
+
+    const negBarriers = structuredClone(DEFAULT_DIFFICULTY)
+    negBarriers.perPlayerCount[1].barriers = -1
+    expect(validateDifficultyConfig(negBarriers)).toContain('perPlayerCount.1.barriers must be a finite number >= 0')
+  })
+
+  test('allows zero barriers (a legal, if brutal, config)', () => {
+    const config = structuredClone(DEFAULT_DIFFICULTY)
+    config.perPlayerCount[1].barriers = 0
+    expect(validateDifficultyConfig(config)).toEqual([])
+  })
+
+  test('rejects invalid livesMode', () => {
+    const config = structuredClone(DEFAULT_DIFFICULTY) as Record<string, unknown>
+    config.livesMode = 'infinite'
+    expect(validateDifficultyConfig(config)).toContain("livesMode must be 'shared' or 'per-player'")
+  })
+
+  test('rejects missing waveRamp block and bad ramp numbers', () => {
+    const noRamp = structuredClone(DEFAULT_DIFFICULTY) as Record<string, unknown>
+    delete noRamp.waveRamp
+    expect(validateDifficultyConfig(noRamp)).toContain('waveRamp must be an object')
+
+    const negPct = structuredClone(DEFAULT_DIFFICULTY)
+    negPct.waveRamp.shootPctPerWave = -0.1
+    expect(validateDifficultyConfig(negPct)).toContain('waveRamp.shootPctPerWave must be a finite number >= 0')
+
+    const zeroCap = structuredClone(DEFAULT_DIFFICULTY)
+    zeroCap.waveRamp.maxWaveForRamp = 0
+    expect(validateDifficultyConfig(zeroCap)).toContain('waveRamp.maxWaveForRamp must be a finite number > 0')
+  })
+
+  test('accumulates multiple issues for a thoroughly broken config', () => {
+    const issues = validateDifficultyConfig({ name: 'broken' })
+    expect(issues.length).toBeGreaterThanOrEqual(3)
+    expect(issues).toContain('base must be an object')
+    expect(issues).toContain('perPlayerCount must be an object')
+    expect(issues).toContain('waveRamp must be an object')
   })
 })

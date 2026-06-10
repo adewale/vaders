@@ -3,8 +3,8 @@
 
 import { describe, it, expect, vi, type Mock } from 'vitest'
 import { GameRoom, type Env } from './GameRoom'
-import { COUNTDOWN_SECONDS, WIPE_TIMING } from '../../shared/types'
-import type { GameState } from '../../shared/types'
+import { COUNTDOWN_SECONDS, DEFAULT_DIFFICULTY, WIPE_TIMING } from '../../shared/types'
+import type { DifficultyConfig, GameState } from '../../shared/types'
 
 // Response type helpers
 interface RoomInfoResponse {
@@ -583,6 +583,107 @@ describe('WebSocket Message Handling', () => {
 
       // Should have set alarm for game tick
       expect(ctx.storage.setAlarm).toHaveBeenCalled()
+    })
+  })
+
+  describe('difficulty config resolution (DIFFICULTY_CONFIG env override)', () => {
+    /** A recognizably non-default config: 2 barriers and 7 lives for solo. */
+    function customDifficulty(): DifficultyConfig {
+      const config = structuredClone(DEFAULT_DIFFICULTY)
+      config.name = 'custom-test'
+      config.perPlayerCount[1] = { ...config.perPlayerCount[1], lives: 7, barriers: 2 }
+      return config
+    }
+
+    /** Boot a room with the given env extras, join one player, start solo. */
+    async function startSoloWithEnv(envOverrides: Partial<Env>) {
+      const ctx = createMockDurableObjectContext()
+      const env = { ...createMockEnv(), ...envOverrides }
+      const gameRoom = new GameRoom(ctx as any, env)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      await gameRoom.fetch(
+        new Request('https://internal/init', { method: 'POST', body: JSON.stringify({ roomCode: 'DIFF01' }) }),
+      )
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+      await joinPlayer(gameRoom, ws, 'SoloPlayer')
+      await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'start_solo' }))
+      const state = await getRoomState(gameRoom)
+      return { gameRoom, ctx, state }
+    }
+
+    /** Parse spied console.log JSON lines and return the first with this event name. */
+    function findLoggedEvent(spy: ReturnType<typeof vi.spyOn>, eventName: string): Record<string, unknown> | undefined {
+      return spy.mock.calls
+        .map((call: unknown[]) => {
+          try {
+            return JSON.parse(call[0] as string) as Record<string, unknown>
+          } catch {
+            return null
+          }
+        })
+        .find((line): line is Record<string, unknown> => line?.event === eventName)
+    }
+
+    it('uses DEFAULT_DIFFICULTY when DIFFICULTY_CONFIG is unset', async () => {
+      const { state } = await startSoloWithEnv({})
+      expect(state?.difficulty).toEqual(DEFAULT_DIFFICULTY)
+      expect(state?.entities.filter((e) => e.kind === 'barrier')).toHaveLength(3) // solo default
+      expect(state?.lives).toBe(3)
+      expect(state?.maxLives).toBe(3)
+    })
+
+    it('uses a valid DIFFICULTY_CONFIG override (snapshot, barriers, lives)', async () => {
+      const { state } = await startSoloWithEnv({ DIFFICULTY_CONFIG: JSON.stringify(customDifficulty()) })
+      expect(state?.difficulty.name).toBe('custom-test')
+      expect(state?.entities.filter((e) => e.kind === 'barrier')).toHaveLength(2)
+      expect(state?.lives).toBe(7)
+      expect(state?.maxLives).toBe(7)
+    })
+
+    it('logs the resolved config name in the game_start wide event', async () => {
+      const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+      try {
+        await startSoloWithEnv({ DIFFICULTY_CONFIG: JSON.stringify(customDifficulty()) })
+        const gameStart = findLoggedEvent(consoleLogSpy, 'game_start')
+        expect(gameStart).toBeDefined()
+        expect(gameStart?.difficultyConfigName).toBe('custom-test')
+      } finally {
+        consoleLogSpy.mockRestore()
+      }
+    })
+
+    it('malformed JSON: falls back to defaults and logs difficulty_config_invalid', async () => {
+      const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+      try {
+        const { state } = await startSoloWithEnv({ DIFFICULTY_CONFIG: '{not json' })
+        expect(state?.difficulty).toEqual(DEFAULT_DIFFICULTY)
+        expect(state?.lives).toBe(3)
+        expect(state?.entities.filter((e) => e.kind === 'barrier')).toHaveLength(3)
+        const invalid = findLoggedEvent(consoleLogSpy, 'difficulty_config_invalid')
+        expect(invalid).toBeDefined()
+        expect(invalid?.reason).toBe('json_parse_failed')
+        // The game still started normally on defaults
+        expect(findLoggedEvent(consoleLogSpy, 'game_start')?.difficultyConfigName).toBe('ship-v1')
+      } finally {
+        consoleLogSpy.mockRestore()
+      }
+    })
+
+    it('structurally invalid config: falls back to defaults and logs the issues', async () => {
+      const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+      try {
+        const broken = customDifficulty() as unknown as { perPlayerCount: Record<number, unknown> }
+        delete broken.perPlayerCount[3]
+        const { state } = await startSoloWithEnv({ DIFFICULTY_CONFIG: JSON.stringify(broken) })
+        expect(state?.difficulty).toEqual(DEFAULT_DIFFICULTY)
+        const invalid = findLoggedEvent(consoleLogSpy, 'difficulty_config_invalid')
+        expect(invalid).toBeDefined()
+        expect(invalid?.reason).toBe('validation_failed')
+        expect(invalid?.issues).toContain('perPlayerCount.3 is missing')
+      } finally {
+        consoleLogSpy.mockRestore()
+      }
     })
   })
 

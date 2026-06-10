@@ -3,7 +3,7 @@
 
 import { describe, it, expect } from 'bun:test'
 import { GAME_STATE_DEFAULTS, createDefaultGameState, migrateGameState, validateGameState } from './state-defaults'
-import { DEFAULT_CONFIG } from './types'
+import { DEFAULT_CONFIG, DEFAULT_DIFFICULTY } from './types'
 
 describe('GAME_STATE_DEFAULTS', () => {
   it('has no undefined values', () => {
@@ -29,6 +29,8 @@ describe('GAME_STATE_DEFAULTS', () => {
       'wipeTicksRemaining',
       'wipeWaveNumber',
       'alienShootingDisabled',
+      'nextEntityId',
+      'difficulty',
       'config',
     ]
 
@@ -142,6 +144,43 @@ describe('migrateGameState', () => {
     expect(issues).toEqual([])
   })
 
+  it('derives nextEntityId from existing e_<n> entity ids when missing', () => {
+    // Simulate old persisted state from before nextEntityId moved into GameState
+    const oldState = {
+      roomCode: 'OLD02',
+      entities: [
+        { kind: 'barrier', id: 'e_3', x: 10, segments: [] },
+        { kind: 'alien', id: 'e_42', x: 20, y: 5, type: 'octopus', alive: true, row: 0, col: 0, points: 10 },
+        { kind: 'bullet', id: 'b_100_p1', x: 30, y: 10, ownerId: 'p1', dy: -1 }, // Non-e_ id ignored
+      ],
+      // NOTE: nextEntityId is MISSING
+    }
+
+    const migrated = migrateGameState(oldState as any)
+
+    expect(migrated.nextEntityId).toBe(43) // max e_<n> + 1, never collides
+  })
+
+  it('preserves persisted nextEntityId when present', () => {
+    const migrated = migrateGameState({ roomCode: 'NEW01', nextEntityId: 77 } as any)
+    expect(migrated.nextEntityId).toBe(77)
+  })
+
+  it('defaults difficulty to DEFAULT_DIFFICULTY for old persisted states', () => {
+    // Old persisted states predate the difficulty snapshot
+    const migrated = migrateGameState({ roomCode: 'OLD03' } as any)
+    expect(migrated.difficulty).toEqual(DEFAULT_DIFFICULTY)
+    expect(migrated.difficulty).not.toBe(DEFAULT_DIFFICULTY) // cloned, not shared
+  })
+
+  it('preserves a persisted difficulty snapshot', () => {
+    const custom = structuredClone(DEFAULT_DIFFICULTY)
+    custom.name = 'flatter-multi-A'
+    custom.waveRamp.speedPctPerWave = 0.05
+    const migrated = migrateGameState({ roomCode: 'NEW02', difficulty: custom } as any)
+    expect(migrated.difficulty).toBe(custom)
+  })
+
   it('merges config with defaults', () => {
     const partialConfig = {
       roomCode: 'CONF',
@@ -188,10 +227,10 @@ describe('validateGameState', () => {
     expect(validateGameState(123)).toEqual(['State is not an object'])
   })
 
-  it('checks all 18 required fields', () => {
+  it('checks all 20 required fields', () => {
     const issues = validateGameState({})
-    // Should have 18 missing field errors (including roomCode and maxLives)
-    expect(issues.filter((i) => i.includes('Missing field')).length).toBe(18)
+    // Should have 20 missing field errors (including roomCode and maxLives)
+    expect(issues.filter((i) => i.includes('Missing field')).length).toBe(20)
   })
 })
 
