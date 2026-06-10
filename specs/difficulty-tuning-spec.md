@@ -200,7 +200,49 @@ Determinism: bot decisions use a seeded RNG derived from the game seed + slot
 index. Same seed → identical game, so anomalous runs are replayable for
 debugging.
 
-### 3.4 Runner
+### 3.4 Prerequisite: make the reducer the complete state machine
+
+The reducer is almost — but not quite — a complete single-machine simulation
+target. An audit (June 2026) found no wall-clock, unseeded randomness, timers,
+or network use anywhere in `reducer.ts` or `shared/types.ts`. Time is already
+logical (tick counters), and randomness already flows through
+`seededRandom(state)`. This matches the two patterns from the testing
+research we are following: TigerBeetle's VOPR (whole system on one machine,
+seed = perfect reproduction) and Jane Street's library-level simulation
+(nondeterminism as explicit parameters, so the real code runs unmodified in
+tests).
+
+However, three pieces of game-progression logic live in `GameRoom.tick()`
+orchestration rather than the reducer, and a reducer-only simulation would
+silently skip them:
+
+1. **Wave-2+ alien spawning** — aliens for a new wave are created by
+   `GameRoom` at the `wipe_hold → wipe_reveal` transition
+   (`GameRoom.ts:1059-1069`), not by the reducer (which explicitly comments
+   "Aliens are created by GameRoom"). A reducer-only sim would clear wave 1
+   and then face an empty screen forever.
+2. **`nextWave()`** — wave increment and barrier persistence (the only
+   across-wave difficulty ramp we have) run in `GameRoom` when it observes the
+   reducer's `wave_complete` event (`GameRoom.ts:1053-1055`).
+3. **Entity ID generation** — `this.nextEntityId` is Durable Object instance
+   state, outside `GameState`.
+
+**Decision: move all three into the reducer** (the reducer handles
+`wave_complete` internally; `nextEntityId` becomes a `GameState` field) rather
+than re-implementing them in the sim runner. Re-implementation would create a
+second copy of game-progression logic that drifts from production — the exact
+failure mode the Jane Street notes warn about with per-component mocks
+("duplicating protocol details in every test"). After this move,
+`GameRoom.tick()` shrinks to: dispatch `TICK`, broadcast, persist — pure
+transport/persistence shell around a complete state machine. This is also a
+correctness win independent of simulation: wave progression becomes unit-testable
+and is covered by the same golden tests as the config extraction (Gate 1).
+
+With that prerequisite met, **nothing stops the simulation from running on one
+machine with zero network traffic**: one process, a for-loop over
+`gameReducer`, no wrangler, no Durable Objects, no WebSockets, no miniflare.
+
+### 3.5 Runner
 
 One simulated game:
 
@@ -229,7 +271,7 @@ interface GameResult {
 }
 ```
 
-### 3.5 Experiment runner & report
+### 3.6 Experiment runner & report
 
 `experiment.ts` runs the full grid — typically:
 
@@ -245,7 +287,7 @@ Output per cell: median / p25 / p75 of `finalWave` and `survivalTicks`, defeat
 rate before wave 2, mean lives lost in wave 1. Report as a markdown table
 (human review) plus JSON (regression tracking in CI later).
 
-### 3.6 Validation of the harness itself
+### 3.7 Validation of the harness itself
 
 Before trusting it for tuning:
 
@@ -384,7 +426,7 @@ If that gap closes to within 1.5× of solo while solo metrics stay flat, the
 project succeeded. Everything else is secondary evidence.
 
 If simulation predictions (Gate 2) and telemetry (Gate 3) disagree
-significantly, the calibration step in §3.6 is rerun and the bands in §6.2 are
+significantly, the calibration step in §3.7 is rerun and the bands in §6.2 are
 recalibrated — the sim is a screening tool, telemetry is the truth.
 
 ---
