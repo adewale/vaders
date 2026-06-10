@@ -294,7 +294,101 @@ describe('LaunchScreen menu sounds — property-based', () => {
   const POSITIVE_KEYS = ['ArrowUp', 'ArrowDown', 'Enter', '1', '2', '3', '4'] as const
   const NEGATIVE_KEYS = ['m', 'n', '?', 'Escape', 'a', 'z', 'Tab', 'Shift', 'Backspace'] as const
 
-  it('call count equals number of non-repeat positive key presses (PBT)', async () => {
+  /**
+   * Model of LaunchScreen's keydown handler, covering exactly the state that
+   * decides whether a key produces a menu sound: `joinMode` and
+   * `selectedIndex`. Join mode is entered by the '3' hotkey OR by Enter while
+   * JOIN ROOM (index 2) is selected; inside join mode NO key fires a sound,
+   * and Escape returns to the menu.
+   *
+   * The previous oracle was a linear count that special-cased only the
+   * literal key '3'. CI's fast-check seed -366879321 found the gap:
+   * ['2', 'ArrowDown', 'Enter', 'ArrowUp'] — '2' selects index 1, ArrowDown
+   * moves to index 2, Enter activates JOIN ROOM (entering join mode), and
+   * ArrowUp is then correctly silent. The component was right; the model was
+   * wrong. This oracle simulates the handler instead of counting keys.
+   */
+  function expectedMenuSounds(events: ReadonlyArray<{ key: string; repeat: boolean }>): Array<'navigate' | 'select'> {
+    const expected: Array<'navigate' | 'select'> = []
+    let joinMode = false
+    let selectedIndex = 0
+    for (const e of events) {
+      if (e.repeat) continue
+      if (joinMode) {
+        // Room-code entry: every key is silent; Escape exits back to the menu.
+        if (e.key === 'Escape') joinMode = false
+        continue
+      }
+      const lowered = e.key.length === 1 ? e.key.toLowerCase() : e.key
+      if (lowered === 'm' || lowered === 'n') continue // audio toggles, no menu sound
+      switch (e.key) {
+        case 'ArrowDown':
+          expected.push('navigate')
+          selectedIndex = (selectedIndex + 1) % 4
+          break
+        case 'ArrowUp':
+          expected.push('navigate')
+          selectedIndex = (selectedIndex + 3) % 4
+          break
+        case 'Enter':
+          expected.push('select')
+          if (selectedIndex === 2) joinMode = true // JOIN ROOM
+          break
+        case '1':
+          expected.push('select')
+          selectedIndex = 0
+          break
+        case '2':
+          expected.push('select')
+          selectedIndex = 1
+          break
+        case '3':
+          expected.push('select')
+          selectedIndex = 2
+          joinMode = true
+          break
+        case '4':
+          expected.push('select')
+          selectedIndex = 3
+          break
+        // every other key: no sound
+      }
+    }
+    return expected
+  }
+
+  function playSequence(events: ReadonlyArray<{ key: string; repeat: boolean }>): Array<'navigate' | 'select'> {
+    const calls: Array<'navigate' | 'select'> = []
+    const { unmount } = render(
+      <LaunchScreen
+        onStartSolo={noop}
+        onCreateRoom={noop}
+        onJoinRoom={noop}
+        onMatchmake={noop}
+        onMenuSound={(kind) => calls.push(kind)}
+      />,
+    )
+    for (const e of events) {
+      fireEvent.keyDown(window, { key: e.key, repeat: e.repeat })
+    }
+    unmount()
+    return calls
+  }
+
+  it('REGRESSION: Enter on JOIN ROOM enters join mode and silences later menu keys (CI seed -366879321)', () => {
+    // The shrunk counterexample from the CI failure, pinned as a
+    // deterministic example so the case is exercised on every run
+    // regardless of the PBT's seed.
+    const calls = playSequence([
+      { key: '2', repeat: false }, // select (CREATE ROOM hotkey), index -> 1
+      { key: 'ArrowDown', repeat: false }, // navigate, index -> 2 (JOIN ROOM)
+      { key: 'Enter', repeat: false }, // select, activates JOIN ROOM -> join mode
+      { key: 'ArrowUp', repeat: false }, // join mode: silent
+    ])
+    expect(calls).toEqual(['select', 'navigate', 'select'])
+  })
+
+  it('menu sound sequence matches the handler model for any key sequence (PBT)', async () => {
     const fc = await import('fast-check')
     await fc.assert(
       fc.asyncProperty(
@@ -306,31 +400,16 @@ describe('LaunchScreen menu sounds — property-based', () => {
           { maxLength: 40 },
         ),
         async (events) => {
-          const calls: Array<'navigate' | 'select'> = []
-          const { unmount } = render(
-            <LaunchScreen
-              onStartSolo={noop}
-              onCreateRoom={noop}
-              onJoinRoom={noop}
-              onMatchmake={noop}
-              onMenuSound={(kind) => calls.push(kind)}
-            />,
-          )
-          // Pressing '3' opens join mode, which changes focus/handling —
-          // exclude it from the oracle's positive set for this property and
-          // skip generated events after join-mode opens. Simplest approach:
-          // filter out '3' entirely for this PBT (covered by explicit tests).
-          const filtered = events.filter((e) => e.key !== '3')
-          const expected = filtered.filter(
-            (e) => !e.repeat && (POSITIVE_KEYS as readonly string[]).includes(e.key),
-          ).length
-          for (const e of filtered) {
-            fireEvent.keyDown(window, { key: e.key, repeat: e.repeat })
-          }
-          unmount()
-          return calls.length === expected
+          const calls = playSequence(events)
+          const expected = expectedMenuSounds(events)
+          // Full-sequence identity (kinds in order), not just a count —
+          // a navigate misreported as select would fail here.
+          return JSON.stringify(calls) === JSON.stringify(expected)
         },
       ),
+      // 40 runs fits the 5s test timeout (each case renders + replays up to
+      // 40 events). Verified once at 1500 runs across fresh seeds; the known
+      // CI counterexample is pinned as the deterministic REGRESSION case above.
       { numRuns: 40 },
     )
   })
