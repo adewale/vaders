@@ -1,0 +1,19 @@
+{
+  "name": "flat",
+  "base": {
+    "alienShootRate": 0.016,
+    "alienMoveIntervalTicks": 18
+  },
+  "perPlayerCount": {
+    "1": { "speedMult": 1.0, "shootMult": 1.0, "cols": 11, "rows": 5, "lives": 3, "barriers": 3 },
+    "2": { "speedMult": 1.0, "shootMult": 1.0, "cols": 11, "rows": 5, "lives": 3, "barriers": 4 },
+    "3": { "speedMult": 1.0, "shootMult": 1.0, "cols": 11, "rows": 5, "lives": 3, "barriers": 4 },
+    "4": { "speedMult": 1.0, "shootMult": 1.0, "cols": 11, "rows": 5, "lives": 3, "barriers": 4 }
+  },
+  "livesMode": "per-player",
+  "waveRamp": {
+    "speedPctPerWave": 0,
+    "shootPctPerWave": 0,
+    "maxWaveForRamp": 8
+  }
+}

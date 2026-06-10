@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "pretest": "node ../scripts/write-build-info.mjs",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "sim": "bun src/sim/cli.ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250124.0",
