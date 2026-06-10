@@ -21,9 +21,17 @@ function median(values: number[]): number {
 // ─── Built-in configs ─────────────────────────────────────────────────────────
 
 describe('sim built-in configs', () => {
-  const names = ['ship-v1', 'easier-multi', 'flat', 'classic-ramp']
+  const names = [
+    'ship-v1',
+    'ship-v2',
+    'ship-v2.1',
+    'ship-v2.2',
+    'easier-multi',
+    'flat',
+    'classic-ramp',
+  ]
 
-  it('ships exactly four built-in configs', () => {
+  it('registers every shipped config as a built-in', () => {
     expect(Object.keys(BUILTIN_CONFIGS).sort()).toEqual([...names].sort())
   })
 

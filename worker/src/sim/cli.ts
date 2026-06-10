@@ -21,6 +21,8 @@ import { DEFAULT_TICK_CAP } from './runner'
 import { isBotPolicyName, type BotPolicyName } from './bot'
 import shipV1 from './configs/ship-v1.json'
 import shipV2 from './configs/ship-v2.json'
+import shipV21 from './configs/ship-v2.1.json'
+import shipV22 from './configs/ship-v2.2.json'
 import easierMulti from './configs/easier-multi.json'
 import flat from './configs/flat.json'
 import classicRamp from './configs/classic-ramp.json'
@@ -38,6 +40,8 @@ declare const process: { argv: string[]; exit(code?: number): never }
 export const BUILTIN_CONFIGS: Record<string, unknown> = {
   'ship-v1': shipV1,
   'ship-v2': shipV2,
+  'ship-v2.1': shipV21,
+  'ship-v2.2': shipV22,
   'easier-multi': easierMulti,
   flat,
   'classic-ramp': classicRamp,
