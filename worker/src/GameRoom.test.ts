@@ -90,7 +90,13 @@ function createMockDurableObjectContext() {
             return { toArray: () => [] }
           }
           if (query.includes('DELETE FROM rejoin_sessions')) {
-            delete rejoinSessions[params[0] as string]
+            if (params.length > 0) {
+              // Targeted delete by token (consume/expire path).
+              delete rejoinSessions[params[0] as string]
+            } else {
+              // Bulk clear (cleanup path) — drop all tokens for the dead room.
+              for (const token of Object.keys(rejoinSessions)) delete rejoinSessions[token]
+            }
             return { toArray: () => [] }
           }
           if (query.includes('DELETE')) {
@@ -103,6 +109,7 @@ function createMockDurableObjectContext() {
       setAlarm: vi.fn(async (time: number) => {
         alarm = time
       }),
+      getAlarm: vi.fn(async () => alarm),
       deleteAlarm: vi.fn(async () => {
         alarm = null
       }),
@@ -116,6 +123,9 @@ function createMockDurableObjectContext() {
       webSockets.push(ws)
     }),
     getWebSockets: vi.fn(() => webSockets),
+    setWebSocketAutoResponse: vi.fn(),
+    getWebSocketAutoResponseTimestamp: vi.fn((_ws: MockWebSocket): Date | null => null),
+    waitUntil: vi.fn(),
     // Test helpers
     _sqlData: sqlData,
     _rejoinSessions: rejoinSessions,
@@ -125,7 +135,14 @@ function createMockDurableObjectContext() {
 }
 
 function createMockEnv(): Env {
-  const matchmakerFetch = vi.fn(async () => new Response('OK'))
+  // GameRoom calls the Matchmaker over RPC (register / unregister). A stable
+  // stub object lets tests assert which RPC method was invoked.
+  const matchmakerStub = {
+    register: vi.fn(async () => ({ ok: true as const })),
+    unregister: vi.fn(async () => {}),
+    find: vi.fn(async () => null),
+    getRoomInfo: vi.fn(async () => null),
+  }
 
   return {
     GAME_ROOM: {
@@ -134,9 +151,7 @@ function createMockEnv(): Env {
     } as any,
     MATCHMAKER: {
       idFromName: vi.fn((name: string) => ({ toString: () => `matchmaker-${name}` })),
-      get: vi.fn(() => ({
-        fetch: matchmakerFetch,
-      })),
+      get: vi.fn(() => matchmakerStub),
     } as any,
   }
 }
@@ -536,6 +551,46 @@ describe('WebSocket Message Handling', () => {
       // Alarm should be set
       expect(ctx.storage.setAlarm).toHaveBeenCalled()
     })
+
+    it('ignores ready during active play — cannot force a countdown that resets a live match', async () => {
+      // Security/state-machine regression: the ready handler had no status
+      // guard and did not route through the reducer's TRANSITIONS table. A
+      // scripted client could send `ready` mid-match; once every live player's
+      // id landed in readyPlayerIds, checkStartConditions() fired a countdown
+      // from `playing`, which on completion calls startGame() and wipes the
+      // match (tick/score/wave reset). Ready is only meaningful in `waiting`.
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws1 = createMockWebSocket()
+      const ws2 = createMockWebSocket()
+      ctx._webSockets.push(ws1, ws2)
+
+      await joinPlayer(gameRoom, ws1, 'Player1')
+      await joinPlayer(gameRoom, ws2, 'Player2')
+
+      // A match is in progress.
+      const game = (gameRoom as unknown as { game: GameState }).game
+      game.status = 'playing'
+      game.tick = 500
+      game.score = 1234
+      game.readyPlayerIds = []
+      ws1.send.mockClear()
+      ws2.send.mockClear()
+
+      // Attempt the exploit: both live players send `ready`.
+      await gameRoom.webSocketMessage(ws1 as any, JSON.stringify({ type: 'ready' }))
+      await gameRoom.webSocketMessage(ws2 as any, JSON.stringify({ type: 'ready' }))
+
+      const after = (gameRoom as unknown as { game: GameState }).game
+      expect(after.status).toBe('playing') // not flipped to countdown
+      expect(after.countdownRemaining).toBeNull()
+      expect(after.tick).toBe(500) // match progress untouched
+      expect(after.score).toBe(1234) // score not wiped
+      const startedCountdown = [...ws1.send.mock.calls, ...ws2.send.mock.calls].some((call: unknown[]) => {
+        const msg = JSON.parse(call[0] as string)
+        return msg.type === 'event' && msg.name === 'countdown_tick'
+      })
+      expect(startedCountdown).toBe(false)
+    })
   })
 
   describe('unready message', () => {
@@ -733,6 +788,206 @@ describe('WebSocket Close Handling', () => {
       return msg.type === 'event' && msg.name === 'countdown_cancelled'
     })
     expect(cancelCall).toBeDefined()
+  })
+
+  it('drains and cleans up the room when players disconnect at game_over (no leak)', async () => {
+    // Regression for the "game_over roach motel": disconnecting at the
+    // game-over screen must remove the player so the room reaches 0 players
+    // and cleanup() runs, unregistering from the matchmaker. Previously
+    // PLAYER_LEAVE was blocked in game_over, so the room + registry leaked.
+    const { gameRoom, ctx, env } = await createInitializedGameRoom()
+    const ws1 = createMockWebSocket()
+    const ws2 = createMockWebSocket()
+    ctx._webSockets.push(ws1, ws2)
+
+    await joinPlayer(gameRoom, ws1, 'Player1')
+    await joinPlayer(gameRoom, ws2, 'Player2')
+
+    // Force the room into game_over (terminal screen both players are viewing).
+    const game = (gameRoom as unknown as { game: GameState }).game
+    game.status = 'game_over'
+
+    // First disconnect at game_over removes exactly one player.
+    await gameRoom.webSocketClose(ws1 as any, 1006, 'closed', false)
+    expect(Object.keys((gameRoom as unknown as { game: GameState }).game.players)).toHaveLength(1)
+
+    // Second disconnect empties the room.
+    await gameRoom.webSocketClose(ws2 as any, 1006, 'closed', false)
+    expect(Object.keys((gameRoom as unknown as { game: GameState }).game.players)).toHaveLength(0)
+
+    // The empty-room alarm fires cleanup, which unregisters from the matchmaker
+    // (via RPC) and tears down state — the room no longer leaks.
+    await gameRoom.alarm()
+    const matchmakerStub = (env.MATCHMAKER as any).get()
+    expect(matchmakerStub.unregister).toHaveBeenCalled()
+    expect((gameRoom as unknown as { game: GameState | null }).game).toBeNull()
+  })
+
+  it('clears rejoin tokens when the room is cleaned up (no cross-room token leak)', async () => {
+    // rejoin_sessions rows were only deleted on expiry/consume, and cleanup()
+    // dropped game_state but left the token table behind. Each dead room's
+    // SQLite kept its tokens forever. Cleanup must clear them too.
+    const { gameRoom, ctx } = await createInitializedGameRoom()
+    const ws = createMockWebSocket()
+    ctx._webSockets.push(ws)
+
+    await joinPlayer(gameRoom, ws, 'Player1') // join mints a rejoin token
+    expect(Object.keys(ctx._rejoinSessions).length).toBeGreaterThan(0)
+
+    // Player leaves → room empties → cleanup is scheduled; the alarm fires it.
+    await gameRoom.webSocketClose(ws as any, 1000, 'left', true)
+    await gameRoom.alarm()
+
+    expect(Object.keys(ctx._rejoinSessions)).toHaveLength(0)
+    expect((gameRoom as unknown as { game: GameState | null }).game).toBeNull()
+  })
+
+  it('a mid-game reconnect does not clobber the game-tick alarm (no 5s freeze)', async () => {
+    // Regression for the single-alarm clobber: a Durable Object has ONE alarm
+    // and setAlarm overwrites. ensureUnauthenticatedSocketAlarm fired on every
+    // WS upgrade and set now+5s unconditionally — so a player reconnecting
+    // mid-match (the ?rejoin upgrade is allowed during `playing`) pushed the
+    // pending ~33ms game-tick alarm out to +5s, freezing the whole room's loop
+    // for 5 seconds. Cloudflare's documented "Multiple Events (Single Alarm)"
+    // pattern is to min-merge via getAlarm() — never replace a sooner alarm.
+    const { gameRoom, ctx } = await createInitializedGameRoom()
+    const ws = createMockWebSocket()
+    ctx._webSockets.push(ws)
+    await joinPlayer(gameRoom, ws, 'Player1')
+    await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'start_solo' }))
+    await completeWipePhases(gameRoom)
+    expect((gameRoom as unknown as { game: GameState }).game.status).toBe('playing')
+
+    // A game-tick alarm is pending ~33ms out.
+    const tickDeadline = ctx._alarm()
+    expect(tickDeadline).not.toBeNull()
+    expect(tickDeadline! - Date.now()).toBeLessThan(1000)
+
+    // A fresh, not-yet-authenticated socket upgrades mid-game (reconnect that
+    // hasn't sent rejoin/join yet), triggering the unauthenticated-socket alarm.
+    const pending = createMockWebSocket() // no attachment -> unauthenticated
+    ctx._webSockets.push(pending)
+    await (gameRoom as unknown as { ensureUnauthenticatedSocketAlarm(): Promise<void> }).ensureUnauthenticatedSocketAlarm()
+
+    // The sooner game-tick alarm must survive — not be pushed out to +5s.
+    const after = ctx._alarm()
+    expect(after).toBe(tickDeadline)
+    expect(after! - Date.now()).toBeLessThan(1000)
+  })
+
+  it('keeps the DO alive for background registry updates via ctx.waitUntil', async () => {
+    // fireAndForget tasks (registry refresh, cleanup-alarm scheduling) used to
+    // run unprotected — an eviction between handler return and task completion
+    // would silently drop them (e.g. a lost registry update → matchmaker drift).
+    // They must be registered with ctx.waitUntil so the runtime keeps the DO
+    // alive until they settle.
+    const { gameRoom, ctx } = await createInitializedGameRoom()
+    const ws = createMockWebSocket()
+    ctx._webSockets.push(ws)
+    await joinPlayer(gameRoom, ws, 'Player1')
+    await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'start_solo' }))
+    await completeWipePhases(gameRoom)
+    ;(ctx.waitUntil as Mock).mockClear()
+
+    // forfeit → endGame → fireAndForget(registry update + cleanup alarm)
+    await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'forfeit' }))
+
+    expect(ctx.waitUntil).toHaveBeenCalled()
+  })
+
+  describe('WebSocket auto-response (hibernation-friendly heartbeat)', () => {
+    it('registers a ping→pong auto-response so idle lobbies hibernate through keepalives', async () => {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      void gameRoom
+      expect(ctx.setWebSocketAutoResponse).toHaveBeenCalled()
+      const pair = (ctx.setWebSocketAutoResponse as Mock).mock.calls[0][0] as { request: string; response: string }
+      expect(pair.request).toContain('ping')
+      expect(pair.response).toContain('pong')
+    })
+
+    it('reconciles heartbeat liveness from the auto-response timestamp so a pinging player is not reaped', async () => {
+      // Auto-responded pings never invoke webSocketMessage, so they cannot bump
+      // lastActiveTick directly. A player in active play who only pings (no
+      // input) for > IDLE_STALE_TICKS would be wrongly reaped unless the tick
+      // reconciles liveness from the runtime's per-socket auto-response stamp.
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+      await joinPlayer(gameRoom, ws, 'Player1')
+      await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'start_solo' }))
+      await completeWipePhases(gameRoom)
+
+      const game = (gameRoom as unknown as { game: GameState }).game
+      const playerId = Object.keys(game.players)[0]
+      // Make the player look long-idle (well past the 2400-tick reap threshold)…
+      game.players[playerId].lastActiveTick = game.tick - 5000
+      // …but their socket pinged just now via the auto-response path.
+      ;(ctx.getWebSocketAutoResponseTimestamp as Mock).mockReturnValue(new Date())
+
+      ;(gameRoom as unknown as { tick(): void }).tick()
+
+      const after = (gameRoom as unknown as { game: GameState }).game
+      expect(after.players[playerId]).toBeDefined() // not reaped
+      // Reconciliation bumped it out of the stale zone (it ran before the
+      // TICK reducer incremented, so it trails `after.tick` by one).
+      expect(after.tick - after.players[playerId].lastActiveTick!).toBeLessThanOrEqual(1)
+    })
+  })
+
+  describe('alarm() error boundary', () => {
+    async function reachPlaying() {
+      const { gameRoom, ctx } = await createInitializedGameRoom()
+      const ws = createMockWebSocket()
+      ctx._webSockets.push(ws)
+      await joinPlayer(gameRoom, ws, 'Player1')
+      await gameRoom.webSocketMessage(ws as any, JSON.stringify({ type: 'start_solo' }))
+      await completeWipePhases(gameRoom)
+      return { gameRoom, ctx }
+    }
+
+    it('catches a fault inside a tick, logs it, and re-arms with backoff instead of rejecting', async () => {
+      // Cloudflare retries a throwing alarm() — a reducer exception would
+      // otherwise retry-storm against a poisoned room. The handler must catch,
+      // emit a wide event, and re-arm deliberately (backed off), never reject.
+      const { gameRoom, ctx } = await reachPlaying()
+      expect((gameRoom as unknown as { game: GameState }).game.status).toBe('playing')
+      ;(gameRoom as unknown as { tick: () => void }).tick = () => {
+        throw new Error('boom')
+      }
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+      // Must resolve (not reject) even though the tick throws.
+      await expect(gameRoom.alarm()).resolves.toBeUndefined()
+
+      const emittedAlarmError = logSpy.mock.calls.some(
+        (c) => typeof c[0] === 'string' && c[0].includes('"event":"alarm_error"'),
+      )
+      expect(emittedAlarmError).toBe(true)
+      // Re-armed with a backoff (~1s), not the 33ms tick cadence and not abandoned.
+      const next = ctx._alarm()
+      expect(next).not.toBeNull()
+      expect(next! - Date.now()).toBeGreaterThan(500)
+      logSpy.mockRestore()
+    })
+
+    it('gives up and ends the game after repeated consecutive faults (bounded failure)', async () => {
+      const { gameRoom } = await reachPlaying()
+      ;(gameRoom as unknown as { tick: () => void }).tick = () => {
+        throw new Error('persistent fault')
+      }
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+      // Drive enough failing alarms to exceed the give-up threshold.
+      for (let i = 0; i < 12; i++) await gameRoom.alarm()
+
+      // The room halts deterministically instead of spinning forever.
+      expect((gameRoom as unknown as { game: GameState }).game.status).toBe('game_over')
+      const gaveUp = logSpy.mock.calls.some(
+        (c) => typeof c[0] === 'string' && c[0].includes('"event":"alarm_error_giving_up"'),
+      )
+      expect(gaveUp).toBe(true)
+      logSpy.mockRestore()
+    })
   })
 
   it('schedules room cleanup when last player leaves', async () => {

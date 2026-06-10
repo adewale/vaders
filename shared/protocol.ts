@@ -51,7 +51,7 @@ export type ServerEvent =
 export type ServerMessage =
   | { type: 'sync'; state: GameState; playerId?: string; rejoinToken?: string; config?: GameConfig }
   | ServerEvent
-  | { type: 'pong'; serverTime: number }
+  | { type: 'pong'; serverTime?: number } // serverTime omitted by the runtime auto-response; no client reads it
   | { type: 'error'; code: ErrorCode; message: string }
 
 // Sync optimization:

@@ -11,13 +11,14 @@ import type {
   InputState,
 } from '../../../shared/types'
 import { applyPlayerInput } from '../../../shared/types'
+import { type Liveness, createLiveness, markAlive, isConnectionStale, PING_INTERVAL } from './liveness'
 
 // Application-level heartbeat. Browsers cannot send WebSocket protocol ping
 // frames, so this data message intentionally wakes a hibernated Durable Object
 // about every 30s. For Vaders' low traffic, reliable phantom-player detection
 // and user-visible reconnect behavior are worth that small idle-room cost.
-const PING_INTERVAL = 30000
-const PONG_TIMEOUT = 5000
+// PING_INTERVAL / PONG_TIMEOUT / staleness live in ./liveness so the heartbeat
+// reset on (re)open cannot drift from the staleness check that consumes it.
 const SYNC_INTERVAL_MS = 33 // Expected sync rate for lerp calculation
 
 function rejoinStorageKey(roomUrl: string): string {
@@ -86,7 +87,10 @@ export function useGameConnection(roomUrl: string, playerName: string) {
   })
 
   const wsRef = useRef<WebSocket | null>(null)
-  const lastPongRef = useRef<number>(Date.now())
+  // Liveness is marked alive on BOTH socket-open and pong (see ./liveness).
+  // Resetting on open is what stops a stale pong from a previous socket from
+  // tearing down a freshly reconnected one.
+  const livenessRef = useRef<Liveness>(createLiveness(Date.now()))
   const pingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const localInputRef = useRef<InputState>({ left: false, right: false })
   const rejoinTokenRef = useRef<string | null>(null)
@@ -113,6 +117,9 @@ export function useGameConnection(roomUrl: string, playerName: string) {
         ws.onopen = () => {
           // Successful connection (or reconnection) - reset attempt counter
           reconnectAttemptRef.current = 0
+          // Mark alive on open: a brand-new socket has never received a pong,
+          // so the previous socket's timestamp must not count against it.
+          markAlive(livenessRef.current, Date.now())
           setState((s) => ({ ...s, connected: true, reconnecting: false, error: null }))
 
           // Rejoin if we have a room-scoped token; otherwise perform a fresh join.
@@ -129,7 +136,7 @@ export function useGameConnection(roomUrl: string, playerName: string) {
             clearInterval(pingIntervalRef.current)
           }
           pingIntervalRef.current = setInterval(() => {
-            if (Date.now() - lastPongRef.current > PING_INTERVAL + PONG_TIMEOUT) {
+            if (isConnectionStale(livenessRef.current, Date.now())) {
               ws.close()
               return
             }
@@ -142,7 +149,7 @@ export function useGameConnection(roomUrl: string, playerName: string) {
             const msg: ServerMessage = JSON.parse(event.data)
 
             if (msg.type === 'pong') {
-              lastPongRef.current = Date.now()
+              markAlive(livenessRef.current, Date.now())
               return
             }
 
@@ -192,8 +199,15 @@ export function useGameConnection(roomUrl: string, playerName: string) {
               })
               return
             }
+
+            // Unknown message type: don't silently drop it — surface a dev
+            // signal so protocol drift (e.g. a server sending a new type before
+            // the client is updated) is visible instead of vanishing.
+            console.warn('[vaders] ignoring unknown server message type:', (msg as { type?: unknown })?.type)
           } catch {
-            // Invalid JSON
+            // Malformed/unparseable frame. Warn rather than swallow silently —
+            // corruption or a non-JSON payload would otherwise go unnoticed.
+            console.warn('[vaders] dropped unparseable server message')
           }
         }
 

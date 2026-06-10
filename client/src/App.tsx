@@ -16,9 +16,12 @@ import { debugLog, clearDebugLog } from './debug'
 import { useTerminalSize, STANDARD_WIDTH, STANDARD_HEIGHT } from './hooks/useTerminalSize'
 import { useGameAudio, playShootSound, playMenuNavigateSound, playMenuSelectSound } from './hooks/useGameAudio'
 import { AudioManager, MusicManager } from './audio'
+import { resolveServerUrl } from './serverUrl'
 
 const VERSION = '1.0.0'
-const SERVER_URL = process.env.VADERS_SERVER ?? 'http://localhost:8787'
+// Default to the production server (matching the launcher in bin/vaders.ts) so
+// running the client directly doesn't silently target a dead localhost.
+const SERVER_URL = resolveServerUrl(process.env.VADERS_SERVER)
 const LOG_PATH = process.env.VADERS_LOG_PATH ?? ''
 
 /** Construct WebSocket URL for a room from the HTTP server URL */

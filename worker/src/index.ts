@@ -5,7 +5,8 @@ export { GameRoom } from './GameRoom'
 export { Matchmaker } from './Matchmaker'
 export type { Env } from './env'
 
-import type { Env } from './env'
+import type { Env, MatchmakerStub } from './env'
+import type { MatchmakerLogContext } from './Matchmaker'
 import { BUILD_INFO } from './buildInfo'
 import { logEvent } from './logger'
 
@@ -28,12 +29,17 @@ console.log(
  *  the originating HTTP request. Matches the wide-events pattern from
  *  logging-best-practices: one requestId threads through every service hop. */
 const REQUEST_ID_HEADER = 'x-vaders-request-id'
+const REGION_HEADER = 'x-vaders-region'
 
-/** Clone a Request with the requestId header added, so DO-side logs can
- *  include it. Preserves body, method, and existing headers. */
-function withRequestId(request: Request, requestId: string): Request {
+/** Clone a Request with the correlation headers added, so DO-side logs can
+ *  include the originating requestId and edge region (colo). The WebSocket
+ *  upgrade is the one Worker→GameRoom call that must stay a fetch (RPC can't
+ *  return a 101), so correlation rides on headers here. Preserves body, method,
+ *  and existing headers. */
+function withCorrelation(request: Request, requestId: string, region?: string): Request {
   const headers = new Headers(request.headers)
   headers.set(REQUEST_ID_HEADER, requestId)
+  if (region) headers.set(REGION_HEADER, region)
   return new Request(request, { headers })
 }
 
@@ -53,38 +59,60 @@ function generateRoomCode(): string {
  * Generate a unique room code that doesn't already exist.
  * Returns null if unable to generate a unique code after max attempts.
  */
-async function generateUniqueRoomCode(matchmaker: DurableObjectStub): Promise<string | null> {
+async function generateUniqueRoomCode(matchmaker: MatchmakerStub): Promise<string | null> {
   for (let attempt = 0; attempt < MAX_ROOM_GENERATION_ATTEMPTS; attempt++) {
     const roomCode = generateRoomCode()
-    const check = await matchmaker.fetch(new Request(`https://internal/info/${roomCode}`))
-    if (check.status === 404) {
+    const existing = await matchmaker.getRoomInfo(roomCode)
+    if (existing === null) {
       return roomCode
     }
   }
   return null
 }
 
+type CreateRoomResult = { ok: true } | { ok: false; status: number; body: unknown }
+
 /**
  * Create and initialize a new game room.
- * Returns the room code or null on failure.
+ *
+ * Both downstream calls are checked: a `register` rejection (the matchmaker is
+ * at capacity) must propagate so the caller can return an honest error instead
+ * of handing the client a roomCode for a room the registry never accepted, and
+ * a failed GameRoom init must be compensated by un-registering the room.
  */
-async function createRoom(env: Env, matchmaker: DurableObjectStub, roomCode: string): Promise<void> {
-  const id = env.GAME_ROOM.idFromName(roomCode)
-  const stub = env.GAME_ROOM.get(id)
+async function createRoom(
+  env: Env,
+  matchmaker: MatchmakerStub,
+  roomCode: string,
+  log: MatchmakerLogContext,
+): Promise<CreateRoomResult> {
+  // Register FIRST. If the matchmaker is at capacity it rejects here, before we
+  // initialize a GameRoom Durable Object — otherwise a full matchmaker would
+  // leave behind orphan initialized rooms (a GameRoom with state but no
+  // registry entry) on every rejected create. A playerCount-0 `waiting` room
+  // is never returned by find(), so registering before init is safe.
+  const registered = await matchmaker.register(roomCode, 0, 'waiting', log)
+  if (!registered.ok) {
+    return { ok: false, status: 503, body: { code: registered.code, message: 'Too many active rooms' } }
+  }
 
-  await stub.fetch(
+  // GameRoom keeps a fetch handler (it serves WebSocket upgrades, which RPC
+  // cannot), so init goes over fetch.
+  const stub = env.GAME_ROOM.get(env.GAME_ROOM.idFromName(roomCode))
+  const initRes = await stub.fetch(
     new Request('https://internal/init', {
       method: 'POST',
       body: JSON.stringify({ roomCode }),
     }),
   )
+  if (!initRes.ok) {
+    // Compensate: roll back the registry entry so we never advertise a room
+    // whose GameRoom failed to initialize.
+    await Promise.resolve(matchmaker.unregister(roomCode, log)).catch(() => {})
+    return { ok: false, status: 503, body: { code: 'room_init_failed', message: 'Could not initialize room' } }
+  }
 
-  await matchmaker.fetch(
-    new Request('https://internal/register', {
-      method: 'POST',
-      body: JSON.stringify({ roomCode, playerCount: 0, status: 'waiting' }),
-    }),
-  )
+  return { ok: true }
 }
 
 export default {
@@ -96,11 +124,13 @@ export default {
     // Worker entry log to the matching DO-side logs.
     const requestId = crypto.randomUUID()
 
-    // Capture the Cloudflare colo (region) from request.cf if present so
-    // subsequent logEvent() calls within this request can include it.
-    // request.cf is undefined in tests/Node; we guard for that.
-    const colo = (request as Request & { cf?: { colo?: string } }).cf?.colo
-    ;(globalThis as { CF_REGION?: string | undefined }).CF_REGION = colo ?? undefined
+    // Capture the Cloudflare colo (region) from request.cf and thread it
+    // EXPLICITLY into every logEvent and DO call below. Previously this was
+    // stashed in a module-level global that (a) is never visible inside a DO's
+    // own isolate, so DO logs had no region, and (b) is clobbered across
+    // concurrent requests in one isolate. request.cf is undefined in tests/Node.
+    const region = (request as Request & { cf?: { colo?: string } }).cf?.colo
+    const log: MatchmakerLogContext = { requestId, region }
 
     // CORS headers for all responses
     const corsHeaders = {
@@ -116,6 +146,7 @@ export default {
       method: request.method,
       path: url.pathname,
       requestId,
+      region,
     })
 
     // Handle CORS preflight
@@ -125,11 +156,11 @@ export default {
 
     // POST /room - Create new room
     if (url.pathname === '/room' && request.method === 'POST') {
-      const matchmaker = env.MATCHMAKER.get(env.MATCHMAKER.idFromName('global'))
+      const matchmaker = env.MATCHMAKER.get(env.MATCHMAKER.idFromName('global')) as unknown as MatchmakerStub
       const roomCode = await generateUniqueRoomCode(matchmaker)
 
       if (!roomCode) {
-        logEvent('http_room_create', { requestId, outcome: 'generation_failed' })
+        logEvent('http_room_create', { requestId, region, outcome: 'generation_failed' })
         return new Response(
           JSON.stringify({
             code: 'room_generation_failed',
@@ -142,9 +173,16 @@ export default {
         )
       }
 
-      await createRoom(env, matchmaker, roomCode)
+      const created = await createRoom(env, matchmaker, roomCode, log)
+      if (!created.ok) {
+        logEvent('http_room_create', { requestId, region, outcome: 'create_failed', roomCode })
+        return new Response(JSON.stringify(created.body), {
+          status: created.status,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders },
+        })
+      }
 
-      logEvent('http_room_create', { requestId, outcome: 'created', roomCode })
+      logEvent('http_room_create', { requestId, region, outcome: 'created', roomCode })
       return new Response(JSON.stringify({ roomCode }), {
         headers: { 'Content-Type': 'application/json', ...corsHeaders },
       })
@@ -164,18 +202,18 @@ export default {
       // upgrade handshake; this line records that a client reached
       // the edge with the intent to connect. Pair via requestId with
       // any downstream room_join / game_in_progress / ws_error events.
-      logEvent('ws_upgrade_attempt', { requestId, roomCode })
+      logEvent('ws_upgrade_attempt', { requestId, region, roomCode })
       const id = env.GAME_ROOM.idFromName(roomCode)
       const stub = env.GAME_ROOM.get(id)
-      // Thread requestId to the DO so its logs correlate with this request.
-      return stub.fetch(withRequestId(request, requestId))
+      // Thread requestId + region to the DO so its logs correlate with this
+      // request and carry the originating edge region.
+      return stub.fetch(withCorrelation(request, requestId, region))
     }
 
     // GET /matchmake - Find or create open room
     if (url.pathname === '/matchmake') {
-      const matchmaker = env.MATCHMAKER.get(env.MATCHMAKER.idFromName('global'))
-      const result = await matchmaker.fetch(new Request('https://internal/find'))
-      const { roomCode: existingRoom } = (await result.json()) as { roomCode: string | null }
+      const matchmaker = env.MATCHMAKER.get(env.MATCHMAKER.idFromName('global')) as unknown as MatchmakerStub
+      const existingRoom = await matchmaker.find(log)
 
       if (existingRoom) {
         // Wide event: matchmaker returned an existing room. Pair with
@@ -184,6 +222,7 @@ export default {
         // by requestId.
         logEvent('http_matchmake', {
           requestId,
+          region,
           outcome: 'joined_existing',
           roomCode: existingRoom,
         })
@@ -198,6 +237,7 @@ export default {
       if (!newRoomCode) {
         logEvent('http_matchmake', {
           requestId,
+          region,
           outcome: 'generation_failed',
         })
         return new Response(
@@ -212,13 +252,21 @@ export default {
         )
       }
 
-      await createRoom(env, matchmaker, newRoomCode)
+      const createdForMatch = await createRoom(env, matchmaker, newRoomCode, log)
+      if (!createdForMatch.ok) {
+        logEvent('http_matchmake', { requestId, region, outcome: 'create_failed', roomCode: newRoomCode })
+        return new Response(JSON.stringify(createdForMatch.body), {
+          status: createdForMatch.status,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders },
+        })
+      }
 
       // "created_fresh" is the interesting case for diagnosis — this is
       // the path a "stranded matchmaker" hits (see docs/TODO.md). Pair
       // with the Lobby-side UX that shows them they seeded a new room.
       logEvent('http_matchmake', {
         requestId,
+        region,
         outcome: 'created_fresh',
         roomCode: newRoomCode,
       })
@@ -231,18 +279,17 @@ export default {
     const infoMatch = url.pathname.match(/^\/room\/([A-Z0-9]{6})$/)
     if (infoMatch) {
       const roomCode = infoMatch[1]
-      const matchmaker = env.MATCHMAKER.get(env.MATCHMAKER.idFromName('global'))
-      const result = await matchmaker.fetch(new Request(`https://internal/info/${roomCode}`))
+      const matchmaker = env.MATCHMAKER.get(env.MATCHMAKER.idFromName('global')) as unknown as MatchmakerStub
+      const info = await matchmaker.getRoomInfo(roomCode)
 
-      if (result.status === 404) {
+      if (info === null) {
         return new Response(JSON.stringify({ error: 'Room not found' }), {
           status: 404,
           headers: { 'Content-Type': 'application/json', ...corsHeaders },
         })
       }
 
-      const data = await result.json()
-      return new Response(JSON.stringify(data), {
+      return new Response(JSON.stringify(info), {
         headers: { 'Content-Type': 'application/json', ...corsHeaders },
       })
     }

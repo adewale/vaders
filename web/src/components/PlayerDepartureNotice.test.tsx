@@ -34,6 +34,11 @@ describe('PlayerDepartureNotice', () => {
     expect(toast).not.toBeNull()
     // Identify the departing slot/name in the message
     expect(toast.textContent).toMatch(/P2|Player 2|slot 2|left|disconnected/i)
+    // The toast is an accessible live status region: rendered as <output>,
+    // which carries an implicit role="status" / aria-live="polite". Pins the
+    // semantics so a revert to a bare <div> fails here (and the biome
+    // lint/a11y/useSemanticElements error doesn't regress).
+    expect(screen.getByRole('status')).toBe(toast)
   })
 
   it('auto-dismisses after 3 seconds', () => {

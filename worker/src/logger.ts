@@ -12,8 +12,12 @@
 //   in GameRoom.ts for per-message breadcrumbs.
 // - `undefined` fields are stripped before emit so JSON output stays clean
 //   and queryable in log aggregators (undefined → missing key, not "null").
-// - Region is read lazily from `globalThis.CF_REGION` so a per-request middleware
-//   can set it from `request.cf?.colo` without threading the value everywhere.
+// - `region` (the edge colo) is a caller-supplied field passed explicitly in
+//   `data`, threaded from the Worker entry's `request.cf?.colo` through RPC
+//   contexts and the WS-upgrade header. It is NOT read from a global: a global
+//   set in the Worker isolate is never visible inside a Durable Object's own
+//   isolate (so DO logs would lack region) and is clobbered across concurrent
+//   requests in one isolate.
 
 import { BUILD_INFO } from './buildInfo'
 
@@ -24,23 +28,18 @@ import { BUILD_INFO } from './buildInfo'
  *   - `event`    — the eventName
  *   - `version`, `commitHash`, `buildTime` — from ./buildInfo
  *   - `timestamp` — ISO-8601 at emit time
- *   - `region` — from globalThis.CF_REGION (may be undefined → omitted)
  *
- * Caller-supplied fields in `data` override nothing in the envelope; they are
- * merged alongside. `undefined` values (from either envelope or data) are
- * stripped before serialization so downstream log queries don't hit "null"
- * surprises.
+ * Caller-supplied fields in `data` (including `region`, `roomCode`, `requestId`)
+ * are merged alongside. `undefined` values are stripped before serialization so
+ * downstream log queries don't hit "null" surprises.
  */
 export function logEvent(eventName: string, data: Record<string, unknown>): void {
-  const region = (globalThis as { CF_REGION?: string }).CF_REGION
-
   const envelope: Record<string, unknown> = {
     event: eventName,
     version: BUILD_INFO.version,
     commitHash: BUILD_INFO.commitHash,
     buildTime: BUILD_INFO.buildTime,
     timestamp: new Date().toISOString(),
-    region,
     ...data,
   }
 

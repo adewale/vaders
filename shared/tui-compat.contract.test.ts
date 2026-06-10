@@ -217,8 +217,10 @@ describe('Contract · layout boundaries', () => {
     expect(LAYOUT.PLAYER_MIN_X).toBeLessThanOrEqual(LAYOUT.PLAYER_MAX_X)
     const range = LAYOUT.PLAYER_MAX_X - LAYOUT.PLAYER_MIN_X
     expect(range).toBeGreaterThanOrEqual(100)
-    // Range must also leave room for the sprite — left + width <= screen
-    expect(LAYOUT.PLAYER_MAX_X + LAYOUT.PLAYER_WIDTH).toBeLessThanOrEqual(STANDARD_WIDTH)
+    // player.x is the sprite CENTER, so the right edge is PLAYER_MAX_X + half
+    // width. That edge must stay on screen (≤ last column), not PLAYER_MAX_X +
+    // full width (the old left-edge formula that left 4 columns unreachable).
+    expect(LAYOUT.PLAYER_MAX_X + HITBOX.PLAYER_HALF_WIDTH).toBeLessThanOrEqual(STANDARD_WIDTH - 1)
   })
 
   test('LAYOUT player dimensions mirror SPRITE_SIZE.player', () => {

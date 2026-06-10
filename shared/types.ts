@@ -23,7 +23,7 @@ export const STANDARD_HEIGHT = 36
 export const LAYOUT = {
   PLAYER_Y: 31, // Y position for player ships (5 rows from bottom)
   PLAYER_MIN_X: 3, // Left boundary for player movement (center-based: left edge = 3-3 = 0)
-  PLAYER_MAX_X: 112, // Right boundary for player movement (120 - 7 - 1)
+  PLAYER_MAX_X: 116, // Right boundary (center-based: right edge = 116+3 = 119 = last column). Mirrors PLAYER_MIN_X.
   PLAYER_WIDTH: 7, // Width of player sprite (2-line braille sprite)
   PLAYER_HEIGHT: 2, // Height of player sprite
   BULLET_SPAWN_OFFSET: 2, // Bullet spawns this far above player

@@ -16,6 +16,20 @@ export interface DurableObjectState {
   blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T>
   acceptWebSocket(ws: WebSocket): void
   getWebSockets(): WebSocket[]
+  setWebSocketAutoResponse(maybeReqResp?: unknown): void
+  getWebSocketAutoResponseTimestamp(ws: WebSocket): Date | null
+  waitUntil?(promise: Promise<unknown>): void
+}
+
+// Provide the WebSocketRequestResponsePair runtime global for the test
+// environment — it exists natively in the Workers runtime but not in Node.
+if (typeof (globalThis as Record<string, unknown>).WebSocketRequestResponsePair === 'undefined') {
+  ;(globalThis as Record<string, unknown>).WebSocketRequestResponsePair = class {
+    constructor(
+      public request: string,
+      public response: string,
+    ) {}
+  }
 }
 
 export interface DurableObjectStorage {
@@ -26,6 +40,7 @@ export interface DurableObjectStorage {
   put(key: string, value: unknown): Promise<void>
   delete(key: string): Promise<boolean>
   setAlarm(time: number): Promise<void>
+  getAlarm(): Promise<number | null>
   deleteAlarm(): Promise<void>
 }
 
