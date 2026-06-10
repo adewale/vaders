@@ -566,9 +566,9 @@ Game difficulty scales with the number of players:
 | Players | Lives | Alien Speed | Grid Size | Alien Shots/s |
 |---------|-------|-------------|-----------|---------------|
 | 1 (solo) | 3 | 1.0x | 11x5 | 0.5 |
-| 2 | 5 shared | 1.25x | 11x5 | 0.75 |
-| 3 | 5 shared | 1.5x | 13x5 | 1.0 |
-| 4 | 5 shared | 1.75x | 15x6 | 1.25 |
+| 2 | 5 each | 1.25x | 11x5 | 0.75 |
+| 3 | 5 each | 1.5x | 13x5 | 1.0 |
+| 4 | 5 each | 1.75x | 13x6 | 1.25 |
 
 ### Player Spawn Positions
 

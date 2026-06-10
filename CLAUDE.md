@@ -131,9 +131,9 @@ grep -r 'opentui' web/src/           # Should find nothing
 | Players | Lives | Alien Speed | Grid |
 |---------|-------|-------------|------|
 | 1 (solo) | 3 | 1.0× | 11×5 |
-| 2 | 5 shared | 1.25× | 11×5 |
-| 3 | 5 shared | 1.5× | 13×5 |
-| 4 | 5 shared | 1.75× | 15×6 |
+| 2 | 5 each | 1.25× | 11×5 |
+| 3 | 5 each | 1.5× | 13×5 |
+| 4 | 5 each | 1.75× | 13×6 |
 
 ### WebSocket Protocol
 
