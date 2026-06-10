@@ -78,10 +78,13 @@ export function PlayerDepartureNotice({ prevState, state }: PlayerDepartureNotic
       : `${departures.map(describeDeparture).join(', ')} left the game`
 
   return (
-    <div
+    // <output> is the semantic element for a status region: it carries an
+    // implicit role="status" and aria-live="polite", so screen readers
+    // announce departures without an explicit ARIA role (biome
+    // lint/a11y/useSemanticElements). Layout is unaffected — the inline
+    // style sets display:flex.
+    <output
       data-testid="player-departure-notice"
-      role="status"
-      aria-live="polite"
       style={{
         position: 'fixed',
         top: 64,
@@ -107,7 +110,7 @@ export function PlayerDepartureNotice({ prevState, state }: PlayerDepartureNotic
         ⚡
       </span>
       <span style={{ flexGrow: 1 }}>{message}</span>
-    </div>
+    </output>
   )
 }
 
