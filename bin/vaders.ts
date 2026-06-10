@@ -35,7 +35,7 @@ Usage:
   vaders --local             Run local server (default: remote)
 
 Controls:
-  Arrow keys or A/D   Move left/right
+  Arrow keys         Move left/right
   SPACE              Shoot
   ENTER              Ready up / Select
   Q                  Quit
