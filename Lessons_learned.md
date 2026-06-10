@@ -405,7 +405,7 @@ const scaleTable = {
 }
 ```
 
-**Shared lives in co-op.** 5 lives shared across all players in co-op (vs 3 in solo). Any player death costs one shared life.
+**Per-player lives in co-op.** Each player gets 5 lives in co-op (vs 3 in solo). `Player.lives` is the canonical counter — the game ends when all players are individually dead and out of lives.
 
 **Spread spawn positions.** Players start evenly distributed across the screen width:
 
