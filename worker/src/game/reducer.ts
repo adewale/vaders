@@ -298,8 +298,10 @@ function startSoloReducer(state: GameState): ReducerResult {
   const next = structuredClone(state)
   next.status = 'wipe_hold' // Skip exit, go straight to hold for game start
   next.mode = 'solo'
-  next.maxLives = 3
-  next.lives = 3
+  // Lives come from the difficulty snapshot (3 with DEFAULT_DIFFICULTY)
+  const scaled = getScaledConfig(1, 1, next.difficulty)
+  next.maxLives = scaled.lives
+  next.lives = scaled.lives
   // Patch all players' lives to match solo config
   for (const player of Object.values(next.players)) {
     player.lives = next.lives
@@ -399,7 +401,7 @@ function wipeTickReducer(state: GameState): ReducerResult {
           next.wipeTicksRemaining = WIPE_TIMING.REVEAL_TICKS
           // Spawn the wave's alien formation when entering wipe_reveal
           const playerCount = Object.keys(next.players).length
-          const scaled = getScaledConfig(playerCount, next.config)
+          const scaled = getScaledConfig(playerCount, next.wave, next.difficulty)
           const aliens = createAlienFormation(
             scaled.alienCols,
             scaled.alienRows,
@@ -455,7 +457,7 @@ function tickReducer(state: GameState): ReducerResult {
 
   const events: ServerEvent[] = []
   const playerCount = Object.keys(next.players).length
-  const scaled = getScaledConfig(playerCount, next.config)
+  const scaled = getScaledConfig(playerCount, next.wave, next.difficulty)
 
   // 1. Apply player movement from held input
   for (const player of Object.values(next.players)) {

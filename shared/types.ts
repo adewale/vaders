@@ -277,12 +277,6 @@ export const UFO_SPAWN_PROBABILITY = 0.005
 /** Alien bullet speed ratio: alien bullets skip 1 out of every N ticks */
 export const ALIEN_BULLET_SKIP_INTERVAL = 5
 
-/** Maximum number of barriers placed in the game */
-export const MAX_BARRIER_COUNT = 4
-
-/** Minimum number of barriers added per player (barriers = min(MAX_BARRIER_COUNT, playerCount + BARRIER_PLAYER_OFFSET)) */
-export const BARRIER_PLAYER_OFFSET = 2
-
 /** Number of segments per row in barrier shape */
 export const BARRIER_SHAPE_COLS = 5
 
@@ -298,9 +292,13 @@ export interface GameConfig {
   tickIntervalMs: number // Default: 33 (~30Hz tick rate)
 
   // Tick-based timing (game loop)
+  // NOTE: alien speed/shoot scaling now reads DifficultyConfig.base (snapshotted
+  // into GameState.difficulty at game start), not these two fields. They are
+  // kept for backward compat of persisted configs and as documentation of the
+  // shipped base rates (DEFAULT_DIFFICULTY.base mirrors them).
   baseAlienMoveIntervalTicks: number // Ticks between alien moves
   baseBulletSpeed: number // Cells per tick
-  baseAlienShootRate: number // Probability per tick (use getScaledConfig)
+  baseAlienShootRate: number // Probability per tick (see DifficultyConfig)
   playerCooldownTicks: number // Ticks between shots
   playerMoveSpeed: number // Cells per tick when holding move key
   respawnDelayTicks: number // Ticks until respawn (30 = 1s at 30Hz)
@@ -329,7 +327,126 @@ export interface ScaledConfig {
   alienShootProbability: number // Probability per tick (~0.017 to 0.042)
   alienCols: number // Grid columns (11-15 based on player count)
   alienRows: number // Grid rows (5-6 based on player count)
-  lives: number // Shared lives (3 solo, 5 coop)
+  lives: number // Shared lives pool (3 solo, 5 coop with DEFAULT_DIFFICULTY)
+  barriers: number // Number of barriers placed at game start
+}
+
+// ─── Difficulty Config ────────────────────────────────────────────────────────
+
+/** Complete difficulty tuning surface. One document = one named config. */
+export interface DifficultyConfig {
+  name: string // e.g. "ship-v1", "flatter-multi-A"
+  base: {
+    alienShootRate: number // probability per tick
+    alienMoveIntervalTicks: number // ticks between alien moves
+  }
+  perPlayerCount: Record<
+    1 | 2 | 3 | 4,
+    {
+      speedMult: number
+      shootMult: number
+      cols: number
+      rows: number
+      lives: number // total pool (shared) — see livesMode
+      barriers: number
+    }
+  >
+  livesMode: 'shared' | 'per-player' // per-player multiplies lives by count
+  waveRamp: {
+    speedPctPerWave: number // 0 = current behavior
+    shootPctPerWave: number // 0 = current behavior
+    maxWaveForRamp: number // ramp caps here (classic SI capped at wave 8)
+  }
+}
+
+/**
+ * The shipped difficulty document. Reproduces the pre-extraction hardcoded
+ * values bit-for-bit (scaling table, 3/5 lives, min(4, playerCount + 2)
+ * barriers, no wave ramp) — golden tests in worker/src/game/scaling.test.ts
+ * enforce this. Tuning changes ship as deliberate new configs, never as
+ * silent edits here.
+ */
+export const DEFAULT_DIFFICULTY: DifficultyConfig = {
+  name: 'ship-v1',
+  base: {
+    alienShootRate: 0.016, // matches DEFAULT_CONFIG.baseAlienShootRate
+    alienMoveIntervalTicks: 18, // matches DEFAULT_CONFIG.baseAlienMoveIntervalTicks
+  },
+  perPlayerCount: {
+    1: { speedMult: 1.0, shootMult: 1.0, cols: 11, rows: 5, lives: 3, barriers: 3 }, // base rate
+    2: { speedMult: 1.25, shootMult: 1.5, cols: 11, rows: 5, lives: 5, barriers: 4 }, // 50% more shooting
+    3: { speedMult: 1.5, shootMult: 2.0, cols: 13, rows: 5, lives: 5, barriers: 4 }, // 2x shooting
+    4: { speedMult: 1.75, shootMult: 2.5, cols: 13, rows: 6, lives: 5, barriers: 4 }, // 2.5x shooting
+  },
+  livesMode: 'shared',
+  waveRamp: {
+    speedPctPerWave: 0,
+    shootPctPerWave: 0,
+    maxWaveForRamp: 8,
+  },
+}
+
+/**
+ * Structurally validate an untrusted value (e.g. JSON.parse of the
+ * DIFFICULTY_CONFIG env var) as a DifficultyConfig. Returns a list of
+ * issues; empty array means valid. Mirrors validateGameState's shape.
+ */
+export function validateDifficultyConfig(value: unknown): string[] {
+  const issues: string[] = []
+
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return ['Config is not an object']
+  }
+  const c = value as Record<string, unknown>
+
+  if (typeof c.name !== 'string' || c.name.length === 0) {
+    issues.push('name must be a non-empty string')
+  }
+
+  const isFinitePositive = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n > 0
+  const isFiniteNonNegative = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0
+
+  const base = c.base as Record<string, unknown> | undefined
+  if (typeof base !== 'object' || base === null) {
+    issues.push('base must be an object')
+  } else {
+    if (!isFiniteNonNegative(base.alienShootRate)) issues.push('base.alienShootRate must be a finite number >= 0')
+    if (!isFinitePositive(base.alienMoveIntervalTicks)) issues.push('base.alienMoveIntervalTicks must be a finite number > 0')
+  }
+
+  const perPlayerCount = c.perPlayerCount as Record<string, unknown> | undefined
+  if (typeof perPlayerCount !== 'object' || perPlayerCount === null) {
+    issues.push('perPlayerCount must be an object')
+  } else {
+    for (const count of [1, 2, 3, 4] as const) {
+      const entry = perPlayerCount[count] as Record<string, unknown> | undefined
+      if (typeof entry !== 'object' || entry === null) {
+        issues.push(`perPlayerCount.${count} is missing`)
+        continue
+      }
+      if (!isFinitePositive(entry.speedMult)) issues.push(`perPlayerCount.${count}.speedMult must be a finite number > 0`)
+      if (!isFinitePositive(entry.shootMult)) issues.push(`perPlayerCount.${count}.shootMult must be a finite number > 0`)
+      if (!isFinitePositive(entry.cols)) issues.push(`perPlayerCount.${count}.cols must be a finite number > 0`)
+      if (!isFinitePositive(entry.rows)) issues.push(`perPlayerCount.${count}.rows must be a finite number > 0`)
+      if (!isFinitePositive(entry.lives)) issues.push(`perPlayerCount.${count}.lives must be a finite number > 0`)
+      if (!isFiniteNonNegative(entry.barriers)) issues.push(`perPlayerCount.${count}.barriers must be a finite number >= 0`)
+    }
+  }
+
+  if (c.livesMode !== 'shared' && c.livesMode !== 'per-player') {
+    issues.push("livesMode must be 'shared' or 'per-player'")
+  }
+
+  const waveRamp = c.waveRamp as Record<string, unknown> | undefined
+  if (typeof waveRamp !== 'object' || waveRamp === null) {
+    issues.push('waveRamp must be an object')
+  } else {
+    if (!isFiniteNonNegative(waveRamp.speedPctPerWave)) issues.push('waveRamp.speedPctPerWave must be a finite number >= 0')
+    if (!isFiniteNonNegative(waveRamp.shootPctPerWave)) issues.push('waveRamp.shootPctPerWave must be a finite number >= 0')
+    if (!isFinitePositive(waveRamp.maxWaveForRamp)) issues.push('waveRamp.maxWaveForRamp must be a finite number > 0')
+  }
+
+  return issues
 }
 
 /** Event names that can be emitted during gameplay (matches ServerEvent.name) */
@@ -394,6 +511,12 @@ export interface GameState {
   // Object instance state) so the reducer alone can spawn entities — required
   // for reducer-only simulation. See specs/difficulty-tuning-spec.md §3.4.
   nextEntityId: number
+
+  // Difficulty document snapshot, set at game start (env override or
+  // DEFAULT_DIFFICULTY). The reducer reads THIS — never a module constant —
+  // so a running game is self-describing and simulations can vary the
+  // config per run. See specs/difficulty-tuning-spec.md §2.3.
+  difficulty: DifficultyConfig
 
   config: GameConfig
 }

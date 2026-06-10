@@ -3,7 +3,7 @@
 
 import { describe, it, expect } from 'bun:test'
 import { GAME_STATE_DEFAULTS, createDefaultGameState, migrateGameState, validateGameState } from './state-defaults'
-import { DEFAULT_CONFIG } from './types'
+import { DEFAULT_CONFIG, DEFAULT_DIFFICULTY } from './types'
 
 describe('GAME_STATE_DEFAULTS', () => {
   it('has no undefined values', () => {
@@ -30,6 +30,7 @@ describe('GAME_STATE_DEFAULTS', () => {
       'wipeWaveNumber',
       'alienShootingDisabled',
       'nextEntityId',
+      'difficulty',
       'config',
     ]
 
@@ -165,6 +166,21 @@ describe('migrateGameState', () => {
     expect(migrated.nextEntityId).toBe(77)
   })
 
+  it('defaults difficulty to DEFAULT_DIFFICULTY for old persisted states', () => {
+    // Old persisted states predate the difficulty snapshot
+    const migrated = migrateGameState({ roomCode: 'OLD03' } as any)
+    expect(migrated.difficulty).toEqual(DEFAULT_DIFFICULTY)
+    expect(migrated.difficulty).not.toBe(DEFAULT_DIFFICULTY) // cloned, not shared
+  })
+
+  it('preserves a persisted difficulty snapshot', () => {
+    const custom = structuredClone(DEFAULT_DIFFICULTY)
+    custom.name = 'flatter-multi-A'
+    custom.waveRamp.speedPctPerWave = 0.05
+    const migrated = migrateGameState({ roomCode: 'NEW02', difficulty: custom } as any)
+    expect(migrated.difficulty).toBe(custom)
+  })
+
   it('merges config with defaults', () => {
     const partialConfig = {
       roomCode: 'CONF',
@@ -211,10 +227,10 @@ describe('validateGameState', () => {
     expect(validateGameState(123)).toEqual(['State is not an object'])
   })
 
-  it('checks all 19 required fields', () => {
+  it('checks all 20 required fields', () => {
     const issues = validateGameState({})
-    // Should have 19 missing field errors (including roomCode and maxLives)
-    expect(issues.filter((i) => i.includes('Missing field')).length).toBe(19)
+    // Should have 20 missing field errors (including roomCode and maxLives)
+    expect(issues.filter((i) => i.includes('Missing field')).length).toBe(20)
   })
 })
 

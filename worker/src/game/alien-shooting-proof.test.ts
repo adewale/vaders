@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'vitest'
 import { gameReducer } from './reducer'
 import { createDefaultGameState } from '../../../shared/state-defaults'
-import { DEFAULT_CONFIG, WIPE_TIMING, getAliens, getBullets } from '../../../shared/types'
+import { DEFAULT_DIFFICULTY, WIPE_TIMING, getAliens, getBullets } from '../../../shared/types'
 import { getScaledConfig } from './scaling'
 
 describe('PROOF: Alien shooting works end-to-end', () => {
@@ -48,7 +48,7 @@ describe('PROOF: Alien shooting works end-to-end', () => {
 
     // 5. The reducer spawns the alien formation itself when entering wipe_reveal
     const playerCount = Object.keys(state.players).length
-    const scaled = getScaledConfig(playerCount, state.config)
+    const scaled = getScaledConfig(playerCount, state.wave, state.difficulty)
 
     expect(getAliens(state.entities).length).toBe(scaled.alienCols * scaled.alienRows)
     expect(getAliens(state.entities).every((a) => a.entering)).toBe(true)
@@ -90,7 +90,7 @@ describe('PROOF: Alien shooting works end-to-end', () => {
   })
 
   test('Alien shoot probability is non-zero', () => {
-    const scaled = getScaledConfig(1, DEFAULT_CONFIG)
+    const scaled = getScaledConfig(1, 1, DEFAULT_DIFFICULTY)
 
     expect(scaled.alienShootProbability).toBeGreaterThan(0)
     expect(scaled.alienShootProbability).toBeLessThan(1)

@@ -4625,7 +4625,7 @@ describe('Collision Detection Property-Based Tests', () => {
     it('A2: alien visual overlap without collision — tick ordering bug', () => {
       const { state, players } = createTestPlayingState(1)
       const playerId = players[0].id
-      const scaled = getScaledConfig(1, state.config)
+      const scaled = getScaledConfig(1, state.wave, state.difficulty)
 
       // Set tick so that aliens will move on THIS tick (tick % alienMoveIntervalTicks === 0)
       // After increment in reducer: (tick+1) % interval === 0 => tick+1 must be divisible
@@ -5017,7 +5017,7 @@ describe('Collision Detection Property-Based Tests', () => {
       // on the same tick — no 1-frame delay where bullet visually overlaps alien.
       const { state, players } = createTestPlayingState(1)
       const playerId = players[0].id
-      const scaled = getScaledConfig(1, state.config)
+      const scaled = getScaledConfig(1, state.wave, state.difficulty)
 
       // Set tick so aliens move this tick: (tick+1) % alienMoveIntervalTicks === 0
       state.tick = scaled.alienMoveIntervalTicks - 1
@@ -5280,7 +5280,7 @@ describe('Tick ordering: aliens move before collision checks', () => {
     // inside alien hitbox [52,57) AFTER alien moves from x=50 to x=52.
     const { state, players } = createTestPlayingState(1)
     const playerId = players[0].id
-    const scaled = getScaledConfig(1, state.config)
+    const scaled = getScaledConfig(1, state.wave, state.difficulty)
 
     state.tick = scaled.alienMoveIntervalTicks - 1
 
@@ -5306,7 +5306,7 @@ describe('Tick ordering: aliens move before collision checks', () => {
     // Alien drops down and collision registers on the same tick
     const { state, players } = createTestPlayingState(1)
     const playerId = players[0].id
-    const scaled = getScaledConfig(1, state.config)
+    const scaled = getScaledConfig(1, state.wave, state.difficulty)
 
     state.tick = scaled.alienMoveIntervalTicks - 1
 
@@ -5333,7 +5333,7 @@ describe('Tick ordering: aliens move before collision checks', () => {
     // On ticks where aliens don't move, collision works as before
     const { state, players } = createTestPlayingState(1)
     const playerId = players[0].id
-    const scaled = getScaledConfig(1, state.config)
+    const scaled = getScaledConfig(1, state.wave, state.difficulty)
 
     // Ensure tick is NOT an alien move tick
     state.tick = scaled.alienMoveIntervalTicks
@@ -5353,7 +5353,7 @@ describe('Tick ordering: aliens move before collision checks', () => {
   it('alien-barrier collision uses post-move positions', () => {
     // Verify aliens destroy barriers at their new positions after dropping
     const { state } = createTestPlayingState(1)
-    const scaled = getScaledConfig(1, state.config)
+    const scaled = getScaledConfig(1, state.wave, state.difficulty)
 
     state.tick = scaled.alienMoveIntervalTicks - 1
 
@@ -5385,7 +5385,7 @@ describe('Tick ordering: aliens move before collision checks', () => {
     for (let seed = 0; seed < 100; seed++) {
       const { state, players } = createTestPlayingState(1)
       const playerId = players[0].id
-      const scaled = getScaledConfig(1, state.config)
+      const scaled = getScaledConfig(1, state.wave, state.difficulty)
 
       state.tick = scaled.alienMoveIntervalTicks - 1
       state.rngSeed = seed * 7 + 1

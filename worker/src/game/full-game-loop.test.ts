@@ -416,7 +416,7 @@ describe('Wave Progression', () => {
     const { state: afterHold } = runTicks(afterExit, WIPE_TIMING.HOLD_TICKS)
     expect(afterHold.status).toBe('wipe_reveal')
     const aliens = getAliens(afterHold.entities)
-    const scaled = getScaledConfig(1, afterHold.config)
+    const scaled = getScaledConfig(1, afterHold.wave, afterHold.difficulty)
     expect(aliens).toHaveLength(scaled.alienCols * scaled.alienRows)
     expect(aliens.every((a) => a.entering)).toBe(true)
     expect(aliens.every((a) => a.alive)).toBe(true)
@@ -490,8 +490,9 @@ describe('Wave Progression', () => {
 
     // Tick until second kill - also disable alien movement by setting a high move interval
     // so the alien doesn't drift away from the bullet during travel
+    // (the reducer reads this from the difficulty snapshot, not GameConfig)
     current = structuredClone(current)
-    current.config.baseAlienMoveIntervalTicks = 99999
+    current.difficulty.base.alienMoveIntervalTicks = 99999
 
     let secondKilled = false
     for (let i = 0; i < 30; i++) {

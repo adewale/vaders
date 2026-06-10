@@ -6,6 +6,7 @@ import type {
   GameState,
   Player,
   BarrierEntity,
+  DifficultyConfig,
   ServerMessage,
   ClientMessage,
   PlayerSlot,
@@ -16,11 +17,11 @@ import {
   HITBOX,
   WIPE_TIMING,
   PLAYER_COLORS,
-  MAX_BARRIER_COUNT,
-  BARRIER_PLAYER_OFFSET,
   BARRIER_SHAPE_COLS,
   COUNTDOWN_SECONDS,
+  DEFAULT_DIFFICULTY,
   createBarrierSegments,
+  validateDifficultyConfig,
 } from '../../shared/types'
 import { getScaledConfig, getPlayerSpawnX } from './game/scaling'
 import { gameReducer, type GameAction } from './game/reducer'
@@ -862,10 +863,42 @@ export class GameRoom extends DurableObject<Env> {
     })
   }
 
+  /**
+   * Resolve the difficulty document for a new game: the DIFFICULTY_CONFIG
+   * env var (JSON string) if present and valid, otherwise DEFAULT_DIFFICULTY.
+   * A bad config must never crash a room — log `difficulty_config_invalid`
+   * and fall back to the shipped defaults.
+   */
+  private resolveDifficultyConfig(): DifficultyConfig {
+    const raw = this.env.DIFFICULTY_CONFIG
+    if (!raw) return structuredClone(DEFAULT_DIFFICULTY)
+
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw)
+    } catch (err) {
+      this.log('difficulty_config_invalid', {
+        reason: 'json_parse_failed',
+        message: err instanceof Error ? err.message : String(err),
+      })
+      return structuredClone(DEFAULT_DIFFICULTY)
+    }
+
+    const issues = validateDifficultyConfig(parsed)
+    if (issues.length > 0) {
+      this.log('difficulty_config_invalid', { reason: 'validation_failed', issues })
+      return structuredClone(DEFAULT_DIFFICULTY)
+    }
+    return parsed as DifficultyConfig
+  }
+
   private async startGame() {
     if (!this.game) return
     const playerCount = Object.keys(this.game.players).length
-    const scaled = getScaledConfig(playerCount, this.game.config)
+    // Snapshot the resolved difficulty document into state so the running
+    // game is self-describing and the reducer reads it per tick.
+    this.game.difficulty = this.resolveDifficultyConfig()
+    const scaled = getScaledConfig(playerCount, 1, this.game.difficulty)
 
     debugLog('[GAME_START]', {
       players: Object.entries(this.game.players).map(([id, p]) => ({ id, name: p.name, slot: p.slot })),
@@ -903,7 +936,7 @@ export class GameRoom extends DurableObject<Env> {
     // Note: alienShootingDisabled is set via GAME_STATE_DEFAULTS in state-defaults.ts
 
     // Initialize barriers only - aliens created at wipe_hold→wipe_reveal transition
-    this.game.entities = [...this.createBarriers(playerCount)]
+    this.game.entities = [...this.createBarriers(scaled.barriers)]
 
     this.broadcast({ type: 'event', name: 'game_start', data: undefined })
     this.broadcastFullState()
@@ -915,6 +948,7 @@ export class GameRoom extends DurableObject<Env> {
       mode: this.game.mode,
       playerCount,
       wave: this.game.wave,
+      difficultyConfigName: this.game.difficulty.name,
     })
 
     // Use alarm for game tick (hibernation-compatible)
@@ -1157,10 +1191,9 @@ export class GameRoom extends DurableObject<Env> {
     this.fireAndForget('schedule_cleanup_alarm', this.ctx.storage.setAlarm(Date.now() + 5 * 60 * 1000))
   }
 
-  private createBarriers(playerCount: number): BarrierEntity[] {
+  private createBarriers(barrierCount: number): BarrierEntity[] {
     if (!this.game) return []
     const width = this.game.config.width
-    const barrierCount = Math.min(MAX_BARRIER_COUNT, playerCount + BARRIER_PLAYER_OFFSET)
     const barriers: BarrierEntity[] = []
     const spacing = width / (barrierCount + 1)
 

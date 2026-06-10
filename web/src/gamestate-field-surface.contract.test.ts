@@ -118,6 +118,11 @@ const GAMESTATE_SERVER_ONLY_FIELDS: Record<string, string> = {
   // entities (wave formations). The client only consumes the resulting ids
   // on entities themselves.
   nextEntityId: 'server-only: reducer entity-id counter; client sees entity ids on entities',
+  // Difficulty document snapshot driving the reducer's per-tick scaling
+  // (speed/shoot/grid/lives/barriers + wave ramp). The client experiences it
+  // entirely through the synced positions/entities; a future UI could surface
+  // `difficulty.name`, at which point this entry gets deleted.
+  difficulty: 'server-only: difficulty config snapshot consumed by the reducer',
   // Config is exposed through a component-local helper (`state.config.maxPlayers`
   // in LobbyScreen), accessed via `(state as any).config`. That `as any`
   // access is invisible to the plain `state.config` scraper, so we
