@@ -390,6 +390,11 @@ export interface GameState {
   // Debug flag: completely disable alien shooting
   alienShootingDisabled: boolean
 
+  // Monotonic counter for `e_<n>` entity IDs. Lives in GameState (not Durable
+  // Object instance state) so the reducer alone can spawn entities — required
+  // for reducer-only simulation. See specs/difficulty-tuning-spec.md §3.4.
+  nextEntityId: number
+
   config: GameConfig
 }
 

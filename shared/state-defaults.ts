@@ -79,6 +79,7 @@ export const GAME_STATE_DEFAULTS: Omit<GameState, 'roomCode'> = {
   wipeTicksRemaining: null,
   wipeWaveNumber: null,
   alienShootingDisabled: false, // Set to true to disable alien shooting for debugging
+  nextEntityId: 1,
   config: DEFAULT_CONFIG,
 }
 
@@ -113,7 +114,7 @@ export function createDefaultGameState(roomCode: string): GameState {
  * Existing values in persistedState are preserved.
  */
 export function migrateGameState(persistedState: Partial<GameState> & { roomCode: string }): GameState {
-  return {
+  const migrated: GameState = {
     ...GAME_STATE_DEFAULTS,
     ...persistedState,
     // Ensure config doesn't lose new fields
@@ -122,6 +123,20 @@ export function migrateGameState(persistedState: Partial<GameState> & { roomCode
       ...(persistedState.config ?? {}),
     },
   }
+
+  // nextEntityId used to live in Durable Object instance state, so older
+  // persisted states don't carry it. Derive a non-colliding default from any
+  // existing `e_<n>` entity ids so rehydrated rooms never reuse an id.
+  if (persistedState.nextEntityId === undefined) {
+    let maxEntityId = 0
+    for (const entity of persistedState.entities ?? []) {
+      const match = /^e_(\d+)$/.exec(entity.id)
+      if (match) maxEntityId = Math.max(maxEntityId, Number(match[1]))
+    }
+    migrated.nextEntityId = maxEntityId + 1
+  }
+
+  return migrated
 }
 
 /**
@@ -157,6 +172,7 @@ export function validateGameState(state: unknown): string[] {
     'wipeTicksRemaining',
     'wipeWaveNumber',
     'alienShootingDisabled',
+    'nextEntityId',
     'config',
   ]
 

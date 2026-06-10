@@ -1588,7 +1588,8 @@ describe('barrier segment damage progression', () => {
     const barrier = createTestBarrier('barrier1', 50)
     barrier.segments[0].health = 0
     const bullet = createTestBullet('b1', 50, LAYOUT.BARRIER_Y + 1, players[0].id, -1)
-    state.entities = [barrier, bullet]
+    // Keep a live alien far away so the wave doesn't complete (which would prune bullets)
+    state.entities = [barrier, bullet, createTestAlien('keepalive', 5, 2)]
 
     const result = gameReducer(state, { type: 'TICK' })
 
@@ -2003,7 +2004,10 @@ describe('bottom-row-only alien shooting', () => {
     let currentState = state
     let bulletsCreated = 0
 
-    for (let i = 0; i < 500; i++) {
+    // An all-dead formation completes the wave on the first tick (the reducer
+    // now runs wave transitions itself), so stop at the transition — only
+    // 'playing' ticks could produce alien shots.
+    for (let i = 0; i < 500 && currentState.status === 'playing'; i++) {
       const result = gameReducer(currentState, { type: 'TICK' })
       const newBullets = getBullets(result.state.entities).filter((b) => b.ownerId === null)
       bulletsCreated += newBullets.length
@@ -2012,6 +2016,9 @@ describe('bottom-row-only alien shooting', () => {
 
     // Dead aliens should not shoot
     expect(bulletsCreated).toBe(0)
+    // And a formation with no live aliens counts as a cleared wave
+    expect(currentState.status).toBe('wipe_exit')
+    expect(currentState.wave).toBe(2)
   })
 
   it('when bottom alien is killed, surviving aliens can still shoot', () => {
@@ -3226,7 +3233,9 @@ describe('collision edge cases', () => {
       const bullet1 = createTestBullet('b1', 51, 10, player1.id, -1)
       // Second bullet also in range but alien will be dead when it's checked
       const bullet2 = createTestBullet('b2', 52, 11, player2.id, -1)
-      state.entities = [alien, bullet1, bullet2]
+      // Second live alien far away so killing alien1 doesn't complete the wave
+      // (wave completion prunes bullets, which is not what this test is about)
+      state.entities = [alien, bullet1, bullet2, createTestAlien('faraway', 10, 5, { row: 0, col: 5 })]
 
       const result = gameReducer(state, { type: 'TICK' })
 
@@ -3540,7 +3549,9 @@ describe('collision edge cases', () => {
 
       // Bullet that could hit either
       const bullet = createTestBullet('b1', 52, 2, players[0].id, -1)
-      state.entities = [alien, ufo, bullet]
+      // Second live alien far away so killing alien1 doesn't complete the wave
+      // (wave completion prunes the UFO, which is not what this test is about)
+      state.entities = [alien, ufo, bullet, createTestAlien('faraway', 10, 10, { row: 1, col: 5 })]
       state.score = 0
 
       const result = gameReducer(state, { type: 'TICK' })
@@ -4115,7 +4126,11 @@ describe('Bullet-Barrier Property-Based Tests', () => {
     bulletOwnerId: string | null = 'player-1',
   ) {
     const { state, players } = createTestPlayingState(1, {
-      aliens: [], // No aliens to avoid alien-related logic interfering
+      // One live sentinel alien far from the action: the reducer now runs the
+      // wave transition itself, so an alien-free state would wave-complete on
+      // the first tick and prune all bullets. The sentinel keeps the game in
+      // 'playing' without interfering (it never moves or shoots).
+      aliens: [createTestAlien('sentinel-alien', 0, 0)],
       barriers: [
         {
           kind: 'barrier',
@@ -4128,6 +4143,9 @@ describe('Bullet-Barrier Property-Based Tests', () => {
     })
     // Disable alien shooting to prevent random alien bullets
     state.alienShootingDisabled = true
+    // Freeze alien movement so the sentinel stays put (copy config first —
+    // GAME_STATE_DEFAULTS shares the DEFAULT_CONFIG reference)
+    state.config = { ...state.config, baseAlienMoveIntervalTicks: 999999 }
     return { state, players }
   }
 
@@ -4477,7 +4495,8 @@ describe('Bullet-Barrier Property-Based Tests', () => {
       const startY = LAYOUT.BARRIER_Y + SEG_H * 2 + 5
 
       const { state, players } = createTestPlayingState(1, {
-        aliens: [],
+        // Sentinel alien keeps the wave from completing (see createBarrierTestState)
+        aliens: [createTestAlien('sentinel-alien', 0, 0)],
         barriers: [
           { kind: 'barrier', id: 'barrier-1', x: barrier1X, segments: structuredClone(segments1) },
           { kind: 'barrier', id: 'barrier-2', x: barrier2X, segments: structuredClone(segments2) },
@@ -4488,6 +4507,7 @@ describe('Bullet-Barrier Property-Based Tests', () => {
         ],
       })
       state.alienShootingDisabled = true
+      state.config = { ...state.config, baseAlienMoveIntervalTicks: 999999 }
 
       const finalState = advanceTicks(state, startY + 10)
       const barriers = getBarriers(finalState.entities)
@@ -4963,7 +4983,11 @@ describe('Collision Detection Property-Based Tests', () => {
       const bullet = createTestBullet('b1', targetX + 3, 9, player.id, -1)
       // After move: y=8, checks against alien at y=8 -> hit
 
-      state.entities = [alien, ufo, barrier, bullet]
+      // Second live alien far away so killing a1 doesn't complete the wave
+      // (wave completion prunes the UFO, which is not what this test is about)
+      const farAlien = createTestAlien('a2', 10, 8, { row: 0, col: 5 })
+
+      state.entities = [alien, ufo, barrier, bullet, farAlien]
       state.alienShootingDisabled = true
 
       const result = gameReducer(state, { type: 'TICK' })

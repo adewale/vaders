@@ -114,6 +114,10 @@ const GAMESTATE_SERVER_ONLY_FIELDS: Record<string, string> = {
   // Debug flag that disables alien shooting for playtesting; the client
   // doesn't need it because the absence of bullets IS the effect.
   alienShootingDisabled: 'server-only: debug flag; client infers from bullet absence',
+  // Entity-id counter used by the server-side reducer when spawning new
+  // entities (wave formations). The client only consumes the resulting ids
+  // on entities themselves.
+  nextEntityId: 'server-only: reducer entity-id counter; client sees entity ids on entities',
   // Config is exposed through a component-local helper (`state.config.maxPlayers`
   // in LobbyScreen), accessed via `(state as any).config`. That `as any`
   // access is invisible to the plain `state.config` scraper, so we

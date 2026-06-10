@@ -29,6 +29,7 @@ describe('GAME_STATE_DEFAULTS', () => {
       'wipeTicksRemaining',
       'wipeWaveNumber',
       'alienShootingDisabled',
+      'nextEntityId',
       'config',
     ]
 
@@ -142,6 +143,28 @@ describe('migrateGameState', () => {
     expect(issues).toEqual([])
   })
 
+  it('derives nextEntityId from existing e_<n> entity ids when missing', () => {
+    // Simulate old persisted state from before nextEntityId moved into GameState
+    const oldState = {
+      roomCode: 'OLD02',
+      entities: [
+        { kind: 'barrier', id: 'e_3', x: 10, segments: [] },
+        { kind: 'alien', id: 'e_42', x: 20, y: 5, type: 'octopus', alive: true, row: 0, col: 0, points: 10 },
+        { kind: 'bullet', id: 'b_100_p1', x: 30, y: 10, ownerId: 'p1', dy: -1 }, // Non-e_ id ignored
+      ],
+      // NOTE: nextEntityId is MISSING
+    }
+
+    const migrated = migrateGameState(oldState as any)
+
+    expect(migrated.nextEntityId).toBe(43) // max e_<n> + 1, never collides
+  })
+
+  it('preserves persisted nextEntityId when present', () => {
+    const migrated = migrateGameState({ roomCode: 'NEW01', nextEntityId: 77 } as any)
+    expect(migrated.nextEntityId).toBe(77)
+  })
+
   it('merges config with defaults', () => {
     const partialConfig = {
       roomCode: 'CONF',
@@ -188,10 +211,10 @@ describe('validateGameState', () => {
     expect(validateGameState(123)).toEqual(['State is not an object'])
   })
 
-  it('checks all 18 required fields', () => {
+  it('checks all 19 required fields', () => {
     const issues = validateGameState({})
-    // Should have 18 missing field errors (including roomCode and maxLives)
-    expect(issues.filter((i) => i.includes('Missing field')).length).toBe(18)
+    // Should have 19 missing field errors (including roomCode and maxLives)
+    expect(issues.filter((i) => i.includes('Missing field')).length).toBe(19)
   })
 })
 

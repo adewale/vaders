@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'vitest'
 import { gameReducer } from './reducer'
 import { createDefaultGameState } from '../../../shared/state-defaults'
-import { DEFAULT_CONFIG, WIPE_TIMING, getAliens, getBullets, createAlienFormation } from '../../../shared/types'
+import { DEFAULT_CONFIG, WIPE_TIMING, getAliens, getBullets } from '../../../shared/types'
 import { getScaledConfig } from './scaling'
 
 describe('PROOF: Alien shooting works end-to-end', () => {
@@ -46,18 +46,11 @@ describe('PROOF: Alien shooting works end-to-end', () => {
     }
     expect(state.status).toBe('wipe_reveal')
 
-    // 5. SIMULATE GameRoom: Create aliens when entering wipe_reveal
+    // 5. The reducer spawns the alien formation itself when entering wipe_reveal
     const playerCount = Object.keys(state.players).length
     const scaled = getScaledConfig(playerCount, state.config)
-    const aliens = createAlienFormation(scaled.alienCols, scaled.alienRows)
 
-    // Mark all aliens as entering (like GameRoom does)
-    for (const alien of aliens) {
-      alien.entering = true
-    }
-    state.entities.push(...aliens)
-
-    expect(getAliens(state.entities).length).toBeGreaterThan(0)
+    expect(getAliens(state.entities).length).toBe(scaled.alienCols * scaled.alienRows)
     expect(getAliens(state.entities).every((a) => a.entering)).toBe(true)
 
     // 6. Tick through wipe_reveal until we transition to playing
