@@ -101,7 +101,12 @@ const TRANSITIONS: Record<GameStatus, Partial<Record<GameAction['type'], GameSta
     PLAYER_LEAVE: 'playing',
   },
   game_over: {
-    // Terminal state - no transitions out
+    // Terminal for gameplay progression — no path back into a running game.
+    // PLAYER_LEAVE is the one exception: a disconnect at the game-over screen
+    // must still remove the player so playerCount can reach 0 and the room
+    // (and its matchmaker registry entry) can be cleaned up. Without this the
+    // room leaks forever — the same class as the phantom-player bug.
+    PLAYER_LEAVE: 'game_over',
   },
 }
 

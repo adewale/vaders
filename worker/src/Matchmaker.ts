@@ -6,6 +6,29 @@ import { logEvent } from './logger'
 
 const REQUEST_ID_HEADER = 'x-vaders-request-id'
 
+/** A room untouched for this long is presumed dead and swept from the registry. */
+const STALE_THRESHOLD = 5 * 60 * 1000 // 5 minutes
+/** A `waiting` room that hasn't made status progress for this long is phantom-trapped. */
+const PROGRESS_STALE_THRESHOLD = 10 * 60 * 1000 // 10 minutes
+
+/**
+ * Hard ceiling on tracked rooms. The registry persists as a SINGLE storage
+ * value (`put('rooms', …)`). This DO is KV-backed (migration `new_classes`,
+ * async `storage.get/put`), so that value is subject to Cloudflare's **128 KiB
+ * KV value limit** — NOT the 2 MB SQLite row limit. Each room record is
+ * ~130 bytes worst case, so 500 rooms (~65 KB) stays well under 128 KiB with
+ * margin. The cap makes storage structurally bounded even under a burst of
+ * room creation — past this, new-room registration is refused (the Worker
+ * surfaces a 503) rather than letting the value grow until `put` throws and
+ * matchmaking breaks for everyone.
+ *
+ * Longer term, the registry should move to per-room SQLite rows (one
+ * `INSERT OR REPLACE` per room) to remove both the value-size ceiling and the
+ * whole-blob rewrite on every `/register`. That needs a storage-backend
+ * migration; the cap + sweep is the correct bounded fix until then.
+ */
+export const MAX_TRACKED_ROOMS = 500
+
 function getRequestId(request?: Request): string | undefined {
   return request?.headers.get(REQUEST_ID_HEADER) ?? undefined
 }
@@ -65,6 +88,26 @@ export class Matchmaker {
     })
   }
 
+  /**
+   * Remove every room whose last update is older than STALE_THRESHOLD from
+   * both the registry and the open-rooms set. This is the structural bound on
+   * registry size: any room that stops registering — created-and-abandoned,
+   * crashed, or evicted without cleanup — disappears within STALE_THRESHOLD of
+   * its last touch, instead of living in the single-value `rooms` blob forever.
+   * Does not persist; callers persist once after their own writes.
+   */
+  private sweepStaleRooms(now: number): number {
+    let swept = 0
+    for (const [roomCode, info] of Object.entries(this.rooms)) {
+      if (now - info.updatedAt > STALE_THRESHOLD) {
+        delete this.rooms[roomCode]
+        this.openRooms.delete(roomCode)
+        swept++
+      }
+    }
+    return swept
+  }
+
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url)
     const requestId = getRequestId(request)
@@ -76,10 +119,51 @@ export class Matchmaker {
         playerCount: number
         status: string
       }
+      const now = Date.now()
+
+      // Terminal games are not matchable and only consume space. Treat a
+      // game_over registration as an unregister so finished rooms don't linger
+      // in the registry (one of the unbounded-growth paths).
+      if (status === 'game_over') {
+        const wasKnown = roomCode in this.rooms
+        delete this.rooms[roomCode]
+        this.openRooms.delete(roomCode)
+        await this.state.storage.put('rooms', this.rooms)
+        logEvent('mm_register', {
+          requestId,
+          roomCode,
+          playerCount,
+          status,
+          openTransition: wasKnown ? 'closed→closed' : 'no-change',
+          openRoomsCount: this.openRooms.size,
+        })
+        return new Response('OK')
+      }
+
+      // Capacity guard: never let the single-value registry grow past the cap.
+      // For a brand-new room, try to free space by sweeping stale entries
+      // first; if still full, refuse so `put('rooms', …)` can't exceed 2MB.
+      const isNewRoom = !(roomCode in this.rooms)
+      if (isNewRoom && Object.keys(this.rooms).length >= MAX_TRACKED_ROOMS) {
+        this.sweepStaleRooms(now)
+        if (Object.keys(this.rooms).length >= MAX_TRACKED_ROOMS) {
+          await this.state.storage.put('rooms', this.rooms)
+          logEvent('mm_register_rejected_at_capacity', {
+            requestId,
+            roomCode,
+            trackedRooms: Object.keys(this.rooms).length,
+            cap: MAX_TRACKED_ROOMS,
+          })
+          return new Response(JSON.stringify({ code: 'matchmaker_full', message: 'Too many active rooms' }), {
+            status: 503,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+      }
+
       const wasOpen = this.openRooms.has(roomCode)
       const prev = this.rooms[roomCode]
       const statusChanged = !prev || prev.status !== status
-      const now = Date.now()
       this.rooms[roomCode] = {
         playerCount,
         status,
@@ -146,15 +230,20 @@ export class Matchmaker {
     // status + playerCount against this.rooms before returning the
     // roomCode. Stale entries are pruned on-the-fly.
     if (url.pathname === '/find') {
-      const STALE_THRESHOLD = 5 * 60 * 1000 // 5 minutes
-      // Option C: a room that's been in `waiting` for more than this
-      // threshold without any status transition is presumed stuck
-      // (e.g. phantom-trapped: new victims cycle through without
-      // readying, keeping updatedAt fresh but lastStatusChangeAt
-      // frozen). Force-prune it from the matchmaker so the next
-      // matchmaker sees a fresh pool.
-      const PROGRESS_STALE_THRESHOLD = 10 * 60 * 1000 // 10 minutes
       const now = Date.now()
+
+      // Bound the registry: sweep EVERY room whose last update is older than
+      // STALE_THRESHOLD, not just the ones in openRooms. Created-but-never-
+      // joined rooms (playerCount 0) and any other entry that fell out of
+      // openRooms previously lived forever because the loop below only scans
+      // openRooms. Sweeping all of this.rooms here makes the registry size
+      // O(rooms active in the last 5 minutes). PROGRESS_STALE_THRESHOLD (the
+      // phantom-trap prune) is handled per-open-room in the loop below.
+      // Persist immediately so the sweep is durable even when /find returns a
+      // hit early (the miss path persists too, but hits would otherwise skip it).
+      if (this.sweepStaleRooms(now) > 0) {
+        await this.state.storage.put('rooms', this.rooms)
+      }
 
       // Track pruning reasons so the wide event can explain WHY /find
       // returned null in any given call. Helpful for the "I matchmaked

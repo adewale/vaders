@@ -30,9 +30,23 @@ export async function getRoomInfo(code: string): Promise<{ status: string; playe
   return res.json()
 }
 
+/**
+ * Derive the room WebSocket URL from an HTTP(S) server URL using the platform
+ * URL parser rather than substring surgery. `SERVER_URL.replace('http://', …)`
+ * is fragile: it is case-sensitive (an upper-case scheme silently fails) and
+ * would rewrite any later `http://` in the string. Parsing handles ports,
+ * path prefixes, and scheme normalization correctly.
+ */
+export function deriveWsUrl(serverUrl: string, roomCode: string): string {
+  const url = new URL(serverUrl)
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  const prefix = url.pathname.replace(/\/$/, '')
+  url.pathname = `${prefix}/room/${roomCode}/ws`
+  return url.toString()
+}
+
 export function buildWsUrl(roomCode: string): string {
-  const base = SERVER_URL.replace('https://', 'wss://').replace('http://', 'ws://')
-  return `${base}/room/${roomCode}/ws`
+  return deriveWsUrl(SERVER_URL, roomCode)
 }
 
 /**

@@ -83,6 +83,7 @@ function createMockDurableObjectContext() {
       setAlarm: vi.fn(async (time: number) => {
         alarm = time
       }),
+      getAlarm: vi.fn(async () => alarm),
       deleteAlarm: vi.fn(async () => {
         alarm = null
       }),
@@ -422,9 +423,14 @@ describe('PBT Room Creation: saturation safety', () => {
             )
           }
         } else if (result.status === 503) {
-          if (result.code !== 'room_generation_failed') {
+          // Two legitimate saturation reasons: the code generator exhausted its
+          // attempts (room_generation_failed), or the matchmaker registry hit
+          // its MAX_TRACKED_ROOMS cap (matchmaker_full). Both are valid; what
+          // must never happen is a duplicate or an unexpected status.
+          const validSaturationCodes = ['room_generation_failed', 'matchmaker_full']
+          if (!validSaturationCodes.includes(result.code as string)) {
             throw new Error(
-              `Saturated POST /room returned 503 with code=${result.code}, expected 'room_generation_failed'`,
+              `Saturated POST /room returned 503 with code=${result.code}, expected one of ${validSaturationCodes.join(' | ')}`,
             )
           }
         } else {

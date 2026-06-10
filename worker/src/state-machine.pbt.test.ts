@@ -97,6 +97,7 @@ function createMockDurableObjectContext() {
       setAlarm: vi.fn(async (time: number) => {
         alarm = time
       }),
+      getAlarm: vi.fn(async () => alarm),
       deleteAlarm: vi.fn(async () => {
         alarm = null
       }),

@@ -280,13 +280,33 @@ export class GameRoom extends DurableObject<Env> {
     return session.player_id
   }
 
+  /**
+   * Schedule a wake no later than `when`, without clobbering a sooner pending
+   * alarm. A Durable Object has a SINGLE alarm and setAlarm() overwrites it —
+   * the game tick (33ms), countdown (1s), cleanup (5min), and the
+   * unauthenticated-socket timeout (5s) all share it. Soft deadlines must
+   * never push out a sooner hard-cadence alarm (notably the game tick), or the
+   * loop freezes until the later alarm fires. This is Cloudflare's documented
+   * "Multiple Events (Single Alarm)" pattern: min-merge via getAlarm().
+   */
+  private async scheduleWakeNoLaterThan(when: number): Promise<void> {
+    const current = await this.ctx.storage.getAlarm()
+    if (current === null || current === undefined || when < current) {
+      await this.ctx.storage.setAlarm(when)
+    }
+  }
+
   private async ensureUnauthenticatedSocketAlarm() {
     const hasUnauthenticatedSocket = this.ctx.getWebSockets().some((ws) => {
       const attachment = ws.deserializeAttachment() as WebSocketAttachment | null
       return !attachment?.playerId
     })
     if (!hasUnauthenticatedSocket) return
-    await this.ctx.storage.setAlarm(Date.now() + UNAUTHENTICATED_SOCKET_TIMEOUT_MS)
+    // Min-merge: a reconnect mid-match must not push the pending game-tick
+    // alarm out to +5s (which froze the room). closeStaleUnauthenticatedSockets
+    // runs at the top of every alarm() anyway, so a sooner tick alarm still
+    // reaps the unauthenticated socket promptly.
+    await this.scheduleWakeNoLaterThan(Date.now() + UNAUTHENTICATED_SOCKET_TIMEOUT_MS)
   }
 
   private closeStaleUnauthenticatedSockets(now = Date.now()): number {
@@ -600,6 +620,13 @@ export class GameRoom extends DurableObject<Env> {
         }
 
         case 'ready': {
+          // Ready is only meaningful in the lobby. Without this guard the
+          // handler bypassed the state machine: a scripted client could send
+          // `ready` mid-match and, once every live player's id was collected,
+          // checkStartConditions() would fire a countdown from `playing` and
+          // startGame() would wipe the live match. See state-machine.pbt and
+          // GameRoom.test "ignores ready during active play".
+          if (this.game.status !== 'waiting') break
           if (playerId && this.game.players[playerId] && !this.game.readyPlayerIds.includes(playerId)) {
             this.game.readyPlayerIds.push(playerId)
             debugLog('[READY]', {
@@ -625,6 +652,10 @@ export class GameRoom extends DurableObject<Env> {
         }
 
         case 'unready': {
+          // Unready only matters in the lobby (`waiting`) or to cancel a
+          // pending `countdown`. Ignore it during active play / game_over so
+          // it can't churn state or broadcasts outside the lobby flow.
+          if (this.game.status !== 'waiting' && this.game.status !== 'countdown') break
           if (playerId && this.game.players[playerId]) {
             const wasReady = this.game.readyPlayerIds.includes(playerId)
             this.game.readyPlayerIds = this.game.readyPlayerIds.filter((id) => id !== playerId)
@@ -768,6 +799,10 @@ export class GameRoom extends DurableObject<Env> {
 
   private async checkStartConditions() {
     if (!this.game) return
+    // Defense in depth: a coop countdown may only be kicked off from the
+    // lobby. Mirrors the status guard on the `ready` handler so no caller can
+    // start a countdown (and thus a match-resetting startGame) mid-game.
+    if (this.game.status !== 'waiting') return
     const playerCount = Object.keys(this.game.players).length
     const readyCount = this.game.readyPlayerIds.length
     const willStart = playerCount >= 2 && readyCount === playerCount
@@ -1253,6 +1288,11 @@ export class GameRoom extends DurableObject<Env> {
     }
     await this.ctx.storage.deleteAlarm()
     this.ctx.storage.sql.exec('DELETE FROM game_state')
+    // Drop the room's rejoin tokens too. They were only ever deleted on
+    // expiry/consume, so a cleaned-up room left its token rows in SQLite
+    // forever (a per-room leak across the fleet). The table itself is
+    // recreated by the constructor's CREATE TABLE IF NOT EXISTS on next use.
+    this.ctx.storage.sql.exec('DELETE FROM rejoin_sessions')
     this.game = null
   }
 }

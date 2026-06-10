@@ -64,27 +64,60 @@ async function generateUniqueRoomCode(matchmaker: DurableObjectStub): Promise<st
   return null
 }
 
+type CreateRoomResult = { ok: true } | { ok: false; status: number; body: unknown }
+
 /**
  * Create and initialize a new game room.
- * Returns the room code or null on failure.
+ *
+ * Both downstream calls are checked: a failed `/init` (e.g. a 409 code
+ * collision) must NOT be followed by a registry write, and a `/register`
+ * rejection (the matchmaker is at capacity) must propagate so the caller can
+ * return an honest error instead of handing the client a roomCode for a room
+ * the registry never accepted.
  */
-async function createRoom(env: Env, matchmaker: DurableObjectStub, roomCode: string): Promise<void> {
-  const id = env.GAME_ROOM.idFromName(roomCode)
-  const stub = env.GAME_ROOM.get(id)
-
-  await stub.fetch(
-    new Request('https://internal/init', {
-      method: 'POST',
-      body: JSON.stringify({ roomCode }),
-    }),
-  )
-
-  await matchmaker.fetch(
+async function createRoom(env: Env, matchmaker: DurableObjectStub, roomCode: string): Promise<CreateRoomResult> {
+  // Register FIRST. If the matchmaker is at capacity it rejects here, before we
+  // initialize a GameRoom Durable Object — otherwise a full matchmaker would
+  // leave behind orphan initialized rooms (a GameRoom with state but no
+  // registry entry) on every rejected create. A playerCount-0 `waiting` room
+  // is never returned by /find, so registering before init is safe.
+  const registerRes = await matchmaker.fetch(
     new Request('https://internal/register', {
       method: 'POST',
       body: JSON.stringify({ roomCode, playerCount: 0, status: 'waiting' }),
     }),
   )
+  if (!registerRes.ok) {
+    // Surface the matchmaker's reason where it gives one (e.g. matchmaker_full).
+    let body: unknown = { code: 'room_unavailable', message: 'Could not register room' }
+    try {
+      body = await registerRes.json()
+    } catch {}
+    return { ok: false, status: 503, body }
+  }
+
+  const stub = env.GAME_ROOM.get(env.GAME_ROOM.idFromName(roomCode))
+  const initRes = await stub.fetch(
+    new Request('https://internal/init', {
+      method: 'POST',
+      body: JSON.stringify({ roomCode }),
+    }),
+  )
+  if (!initRes.ok) {
+    // Compensate: roll back the registry entry so we never advertise a room
+    // whose GameRoom failed to initialize.
+    await matchmaker
+      .fetch(
+        new Request('https://internal/unregister', {
+          method: 'POST',
+          body: JSON.stringify({ roomCode }),
+        }),
+      )
+      .catch(() => {})
+    return { ok: false, status: 503, body: { code: 'room_init_failed', message: 'Could not initialize room' } }
+  }
+
+  return { ok: true }
 }
 
 export default {
@@ -142,7 +175,14 @@ export default {
         )
       }
 
-      await createRoom(env, matchmaker, roomCode)
+      const created = await createRoom(env, matchmaker, roomCode)
+      if (!created.ok) {
+        logEvent('http_room_create', { requestId, outcome: 'create_failed', roomCode })
+        return new Response(JSON.stringify(created.body), {
+          status: created.status,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders },
+        })
+      }
 
       logEvent('http_room_create', { requestId, outcome: 'created', roomCode })
       return new Response(JSON.stringify({ roomCode }), {
@@ -212,7 +252,14 @@ export default {
         )
       }
 
-      await createRoom(env, matchmaker, newRoomCode)
+      const createdForMatch = await createRoom(env, matchmaker, newRoomCode)
+      if (!createdForMatch.ok) {
+        logEvent('http_matchmake', { requestId, outcome: 'create_failed', roomCode: newRoomCode })
+        return new Response(JSON.stringify(createdForMatch.body), {
+          status: createdForMatch.status,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders },
+        })
+      }
 
       // "created_fresh" is the interesting case for diagnosis — this is
       // the path a "stranded matchmaker" hits (see docs/TODO.md). Pair

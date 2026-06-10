@@ -5,6 +5,7 @@ import { describe, test, expect } from 'bun:test'
 import fc from 'fast-check'
 import {
   LAYOUT,
+  HITBOX,
   STANDARD_WIDTH,
   ALIEN_REGISTRY,
   constrainPlayerX,
@@ -234,6 +235,23 @@ describe('LAYOUT Constants', () => {
   test('player movement range is reasonable', () => {
     const range = LAYOUT.PLAYER_MAX_X - LAYOUT.PLAYER_MIN_X
     expect(range).toBeGreaterThan(50) // Should have decent movement range
+  })
+
+  test('player bounds are symmetric — the playfield is not lopsided', () => {
+    // player.x is the CENTER of a PLAYER_WIDTH sprite (half-width 3). The
+    // reachable left margin (min center → left wall) must equal the right
+    // margin (right wall → max center), or the rightmost columns become
+    // unreachable. PLAYER_MAX_X was computed with the LEFT-edge formula
+    // (120 - 7 - 1 = 112), which left 4 columns dead on the right.
+    const half = HITBOX.PLAYER_HALF_WIDTH
+    const leftEdgeAtMin = LAYOUT.PLAYER_MIN_X - half
+    const rightEdgeAtMax = LAYOUT.PLAYER_MAX_X + half
+    expect(leftEdgeAtMin).toBe(0) // sprite can touch the left wall
+    expect(rightEdgeAtMax).toBe(STANDARD_WIDTH - 1) // ...and the right wall
+    // Symmetric margins:
+    const leftMargin = LAYOUT.PLAYER_MIN_X - 0
+    const rightMargin = STANDARD_WIDTH - 1 - LAYOUT.PLAYER_MAX_X
+    expect(rightMargin).toBe(leftMargin)
   })
 })
 

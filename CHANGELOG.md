@@ -2,6 +2,26 @@
 
 All notable changes to Vaders are documented in this file.
 
+## [1.2.0] — 2026-06-10
+
+A deep-audit hardening pass. Every fix below shipped test-first (red → green) with
+a regression guard; see `Lessons_learned.md` §21 for the full postmortem.
+
+### Fixed
+
+- **Reconnection watchdog killed every recovery** (`client-core`, both frontends) — the heartbeat watchdog measured liveness from the last `pong` only, and the `onopen` handler never refreshed it, so a freshly reconnected socket inherited the dead socket's stale timestamp and was force-closed ~30 s later, every time. Liveness is now an explicit mark set on **both** socket-open and pong (`client-core/src/connection/liveness.ts`), so the reset cannot be forgotten. Regression: `web/src/connection-reconnect.test.tsx` drives the real hook through a reconnect.
+- **Single-alarm clobber froze live rooms for 5 s** (`worker`) — a Durable Object has one alarm and `setAlarm` overwrites; `ensureUnauthenticatedSocketAlarm` fired on every WS upgrade and set `now + 5 s` unconditionally, so a mid-match reconnect pushed the pending 33 ms game-tick alarm out by 5 s. Now min-merges via `getAlarm()` (Cloudflare's documented "Multiple Events / Single Alarm" pattern).
+- **`game_over` leaked rooms forever** (`worker`) — `PLAYER_LEAVE` was blocked in `game_over`, so a disconnect at the game-over screen never removed the player; `playerCount` never reached 0, `cleanup()` never ran, and the room + its matchmaker registry entry persisted indefinitely. `PLAYER_LEAVE` is now permitted out of `game_over`.
+- **`ready` bypassed the state machine** (`worker`) — the `ready` handler had no status guard, so a scripted client could send `ready` mid-match and, once every live player's id was collected, force a countdown whose completion wiped the live match (tick/score/wave reset). `ready`/`unready`/`checkStartConditions` are now status-guarded to the lobby.
+- **Matchmaker registry grew without bound** (`worker`) — `/find` only swept rooms in `openRooms`, so created-but-never-joined rooms (and other non-open entries) lived in the single-value `rooms` blob forever, heading for the **128 KiB KV-value ceiling** (this DO is KV-backed) that would break matchmaking for everyone. `/find` now sweeps **all** rooms by staleness, `game_over` registrations are dropped, and a `MAX_TRACKED_ROOMS` cap (sized to fit 128 KiB) refuses new rooms past the limit (the Worker surfaces 503).
+- **Room creation ignored downstream failures** (`worker`) — `createRoom` ignored the `/init` and `/register` responses, so `POST /room` could hand a client a roomCode for a room the registry had rejected. It now checks both and propagates the failure.
+- **Rejoin-token table leaked per room** (`worker`) — `cleanup()` dropped `game_state` but left `rejoin_sessions` behind, so each dead room's tokens persisted in SQLite. Cleanup now clears them too.
+- **Asymmetric player bounds** (`shared`) — `PLAYER_MAX_X` was computed with the left-edge formula (`120 − 7 − 1 = 112`) on a center-based coordinate, leaving the rightmost 4 columns unreachable while the ship could touch the left wall. Corrected to `116` so the reachable margins mirror.
+- **Malformed / unknown server messages were swallowed silently** (`client-core`) — the WebSocket hook now emits a dev-visible `console.warn` instead of dropping unparseable frames and unknown message types with no signal.
+- **`buildWsUrl` used substring surgery** (`web`) — scheme derivation now uses the URL parser (`deriveWsUrl`), which handles ports, path prefixes, and scheme-case correctly.
+- **TUI audio backend mismatch** (`client`) — the startup probe and `MusicManager` disagreed on the Linux audio binary (probe accepted `aplay`; music hardcoded `mpv`), so music silently failed on `aplay`-only hosts. Both now resolve through one source of truth (`client/src/audio/audioPlayers.ts`) with graceful fallback.
+- **TUI default server URL** (`client`) — running the client directly defaulted to `localhost:8787` while the launcher defaulted to production, silently targeting a dead server. Both now agree on the production default.
+
 ## [1.1.1] — 2026-04-13
 
 ### Fixed

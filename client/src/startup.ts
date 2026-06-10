@@ -14,6 +14,7 @@ import {
   getTerminalRecommendation,
   shouldShowTerminalRecommendation,
 } from './terminal'
+import { resolveMusicPlayer } from './audio/audioPlayers'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -115,6 +116,16 @@ export async function runStartupChecks(): Promise<StartupReport> {
     message: musicExists ? 'background-music.mp3 found' : 'background-music.mp3 missing',
   })
 
+  // Check 7b: Music player binary present.
+  // Use the SAME resolver MusicManager uses, so the startup report can never
+  // claim music works while the binary it will actually use is absent.
+  const resolvedMusicPlayer = resolveMusicPlayer()
+  checks.push({
+    name: 'Music Player',
+    passed: resolvedMusicPlayer !== null,
+    message: resolvedMusicPlayer ? `${resolvedMusicPlayer.player} found` : 'no music player found (mpv/ffplay/...)',
+  })
+
   // Check 8: Audio playback test (actually play a short sound)
   let audioPlaybackWorks = false
   if (audioPlayerAvailable) {
@@ -157,7 +168,9 @@ export async function runStartupChecks(): Promise<StartupReport> {
 
   const allPassed = checks.every((c) => c.passed)
   const audioAvailable = audioPlayerAvailable && audioPlaybackWorks && missingSounds.length === 0
-  const musicAvailable = musicExists && audioPlayerAvailable
+  // Music needs the file AND a music player binary that actually exists — gauged
+  // by the same resolver MusicManager plays through (not the SFX player probe).
+  const musicAvailable = musicExists && resolvedMusicPlayer !== null
 
   return {
     checks,

@@ -6,6 +6,7 @@ import { gameReducer, canTransition } from './reducer'
 import type { GameState, Player, BarrierEntity } from '../../../shared/types'
 import {
   LAYOUT,
+  STANDARD_WIDTH,
   DEFAULT_CONFIG,
   WIPE_TIMING,
   HITBOX,
@@ -126,12 +127,20 @@ describe('canTransition', () => {
   })
 
   describe('from game_over status', () => {
-    it('returns false for all actions (terminal state)', () => {
+    it('is terminal for gameplay actions (no progression out of game_over)', () => {
       expect(canTransition('game_over', 'TICK')).toBe(false)
       expect(canTransition('game_over', 'PLAYER_JOIN')).toBe(false)
-      expect(canTransition('game_over', 'PLAYER_LEAVE')).toBe(false)
       expect(canTransition('game_over', 'PLAYER_INPUT')).toBe(false)
       expect(canTransition('game_over', 'START_SOLO')).toBe(false)
+    })
+
+    it('allows PLAYER_LEAVE so disconnecting players are removed and the room can drain', () => {
+      // Regression: game_over previously blocked PLAYER_LEAVE, so a player who
+      // disconnected at the game-over screen was never removed. playerCount
+      // never reached 0, cleanup() never ran, and the room + its matchmaker
+      // registry entry leaked forever (the same disease as the phantom-player
+      // bug, in its third home). Leaving must always be permitted.
+      expect(canTransition('game_over', 'PLAYER_LEAVE')).toBe(true)
     })
   })
 })
@@ -213,6 +222,23 @@ describe('PLAYER_LEAVE action', () => {
 
     expect(result.state.players.p1).toBeUndefined()
     expect(Object.keys(result.state.players).length).toBe(0)
+  })
+
+  it('removes a player who leaves at the game_over screen (room can drain)', () => {
+    // Behavioural companion to the canTransition gate: leaving from game_over
+    // must actually remove the player and emit player_left, so the room can
+    // reach playerCount 0 and be cleaned up instead of leaking.
+    const { state, players } = createTestGameStateWithPlayers(2, { status: 'game_over' })
+    const leaving = players[0].id
+    const remaining = players[1].id
+
+    const result = gameReducer(state, { type: 'PLAYER_LEAVE', playerId: leaving })
+
+    expect(result.state.players[leaving]).toBeUndefined()
+    expect(result.state.players[remaining]).toBeDefined()
+    expect(Object.keys(result.state.players).length).toBe(1)
+    expect(result.events.some((e) => e.type === 'event' && e.name === 'player_left')).toBe(true)
+    expect(result.persist).toBe(true)
   })
 
   it('removes player from readyPlayerIds', () => {
@@ -3593,7 +3619,7 @@ describe('boundary conditions', () => {
       expect(result.state.players[player.id].x).toBe(LAYOUT.PLAYER_MIN_X)
     })
 
-    it('player at x=PLAYER_MAX_X (112) trying to move right stays at PLAYER_MAX_X', () => {
+    it('player at x=PLAYER_MAX_X (116) trying to move right stays at PLAYER_MAX_X', () => {
       const { state, players } = createTestPlayingState(1)
       const player = players[0]
       player.x = LAYOUT.PLAYER_MAX_X
@@ -3969,24 +3995,29 @@ describe('boundary conditions', () => {
       expect(result.state.players[player.id].alive).toBe(false)
     })
 
-    it('player hitbox at PLAYER_MAX_X does not extend past screen width', () => {
-      // Player at x=PLAYER_MAX_X (114)
-      // Hitbox: [114-2, 114+3) = [112, 117)
-      // x=117 would be out of hitbox
+    it('player hitbox at PLAYER_MAX_X reaches the right wall without extending past it', () => {
+      // With symmetric bounds, x=PLAYER_MAX_X (116) puts the sprite CENTER such
+      // that its right edge sits on the last column (119). Hitbox is
+      // [116-3, 116+3+1) = [113, 120): it covers the final on-screen column and
+      // stops exactly at the screen width — no cell beyond it. The old test
+      // relied on a 4-column dead zone to the right (the bug being fixed), so
+      // there is no longer an on-screen column "just outside" on the right.
       const { state, players } = createTestPlayingState(1)
       const player = players[0]
-      player.x = LAYOUT.PLAYER_MAX_X // x=114
+      player.x = LAYOUT.PLAYER_MAX_X // x=116
       player.lives = 3
       state.players[player.id] = player
 
-      // Alien bullet just outside hitbox
-      const alienBullet = createTestBullet('ab1', 117, LAYOUT.PLAYER_Y, null, 1)
-      state.entities = [alienBullet, createTestAlien('a1', 20, 5)]
+      // A bullet in the last on-screen column hits the player defending the wall.
+      const atWall = createTestBullet('ab1', STANDARD_WIDTH - 1, LAYOUT.PLAYER_Y, null, 1)
+      state.entities = [atWall, createTestAlien('a1', 20, 5)]
 
       const result = gameReducer(state, { type: 'TICK' })
 
-      // checkPlayerHit: 117 >= 112 && 117 < 117 -> false (117 not < 117)
-      expect(result.state.players[player.id].alive).toBe(true) // Misses
+      // checkPlayerHit: 119 >= 113 && 119 < 120 -> true -> hit
+      expect(result.state.players[player.id].alive).toBe(false)
+      // The hitbox upper bound is exactly the screen width — it does not extend past it.
+      expect(LAYOUT.PLAYER_MAX_X + HITBOX.PLAYER_HALF_WIDTH + 1).toBe(STANDARD_WIDTH)
     })
 
     it('UFO off-screen removal uses generous bounds (x < -3 or x > width + 3)', () => {

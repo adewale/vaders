@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { createRoom, createSoloRoom, matchmake, getRoomInfo, buildWsUrl } from './roomApi'
+import { createRoom, createSoloRoom, matchmake, getRoomInfo, buildWsUrl, deriveWsUrl } from './roomApi'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -125,6 +125,35 @@ describe('getRoomInfo', () => {
 })
 
 // ─── 6. buildWsUrl converts https to wss ────────────────────────────────────
+
+describe('deriveWsUrl (scheme derivation, correctness by construction)', () => {
+  it('maps https→wss and http→ws and appends the room route', () => {
+    expect(deriveWsUrl('https://example.com', 'ROOM01')).toBe('wss://example.com/room/ROOM01/ws')
+    expect(deriveWsUrl('http://localhost:8787', 'ROOM01')).toBe('ws://localhost:8787/room/ROOM01/ws')
+  })
+
+  it('preserves the port', () => {
+    expect(deriveWsUrl('http://localhost:8787', 'ABC123')).toContain(':8787/')
+  })
+
+  it('preserves a path prefix on the server URL', () => {
+    expect(deriveWsUrl('https://example.com/api', 'ROOM01')).toBe('wss://example.com/api/room/ROOM01/ws')
+  })
+
+  it('normalizes an upper-case scheme (the string-replace approach did not)', () => {
+    // 'HTTPS://…'.replace('https://', …) is a no-op (case-sensitive), so the
+    // old implementation returned a non-ws URL. The URL parser normalizes it.
+    expect(deriveWsUrl('HTTPS://example.com', 'ROOM01')).toBe('wss://example.com/room/ROOM01/ws')
+  })
+
+  it('always yields a ws/wss URL ending in the room route', () => {
+    for (const base of ['https://a.b', 'http://a.b:1', 'https://a.b/x/y']) {
+      const url = deriveWsUrl(base, 'ZZ0099')
+      expect(url).toMatch(/^wss?:\/\//)
+      expect(url).toMatch(/\/room\/ZZ0099\/ws$/)
+    }
+  })
+})
 
 describe('buildWsUrl', () => {
   it('converts http(s) to ws(s)', () => {

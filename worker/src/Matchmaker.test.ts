@@ -2,7 +2,7 @@
 // Unit tests for the Matchmaker Durable Object
 
 import { describe, it, expect, vi } from 'vitest'
-import { Matchmaker } from './Matchmaker'
+import { Matchmaker, MAX_TRACKED_ROOMS } from './Matchmaker'
 
 // ============================================================================
 // Mock DurableObjectState
@@ -588,5 +588,80 @@ describe('concurrent operations', () => {
 
     const storedRooms = mockState._storage.get('rooms') as Record<string, unknown>
     expect(Object.keys(storedRooms).length).toBe(3)
+  })
+})
+
+// ============================================================================
+// Registry bounding (storage-ceiling safety)
+// ============================================================================
+
+describe('registry bounding', () => {
+  const FRESH = () => Date.now()
+  const STALE = () => Date.now() - 6 * 60 * 1000 // older than the 5-min stale threshold
+
+  it('sweeps a created-but-never-joined room from the registry once it goes stale', async () => {
+    // The big leak path: POST /room registers a room with playerCount 0. If
+    // nobody ever joins, it is never in openRooms and the old /find loop (which
+    // only iterated openRooms) never pruned it — so it lived in storage forever.
+    const { matchmaker, mockState } = await createMatchmaker({
+      GHOST1: { playerCount: 0, status: 'waiting', updatedAt: STALE() },
+    } as any)
+
+    await matchmaker.fetch(createRequest('GET', '/find'))
+
+    const rooms = (mockState._storage.get('rooms') ?? {}) as Record<string, unknown>
+    expect(rooms.GHOST1).toBeUndefined()
+    expect(Object.keys(rooms)).toHaveLength(0)
+  })
+
+  it('does NOT sweep a recently-updated room (only stale ones are removed)', async () => {
+    const { matchmaker, mockState } = await createMatchmaker({
+      LIVE01: { playerCount: 0, status: 'waiting', updatedAt: FRESH() },
+    } as any)
+
+    await matchmaker.fetch(createRequest('GET', '/find'))
+
+    const rooms = (mockState._storage.get('rooms') ?? {}) as Record<string, unknown>
+    expect(rooms.LIVE01).toBeDefined()
+  })
+
+  it('drops a game_over room from the registry on register (terminal games are not tracked)', async () => {
+    const { matchmaker, mockState } = await createMatchmaker({
+      DONE01: { playerCount: 2, status: 'playing', updatedAt: FRESH() },
+    } as any)
+
+    const res = await matchmaker.fetch(
+      createRequest('POST', '/register', { roomCode: 'DONE01', playerCount: 2, status: 'game_over' }),
+    )
+    expect(res.status).toBe(200)
+
+    const rooms = (mockState._storage.get('rooms') ?? {}) as Record<string, unknown>
+    expect(rooms.DONE01).toBeUndefined()
+  })
+
+  it('rejects a NEW room registration when the registry is at capacity', async () => {
+    // Structural guard against the single-value storage ceiling: even a burst
+    // of room creation cannot grow the registry past MAX_TRACKED_ROOMS.
+    const rooms: Record<string, unknown> = {}
+    for (let i = 0; i < MAX_TRACKED_ROOMS; i++) {
+      const code = `R${i.toString().padStart(5, '0')}`
+      // Fresh + playing so the at-capacity sweep cannot free any slot.
+      rooms[code] = { playerCount: 1, status: 'playing', updatedAt: FRESH(), lastStatusChangeAt: FRESH() }
+    }
+    const { matchmaker, mockState } = await createMatchmaker(rooms as any)
+
+    const rejected = await matchmaker.fetch(
+      createRequest('POST', '/register', { roomCode: 'NEWBIE', playerCount: 0, status: 'waiting' }),
+    )
+    expect(rejected.status).toBe(503)
+    const stored = mockState._storage.get('rooms') as Record<string, unknown>
+    expect(stored.NEWBIE).toBeUndefined()
+    expect(Object.keys(stored).length).toBe(MAX_TRACKED_ROOMS)
+
+    // An EXISTING room can still update even at capacity (not a new entry).
+    const updated = await matchmaker.fetch(
+      createRequest('POST', '/register', { roomCode: 'R00000', playerCount: 2, status: 'waiting' }),
+    )
+    expect(updated.status).toBe(200)
   })
 })

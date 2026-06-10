@@ -2,7 +2,7 @@
 
 Multiplayer Space Invaders clone (1–4 players) built with OpenTUI and Cloudflare Durable Objects. **Play in your terminal or your browser** — one authoritative server, two frontends, same game.
 
-![Version: 1.1.1](https://img.shields.io/badge/version-1.1.1-blue)
+![Version: 1.2.0](https://img.shields.io/badge/version-1.2.0-blue)
 ![Terminal Size: 120x36](https://img.shields.io/badge/terminal-120x36-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 

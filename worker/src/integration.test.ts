@@ -72,6 +72,7 @@ function createMockDurableObjectContext() {
       setAlarm: vi.fn(async (time: number) => {
         alarm = time
       }),
+      getAlarm: vi.fn(async () => alarm),
       deleteAlarm: vi.fn(async () => {
         alarm = null
       }),
@@ -1040,6 +1041,57 @@ describe('Worker: HTTP Endpoints', () => {
       expect(response.status).toBe(404)
       const data = (await response.json()) as { error: string }
       expect(data.error).toBe('Room not found')
+    })
+  })
+
+  describe('Room creation robustness', () => {
+    it('returns 503 (not a phantom room) when the matchmaker is at capacity', async () => {
+      // createRoom used to ignore the /register response, so POST /room would
+      // return 200 with a roomCode for a room the registry rejected — a room
+      // nobody could matchmake into. The Worker must surface the failure.
+      const env = createMockEnv()
+      ;(env.MATCHMAKER.get as Mock).mockReturnValue({
+        fetch: vi.fn(async (req: Request) => {
+          const path = new URL(req.url).pathname
+          if (path.startsWith('/info/')) return new Response('Not found', { status: 404 }) // unique code
+          if (path === '/register')
+            return new Response(JSON.stringify({ code: 'matchmaker_full', message: 'Too many active rooms' }), {
+              status: 503,
+            })
+          return new Response('OK')
+        }),
+      })
+
+      const response = await worker.fetch(new Request('http://localhost/room', { method: 'POST' }), env)
+
+      expect(response.status).toBe(503)
+      const data = (await response.json()) as { code: string; roomCode?: string }
+      expect(data.code).toBe('matchmaker_full')
+      expect(data.roomCode).toBeUndefined()
+    })
+
+    it('returns 503 when room initialization conflicts (rolls back the registry, no broken room)', async () => {
+      const env = createMockEnv()
+      ;(env.GAME_ROOM.get as Mock).mockReturnValue({
+        fetch: vi.fn(async () => new Response('Already initialized', { status: 409 })),
+      })
+      const mmCalls: string[] = []
+      ;(env.MATCHMAKER.get as Mock).mockReturnValue({
+        fetch: vi.fn(async (req: Request) => {
+          const path = new URL(req.url).pathname
+          mmCalls.push(path)
+          if (path.startsWith('/info/')) return new Response('Not found', { status: 404 })
+          return new Response('OK')
+        }),
+      })
+
+      const response = await worker.fetch(new Request('http://localhost/room', { method: 'POST' }), env)
+
+      expect(response.status).toBe(503)
+      // Register-first ordering: the room WAS registered, then the failed init
+      // must be compensated by an /unregister so no broken room is advertised.
+      expect(mmCalls).toContain('/register')
+      expect(mmCalls).toContain('/unregister')
     })
   })
 

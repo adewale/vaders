@@ -6,6 +6,7 @@ import { join, dirname } from 'path'
 import { existsSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { getUserConfig, setUserConfig } from '../config/userConfig'
+import { resolveMusicPlayer, isPlayerAvailable } from './audioPlayers'
 
 // Get the directory of this file (works in both Bun and Node ESM)
 const __filename = fileURLToPath(import.meta.url)
@@ -14,7 +15,8 @@ const MUSIC_PATH = join(__dirname, '../../sounds/background-music.mp3')
 
 /**
  * MusicManager - Handles background music playback with looping
- * Uses system audio player (afplay on macOS, mpv/aplay on Linux)
+ * Resolves the platform audio player via resolveMusicPlayer() (the same source
+ * of truth the startup check uses), so detection and playback never disagree.
  */
 class MusicManager {
   private static instance: MusicManager
@@ -52,10 +54,12 @@ class MusicManager {
       return
     }
 
-    // Pre-flight: verify audio player binary exists
-    const player = process.platform === 'darwin' ? 'afplay' : 'mpv'
-    if (!MusicManager.isPlayerAvailable(player)) {
-      this.lastError_ = `Audio player not found: ${player}`
+    // Pre-flight: resolve an audio player that is ACTUALLY present on this
+    // system (same resolver the startup check uses). If none exist, degrade
+    // gracefully — set an error and no-op, exactly as SFX fall back to the bell.
+    const resolved = resolveMusicPlayer()
+    if (!resolved) {
+      this.lastError_ = 'Audio player not found for background music (tried mpv/ffplay/...)'
       return
     }
 
@@ -69,12 +73,17 @@ class MusicManager {
   private async playLoop(): Promise<void> {
     while (this.shouldLoop && this.isPlaying && !this.muted) {
       try {
-        // Use afplay on macOS, mpv or aplay on Linux
-        const player = process.platform === 'darwin' ? 'afplay' : 'mpv'
-        const args = process.platform === 'darwin' ? [MUSIC_PATH] : ['--no-video', '--really-quiet', MUSIC_PATH]
+        // Resolve the player+args from the shared source of truth every loop
+        // (cheap, and tolerant of a player being installed/removed mid-session).
+        const resolved = resolveMusicPlayer()
+        if (!resolved) {
+          this.lastError_ = 'Audio player not found for background music (tried mpv/ffplay/...)'
+          break
+        }
+        const { player, args } = resolved
 
         this.process = spawn({
-          cmd: [player, ...args],
+          cmd: [player, ...args, MUSIC_PATH],
           stdout: 'ignore',
           stderr: 'pipe',
         })
@@ -172,17 +181,15 @@ class MusicManager {
 
   /**
    * Check whether an audio player binary is available on the system.
-   * Uses `which` to verify the binary exists in PATH.
-   * @param player - Binary name to check, defaults to platform default (afplay/mpv)
+   * Delegates to the shared isPlayerAvailable so detection logic lives in one
+   * place. When no binary is given, reports whether ANY music player resolves.
+   * @param player - Binary name to check; defaults to "any resolvable player".
    */
   static isPlayerAvailable(player?: string): boolean {
-    const cmd = player ?? (process.platform === 'darwin' ? 'afplay' : 'mpv')
-    try {
-      const result = Bun.spawnSync({ cmd: ['which', cmd] })
-      return result.exitCode === 0
-    } catch {
-      return false
+    if (player !== undefined) {
+      return isPlayerAvailable(player)
     }
+    return resolveMusicPlayer() !== null
   }
 }
 

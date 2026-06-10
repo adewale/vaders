@@ -1437,3 +1437,69 @@ The first B tests initially used natural solo-game flow and failed — aliens ki
 3. **Matchmakers need a progress signal, not just an update signal.** `updatedAt` refreshes on any registration — including churn. `lastStatusChangeAt` refreshes only on productive transitions. They measure different things, and you need both.
 4. **Wide events made the undebuggable debuggable.** With per-message `console.log` the phantom state would have been invisible.
 5. **Write the reproducer before the fix, but pick the right harness.** A 2400-tick natural gameplay sim is too brittle; direct mutation is more honest.
+
+---
+
+## 21. The Deep-Audit Hardening Pass (v1.2.0)
+
+A whole-system audit — "audit this entire system and the assumptions beneath it" — surfaced a cluster of defects that share a root theme: **the parts of the system with the strongest correctness story (the pure reducer, the PBT harness) were not the parts where correctness actually broke.** The bugs lived at the boundaries the unit tests mock away — the single Durable Object alarm, the WebSocket lifecycle, the matchmaker registry's storage backing. Every fix shipped test-first (red → green) with a regression guard, leaning on the `testing-best-practices` skill (correctness by construction, PBT, both-directions, reproducer-before-fix) and Cloudflare's published Durable Object best practices.
+
+### Liveness is a mark, not a timestamp comparison
+
+The highest-impact bug was three lines: the reconnect watchdog (`useGameConnection`) compared `Date.now()` against `lastPongRef`, and `onopen` never refreshed `lastPongRef`. After any reconnect, the new socket inherited the dead socket's pong timestamp and the watchdog force-closed it ~30 s later — *every* reconnect, forever, on both frontends. The clean close then denied the player rejoin grace server-side, so one transient blip ejected them for good.
+
+The patch ("set `lastPongRef` in `onopen`") works, but the **correct-by-construction** fix is to model the thing that was implicit. Two events prove a connection is alive — a pong *and* a socket opening — so "alive" became an explicit mark (`markAlive`) set on both, with staleness measured from the last mark (`client-core/src/connection/liveness.ts`). You cannot forget the reset because open is one of the two callers, and the unit test asserts it.
+
+**The lesson: when a bug is "X forgot to update Y", ask what Y *represents*. Usually Y is an implicit model of some real-world fact ("the connection is alive"). Make the model explicit and the forgetting becomes structurally impossible.**
+
+### A pure-model test cannot catch a wiring bug
+
+We had `liveness.ts` unit-tested both directions in `bun:test` — but a pure model *cannot* have the bug, because the bug was whether the *hook* calls `markAlive` on open. The honest regression had to drive the real wiring: `web/src/connection-reconnect.test.tsx` renders the actual hook against a mock WebSocket and fake timers, simulates drop → reconnect with a stale clock, and asserts the watchdog does not self-close the healthy socket. It goes red if you delete the one-line reset. A second test asserts the watchdog *still* closes a genuinely silent socket — the both-directions guard against "fixing" the bug by disabling the feature.
+
+**The lesson: unit-test the model for the math, integration-test the wiring for the behavior. The skill's "smallest useful test tier" is not always the smallest — for a wiring bug it's the boundary.**
+
+### One Durable Object, one alarm — it is a shared resource
+
+A DO has a single alarm and `setAlarm` overwrites. Four schedulers shared it (33 ms game tick, 1 s countdown, 5 min cleanup, 5 s unauthenticated-socket timeout), and `ensureUnauthenticatedSocketAlarm` — called on *every* WS upgrade, including mid-match reconnects — set `now + 5 s` unconditionally, clobbering the pending tick and freezing the whole room's loop for 5 s. Cloudflare's docs name this exact trap ("One alarm limit → use the event-queue pattern") and prescribe the fix: **min-merge via `getAlarm()`** — never replace a sooner pending alarm. The soft deadlines (unauth timeout, cleanup) now schedule through `scheduleWakeNoLaterThan`; the hard-cadence tick/countdown stay direct because they are always the soonest in their phase and re-arm themselves.
+
+**The lesson: a singleton timer is a shared mutable resource. Centralise writes through a min-merge helper; never let a soft deadline overwrite a hard cadence. Read the platform's gotchas doc — this one was a named, documented footgun.**
+
+### Terminal states still need an exit edge
+
+`game_over` was modelled as fully terminal (`TRANSITIONS.game_over = {}`), which silently blocked `PLAYER_LEAVE`. A disconnect at the game-over screen never removed the player, so `playerCount` never hit 0, `cleanup()` never ran, and the room + matchmaker entry leaked forever — the *third* home of the phantom-player disease (§20), reached by a path A/B/C didn't cover. "Terminal" means *no progression back into gameplay*, not *no transitions at all*. Players must always be able to leave.
+
+The test that encoded this bug was worse than no test: `expect(canTransition('game_over', 'PLAYER_LEAVE')).toBe(false)` asserted the buggy behavior as if it were a spec (the §8 "tests that document bugs mask problems" anti-pattern, again). Flipping it to `toBe(true)` was step one of the fix.
+
+### Every state-changing handler needs the state-machine's permission
+
+The `ready` handler mutated `readyPlayerIds` and called `checkStartConditions` with no status guard, bypassing the reducer's `TRANSITIONS` table entirely. A scripted client (the protocol is plain JSON over an unauthenticated WS) could send `ready` mid-match; once every live player's id was collected, a countdown fired from `playing` and its completion called `startGame()`, wiping the live match. The PBT harness had already hardened `start_solo` and `join` against this exact class — `ready` was the one that slipped through. Fixed with a `waiting`-only guard on the handler *and* defense-in-depth in `checkStartConditions`.
+
+**The lesson: if you have a state machine, every mutation must pass through it or replicate its guard. An allowlist of transitions is worthless if handlers can mutate around it. Audit *all* handlers against the table, not just the ones a bug report named.**
+
+### Registries need a structural bound, not opportunistic pruning
+
+The matchmaker pruned stale rooms only by iterating `openRooms` — so a created-but-never-joined room (`playerCount 0`, never in `openRooms`) lived in the single-value `rooms` blob forever. Opportunistic pruning of a *subset* is not a bound. The fix sweeps **all** rooms by staleness on `/find`, drops `game_over` registrations eagerly, and adds a hard `MAX_TRACKED_ROOMS` cap that refuses new rooms past the limit (surfaced as a 503).
+
+And the cap's *size* is where reading the docs paid off twice. The first draft set it to 5000 "comfortably under the 2 MB limit." But the Cloudflare storage gotchas spell out that **KV-backed DO values cap at 128 KiB, not 2 MB** — and this DO is KV-backed (migration `new_classes`, async `storage.get/put`). At ~130 bytes/room, 5000 rooms is ~550 KB, which would *itself* blow the 128 KiB ceiling the cap was meant to defend. Corrected to 500 (~65 KB). The re-audit caught a bug in the fix.
+
+**The lesson: a "structural bound" is only as correct as the limit it's sized against. Read the exact limit for the exact backend you're on — SQLite row (2 MB) vs KV value (128 KiB) is a 16× difference, and the migration tag (`new_sqlite_classes` vs `new_classes`) silently decides which one applies.** The deeper fix is per-room SQLite rows (no single-value ceiling, no whole-blob rewrite per register), which Cloudflare's gotchas recommend directly ("store records as rows… batch writes") — deferred because it needs a storage-backend migration.
+
+**The lesson: any registry an adversary (or just churn) can grow needs a structural cap and a sweep that covers the whole keyspace — not just the slice your happy path reads.**
+
+### Coordinate-convention drift is a recurring class, not an incident
+
+`PLAYER_MAX_X` was `120 − 7 − 1 = 112` — the *left-edge* formula — applied to a *center*-based coordinate, leaving the rightmost 4 columns unreachable while the ship could touch the left wall. This is the same center-vs-left-edge confusion §8 and the original Lessons catalogued for bullets and barriers, resurfacing in a movement bound. The contract test even encoded the wrong invariant (`PLAYER_MAX_X + PLAYER_WIDTH ≤ WIDTH`, the left-edge rule). The fix corrected the constant to `116` (symmetric margins) and rewrote the invariant in terms of `PLAYER_HALF_WIDTH` and the *right edge*.
+
+**The lesson: a bug class you've fixed before will reappear in a surface you didn't think to check. The asymmetry was invisible until a test asserted the property directly — `leftMargin === rightMargin` — rather than a one-sided bound. Prefer property assertions ("the playfield is symmetric") over incidental ones ("max is 112").**
+
+### Don't swallow what you can't parse
+
+The WebSocket hook dropped malformed JSON (`catch {}`) and unknown message types (fall-through) with zero signal — exactly what makes a server-rollout protocol mismatch undebuggable. A `console.warn` at both points is the lightest honest fix; the both-directions test asserts a *known* message (pong) does **not** warn, so the diagnostic can't degrade into noise.
+
+### Single source of truth, again (TUI audio)
+
+The startup audio probe accepted `aplay` while `MusicManager` hardcoded `mpv`, so on an `aplay`-only Linux box startup reported "audio OK" and music silently failed. The fix routes both the probe and playback through one resolver (`audioPlayers.ts`) — the same "greppability / one source of truth" discipline §15 applied to cross-surface contracts, here applied to a capability check and the code that depends on it. **A startup check that doesn't share its resolution logic with the runtime is theater.**
+
+### The meta-lesson
+
+Audit the seams, not the cores. The reducer had 270 tests and zero of these bugs; the alarm scheduler, the socket lifecycle, the registry's storage backing, and the client/launcher URL defaults had thin coverage and all of the bugs. **A green core is not a green system. Point the next audit at whatever the unit tests mock — that mock is a list of the assumptions nobody is checking.**
