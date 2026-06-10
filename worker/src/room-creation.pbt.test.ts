@@ -95,6 +95,8 @@ function createMockDurableObjectContext() {
       webSockets.push(ws)
     }),
     getWebSockets: vi.fn(() => webSockets.filter((ws) => !ws._closed)),
+    setWebSocketAutoResponse: vi.fn(),
+    getWebSocketAutoResponseTimestamp: vi.fn((_ws: unknown): Date | null => null),
     _sqlData: sqlData,
     _webSockets: webSockets,
     _alarm: () => alarm,
@@ -157,7 +159,13 @@ class WorkerHarness {
       } as unknown as Env['GAME_ROOM'],
       MATCHMAKER: {
         idFromName: vi.fn(() => ({ toString: () => 'matchmaker-global' })),
-        get: vi.fn(() => ({ fetch: matchmakerFetch })),
+        get: vi.fn(() => ({
+          fetch: matchmakerFetch,
+          register: this.matchmaker.register.bind(this.matchmaker),
+          unregister: this.matchmaker.unregister.bind(this.matchmaker),
+          find: this.matchmaker.find.bind(this.matchmaker),
+          getRoomInfo: this.matchmaker.getRoomInfo.bind(this.matchmaker),
+        })),
       } as unknown as Env['MATCHMAKER'],
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ASSETS: undefined as any,

@@ -82,19 +82,17 @@ describe('logEvent', () => {
     expect(parsed.roomCode).toBe('ABC123')
   })
 
-  it('omits region when globalThis.CF_REGION is unset', () => {
-    // Default state (afterEach deletes CF_REGION)
+  it('omits region when the caller does not supply it', () => {
     logEvent('test_event', { roomCode: 'ABC123' })
 
     const parsed = JSON.parse(consoleLogSpy.mock.calls[0][0] as string)
     expect('region' in parsed).toBe(false)
   })
 
-  it('includes region from globalThis.CF_REGION when set (simulating request.cf?.colo)', () => {
-    // Simulate the HTTP middleware setting CF_REGION from request.cf.colo
-    ;(globalThis as { CF_REGION?: string }).CF_REGION = 'LHR'
-
-    logEvent('request_received', { method: 'POST', path: '/room' })
+  it('includes region when the caller supplies it (threaded from request.cf?.colo)', () => {
+    // Region is now an explicit caller-supplied field — threaded from the
+    // Worker entry through RPC contexts / the WS-upgrade header — not a global.
+    logEvent('request_received', { method: 'POST', path: '/room', region: 'LHR' })
 
     const parsed = JSON.parse(consoleLogSpy.mock.calls[0][0] as string)
     expect(parsed.region).toBe('LHR')

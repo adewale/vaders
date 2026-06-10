@@ -257,3 +257,42 @@ Real hibernation has an alarm queue and can interleave alarm /
 ws-message / fetch tasks; the harness doesn't stress those races.
 Matters more as the game adds features that mutate DO state from
 multiple entry points.
+
+### Matchmaker is a global-singleton DO (scaling)
+
+`Matchmaker` is addressed by `idFromName('global')`, so every
+`register` / `unregister` / `find` / `getRoomInfo` call across the whole
+fleet funnels through one Durable Object. Cloudflare's DO guidance lists
+this as an explicit anti-pattern ("Global singleton handling all traffic
+→ Shard across multiple DOs"; "Chatty microservice (every request) →
+Reconsider architecture"): a global singleton **never hibernates**
+(continuous duration billing) and **bottlenecks at ~1000 req/s**. With
+every active GameRoom re-registering ~every 60s during play (plus
+join/leave/matchmake churn), a few hundred concurrent rooms approaches
+that ceiling.
+
+**Recommended fix.** Shard the registry — e.g. N hash-bucketed
+Matchmaker instances with a fan-in on `find()`, or colo-aware shards
+(`request.cf.colo`) — OR move the registry to KV / D1, which are built
+for read-heavy global lookup and don't hold a compute instance hot.
+Deferred because current traffic is far below the bottleneck; the cap +
+sweep (shipped in 1.2.0) bounds the blast radius until then.
+
+### Matchmaker registry write amplification (scaling)
+
+The registry persists as a SINGLE storage value: `register` / `find` /
+`unregister` each rewrite the entire `rooms` object via
+`storage.put('rooms', …)`. Cloudflare's storage guidance ("store records
+as rows", "batch writes") makes the per-room approach the idiomatic one.
+The `MAX_TRACKED_ROOMS` cap bounds the value *size* (against the 128 KiB
+KV-value ceiling) but not the *write cost*, which is O(rooms) per
+registration.
+
+**Recommended fix.** Move the registry to per-room SQLite rows
+(`INSERT OR REPLACE INTO rooms …`, `DELETE …`, indexed `SELECT` for
+`find`). This removes both the value-size ceiling and the whole-blob
+rewrite, and pairs naturally with the sharding item above. Requires a
+storage-backend migration (the DO is currently KV-backed via
+`new_classes`); a new DO class with `new_sqlite_classes` plus a one-time
+data migration is the clean path. Deferred for the same reason as
+sharding.

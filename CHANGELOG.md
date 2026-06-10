@@ -22,6 +22,16 @@ a regression guard; see `Lessons_learned.md` §21 for the full postmortem.
 - **TUI audio backend mismatch** (`client`) — the startup probe and `MusicManager` disagreed on the Linux audio binary (probe accepted `aplay`; music hardcoded `mpv`), so music silently failed on `aplay`-only hosts. Both now resolve through one source of truth (`client/src/audio/audioPlayers.ts`) with graceful fallback.
 - **TUI default server URL** (`client`) — running the client directly defaulted to `localhost:8787` while the launcher defaulted to production, silently targeting a dead server. Both now agree on the production default.
 
+### Changed
+
+Platform-idiom hardening pass against Cloudflare's published Durable Object best practices (see `Lessons_learned.md` §22). Deferred scaling items (sharding the global-singleton Matchmaker; per-room SQLite registry rows) are captured in `docs/TODO.md`.
+
+- **Matchmaker exposes typed RPC** (`register` / `unregister` / `find` / `getRoomInfo`) — Worker and GameRoom call methods on the stub instead of hand-rolled `fetch(new Request('https://internal/…'))` routing and JSON parsing. A thin `fetch` adapter remains for tests. The WebSocket upgrade stays a fetch (RPC cannot return a 101).
+- **`alarm()` error boundary** — a throwing tick no longer triggers Cloudflare's blind alarm retry (a 30 Hz retry storm against poisoned state). Failures are caught, logged as `alarm_error` wide events, re-armed with a 1 s backoff, and after 10 consecutive failures the room ends the game (`alarm_error_giving_up`) instead of spinning forever.
+- **Heartbeat pings answered by the runtime** — `setWebSocketAutoResponse` now answers the client's `{type:'ping'}` without waking the DO, so idle lobbies hibernate through keepalives (Cloudflare: ping/pong does not interrupt hibernation). The phantom-reap reconciles per-socket liveness from `getWebSocketAutoResponseTimestamp` since auto-responded pings bypass `webSocketMessage`; `pong.serverTime` is now optional (no client read it).
+- **Background tasks protected by `ctx.waitUntil`** — `fireAndForget` registry updates and cleanup-alarm scheduling now extend the DO's lifetime until they settle, so an eviction can't silently drop a registry update.
+- **Region threaded explicitly into logs** — the edge colo travels as an RPC log-context argument and a `x-vaders-region` header on the WS upgrade, replacing the `globalThis.CF_REGION` global that was invisible inside DO isolates (DO logs had no region) and clobbered across concurrent requests. DO wide events now carry `region`.
+
 ## [1.1.1] — 2026-04-13
 
 ### Fixed

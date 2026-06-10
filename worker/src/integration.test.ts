@@ -86,6 +86,8 @@ function createMockDurableObjectContext() {
       webSockets.push(ws)
     }),
     getWebSockets: vi.fn(() => webSockets),
+    setWebSocketAutoResponse: vi.fn(),
+    getWebSocketAutoResponseTimestamp: vi.fn((_ws: unknown): Date | null => null),
     _sqlData: sqlData,
     _webSockets: webSockets,
     _alarm: () => alarm,
@@ -112,6 +114,35 @@ function createMockMatchmakerState() {
       return fn()
     }),
     _storage: storage,
+  }
+}
+
+// env.MATCHMAKER binding that delegates the RPC surface to a real Matchmaker
+// instance (and keeps fetch for any direct-fetch helpers). GameRoom/Worker call
+// register/unregister/find/getRoomInfo over RPC now, not fetch.
+function matchmakerBindingFor(matchmaker: Matchmaker) {
+  return {
+    idFromName: vi.fn(() => ({ toString: () => 'matchmaker-global' })),
+    get: vi.fn(() => ({
+      fetch: (r: Request) => matchmaker.fetch(r),
+      register: matchmaker.register.bind(matchmaker),
+      unregister: matchmaker.unregister.bind(matchmaker),
+      find: matchmaker.find.bind(matchmaker),
+      getRoomInfo: matchmaker.getRoomInfo.bind(matchmaker),
+    })),
+  }
+}
+
+// No-op RPC binding for scenarios that don't wire a real matchmaker.
+function noopMatchmakerBinding() {
+  return {
+    idFromName: vi.fn(() => ({ toString: () => 'matchmaker-global' })),
+    get: vi.fn(() => ({
+      register: vi.fn(async () => ({ ok: true })),
+      unregister: vi.fn(async () => {}),
+      find: vi.fn(async () => null),
+      getRoomInfo: vi.fn(async () => null),
+    })),
   }
 }
 
@@ -184,10 +215,7 @@ describe('Integration: Player Creates Room, Another Player Joins', () => {
         idFromName: vi.fn((name: string) => ({ toString: () => name })),
         get: vi.fn(),
       } as any,
-      MATCHMAKER: {
-        idFromName: vi.fn((name: string) => ({ toString: () => `matchmaker-${name}` })),
-        get: vi.fn(() => ({ fetch: matchmakerFetch })),
-      } as any,
+      MATCHMAKER: matchmakerBindingFor(matchmaker) as any,
     }
 
     gameRoom = new GameRoom(gameRoomCtx as any, env)
@@ -491,17 +519,13 @@ describe('Integration: Two Players Invoke Matchmaking', () => {
     }
 
     const ctx = createMockDurableObjectContext()
-    const matchmakerFetch = vi.fn(async (request: Request) => matchmaker.fetch(request))
 
     const env: Env = {
       GAME_ROOM: {
         idFromName: vi.fn((name: string) => ({ toString: () => name })),
         get: vi.fn(),
       } as any,
-      MATCHMAKER: {
-        idFromName: vi.fn(() => ({ toString: () => 'matchmaker-global' })),
-        get: vi.fn(() => ({ fetch: matchmakerFetch })),
-      } as any,
+      MATCHMAKER: matchmakerBindingFor(matchmaker) as any,
     }
 
     const room = new GameRoom(ctx as any, env)
@@ -720,17 +744,13 @@ describe('Integration: Complete 4-Player Game Flow', () => {
 
     const roomCode = 'FULL4P'
     const ctx = createMockDurableObjectContext()
-    const matchmakerFetch = vi.fn(async (request: Request) => matchmaker.fetch(request))
 
     const env: Env = {
       GAME_ROOM: {
         idFromName: vi.fn((name: string) => ({ toString: () => name })),
         get: vi.fn(),
       } as any,
-      MATCHMAKER: {
-        idFromName: vi.fn(() => ({ toString: () => 'matchmaker-global' })),
-        get: vi.fn(() => ({ fetch: matchmakerFetch })),
-      } as any,
+      MATCHMAKER: matchmakerBindingFor(matchmaker) as any,
     }
 
     const gameRoom = new GameRoom(ctx as any, env)
@@ -824,17 +844,13 @@ describe('Integration: Edge Cases', () => {
 
   beforeEach(async () => {
     ctx = createMockDurableObjectContext()
-    const matchmakerFetch = vi.fn(async () => new Response('OK'))
 
     const env: Env = {
       GAME_ROOM: {
         idFromName: vi.fn((name: string) => ({ toString: () => name })),
         get: vi.fn(),
       } as any,
-      MATCHMAKER: {
-        idFromName: vi.fn(() => ({ toString: () => 'matchmaker-global' })),
-        get: vi.fn(() => ({ fetch: matchmakerFetch })),
-      } as any,
+      MATCHMAKER: noopMatchmakerBinding() as any,
     }
 
     gameRoom = new GameRoom(ctx as any, env)
@@ -973,7 +989,10 @@ describe('Worker: HTTP Endpoints', () => {
       MATCHMAKER: {
         idFromName: vi.fn((name: string) => ({ toString: () => `matchmaker-${name}` })),
         get: vi.fn(() => ({
-          fetch: vi.fn(async () => new Response(JSON.stringify({ roomCode: null }))),
+          register: vi.fn(async () => ({ ok: true })),
+          unregister: vi.fn(async () => {}),
+          find: vi.fn(async () => null),
+          getRoomInfo: vi.fn(async () => null),
         })),
       } as any,
     }
@@ -1031,7 +1050,7 @@ describe('Worker: HTTP Endpoints', () => {
     it('returns 404 for non-existent room', async () => {
       const env = createMockEnv()
       ;(env.MATCHMAKER.get as Mock).mockReturnValue({
-        fetch: vi.fn(async () => new Response('Not found', { status: 404 })),
+        getRoomInfo: vi.fn(async () => null),
       })
 
       const request = new Request('http://localhost/room/NOROOM')
@@ -1051,15 +1070,8 @@ describe('Worker: HTTP Endpoints', () => {
       // nobody could matchmake into. The Worker must surface the failure.
       const env = createMockEnv()
       ;(env.MATCHMAKER.get as Mock).mockReturnValue({
-        fetch: vi.fn(async (req: Request) => {
-          const path = new URL(req.url).pathname
-          if (path.startsWith('/info/')) return new Response('Not found', { status: 404 }) // unique code
-          if (path === '/register')
-            return new Response(JSON.stringify({ code: 'matchmaker_full', message: 'Too many active rooms' }), {
-              status: 503,
-            })
-          return new Response('OK')
-        }),
+        getRoomInfo: vi.fn(async () => null), // generated code is unique
+        register: vi.fn(async () => ({ ok: false, code: 'matchmaker_full' })),
       })
 
       const response = await worker.fetch(new Request('http://localhost/room', { method: 'POST' }), env)
@@ -1075,23 +1087,22 @@ describe('Worker: HTTP Endpoints', () => {
       ;(env.GAME_ROOM.get as Mock).mockReturnValue({
         fetch: vi.fn(async () => new Response('Already initialized', { status: 409 })),
       })
-      const mmCalls: string[] = []
+      const registerSpy = vi.fn(async () => ({ ok: true }))
+      const unregisterSpy = vi.fn(async () => {})
       ;(env.MATCHMAKER.get as Mock).mockReturnValue({
-        fetch: vi.fn(async (req: Request) => {
-          const path = new URL(req.url).pathname
-          mmCalls.push(path)
-          if (path.startsWith('/info/')) return new Response('Not found', { status: 404 })
-          return new Response('OK')
-        }),
+        getRoomInfo: vi.fn(async () => null),
+        register: registerSpy,
+        unregister: unregisterSpy,
       })
 
       const response = await worker.fetch(new Request('http://localhost/room', { method: 'POST' }), env)
 
       expect(response.status).toBe(503)
-      // Register-first ordering: the room WAS registered, then the failed init
-      // must be compensated by an /unregister so no broken room is advertised.
-      expect(mmCalls).toContain('/register')
-      expect(mmCalls).toContain('/unregister')
+      // Register-first ordering: the room WAS registered (via RPC), then the
+      // failed init must be compensated by an unregister so no broken room is
+      // advertised.
+      expect(registerSpy).toHaveBeenCalled()
+      expect(unregisterSpy).toHaveBeenCalled()
     })
   })
 

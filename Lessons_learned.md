@@ -1503,3 +1503,35 @@ The startup audio probe accepted `aplay` while `MusicManager` hardcoded `mpv`, s
 ### The meta-lesson
 
 Audit the seams, not the cores. The reducer had 270 tests and zero of these bugs; the alarm scheduler, the socket lifecycle, the registry's storage backing, and the client/launcher URL defaults had thin coverage and all of the bugs. **A green core is not a green system. Point the next audit at whatever the unit tests mock — that mock is a list of the assumptions nobody is checking.**
+
+---
+
+## 22. Aligning With the Platform's Idioms (the Cloudflare best-practices round)
+
+The §21 re-audit, run against Cloudflare's published Durable Object best practices, surfaced a second tier of issues — not correctness bugs but *idiom and cost* gaps where the code fought the platform instead of using it. Five were fixed test-first; two (sharding the global-singleton Matchmaker, moving the registry to SQLite rows) were captured in `docs/TODO.md` as deferred scaling work. The throughline: **the platform already solved most of these; the fix is to stop hand-rolling around it.**
+
+### RPC over fetch — and keep fetch only where the platform forces it
+
+Every Worker→DO and DO→DO call was `stub.fetch(new Request('https://internal/…'))` with hand-rolled path routing and JSON parsing — the legacy pattern. With `compatibility_date >= 2024-04-03` (this project: 2026-04-29), DOs expose typed RPC methods directly. The Matchmaker became `register/unregister/find/getRoomInfo` RPC methods; callers invoke them on the stub with full type-checking and no JSON surgery. The one call that *stayed* fetch is the WebSocket upgrade — RPC can't return a 101 — so GameRoom keeps a fetch handler for that and only that.
+
+**Migration tactic that bounded the blast radius:** keep a thin `fetch` adapter on the Matchmaker that delegates to the RPC methods. Production switched to RPC; the 30 existing unit tests and the PBT harness helpers kept driving the same logic over a Request, unchanged. The only test churn was the *binding stubs* — `env.MATCHMAKER.get()` had to return the RPC surface instead of `{ fetch }` — because those simulate the platform boundary the production code now crosses differently. **When you change how a seam is crossed, the mocks of that seam are exactly what breaks; nothing else needs to.**
+
+### A throwing alarm is a platform retry-storm waiting to happen
+
+Cloudflare *retries* an alarm whose handler throws. With a 30Hz alarm, a single reducer exception becomes a retry storm against poisoned state. The fix wraps the alarm body in an error boundary that logs a wide event, re-arms *deliberately* with a 1s backoff (not the 33ms cadence, not the platform's blind retry), and after 10 consecutive failures gives up and ends the game. **Bounded failure beats both an unhandled throw and an infinite hot loop. If the platform's default on error is "retry," catching is how you choose the recovery policy instead of inheriting it.**
+
+### Auto-response is free hibernation — but it bypasses your handler
+
+The app sent a `{type:'ping'}` *data* message every 30s, and the code comment admitted it "intentionally wakes a hibernated DO." Cloudflare's `setWebSocketAutoResponse` answers a fixed ping with a fixed pong *in the runtime, without waking the DO* — so idle lobbies hibernate through keepalives. Switching to it was easy; the trap was the **cross-feature interaction**: auto-responded pings never reach `webSocketMessage`, so they stopped bumping the phantom-reap's `lastActiveTick` (Lesson §20, Option B). An idle-but-alive player in active play would have been wrongly reaped. The runtime stamps each socket's last auto-response (`getWebSocketAutoResponseTimestamp`), so the reap now reconciles liveness from that before culling. **A hibernation optimization silently changed which code path observes liveness. When you let the platform handle something your code used to see, find everything that depended on seeing it.** (This is why the pong's now-unused `serverTime` could be dropped — confirming a field is dead before relying on a static response.)
+
+### `waitUntil` is the difference between fire-and-forget and fire-and-hope
+
+`fireAndForget` caught rejections but didn't extend the DO's lifetime, so an eviction between the handler returning and the task settling would silently drop it — a lost registry update reintroducing the very matchmaker/reality drift §20 fought. `this.ctx.waitUntil(task)` keeps the DO alive until it completes. **On a platform that evicts aggressively, an un-awaited promise with no `waitUntil` is not "background work" — it's "work that probably won't happen."**
+
+### Per-request context belongs in the request, never in a module global
+
+Region (the edge colo) was stashed in `globalThis.CF_REGION` at the Worker entry. Two bugs in one line: a DO runs in its *own isolate*, so it never saw the Worker isolate's global (every DO log lacked region); and within one isolate, concurrent requests clobber a shared global (mis-attributed region). The fix threads region explicitly — as an RPC argument and as a WS-upgrade header — and the logger reads it only from the per-call data. **A module-level global is per-isolate mutable state; it is never a safe place for per-request values, and across an isolate boundary it is invisible. Thread the context; don't stash it.**
+
+### The mock is still the list of untested assumptions
+
+Every one of these five fixes required widening the hand-rolled `cloudflare:workers` mock toward the real platform: `getAlarm` (min-merge), `setWebSocketAutoResponse` + `getWebSocketAutoResponseTimestamp`, `waitUntil`, and RPC method stubs on the bindings. That list — the methods the mock *didn't* have — is precisely the set of platform behaviours nothing was exercising. It reinforces §21's standing recommendation: a `vitest-pool-workers` (workerd) smoke suite would have made every one of these fixes testable against the real runtime instead of a mock we keep teaching, one incident at a time, what the platform already does.

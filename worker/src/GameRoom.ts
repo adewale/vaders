@@ -45,7 +45,8 @@ function debugLog(tag: string, data: Record<string, unknown>): void {
   console.log(tag, data)
 }
 import { createDefaultGameState, migrateGameState } from '../../shared/state-defaults'
-import type { Env } from './env'
+import type { Env, MatchmakerStub } from './env'
+import type { MatchmakerLogContext } from './Matchmaker'
 import { logEvent } from './logger'
 
 export type { Env }
@@ -56,6 +57,13 @@ export type { Env }
  * the constant in index.ts.
  */
 const REQUEST_ID_HEADER = 'x-vaders-request-id'
+const REGION_HEADER = 'x-vaders-region'
+
+/** Extract the originating edge region (colo) threaded from the Worker entry on
+ *  the WS-upgrade request, if present. */
+function getRegion(request?: Request): string | undefined {
+  return request?.headers.get(REGION_HEADER) ?? undefined
+}
 
 /**
  * Extract the requestId from the inbound request header, or generate one if
@@ -84,6 +92,21 @@ interface WebSocketAttachment {
 const RATE_LIMIT_WINDOW_MS = 1000
 const RATE_LIMIT_MAX_MESSAGES = 60
 const UNAUTHENTICATED_SOCKET_TIMEOUT_MS = 5000
+
+// App-level heartbeat. The client sends exactly JSON.stringify({type:'ping'}).
+// The runtime auto-responds with the pong below WITHOUT waking the DO, so idle
+// lobbies hibernate through keepalives (Cloudflare: "Ping/pong handling does
+// not interrupt hibernation"). serverTime is omitted — no client reads it.
+const PING_REQUEST_BODY = JSON.stringify({ type: 'ping' })
+const PONG_RESPONSE_BODY = JSON.stringify({ type: 'pong' })
+// Liveness window mirroring the client watchdog (PING_INTERVAL + PONG_TIMEOUT).
+const HEARTBEAT_LIVENESS_MS = 35000
+
+// alarm() error boundary: a faulting alarm is caught and re-armed deliberately
+// (backed off) rather than left to Cloudflare's blind retry. After this many
+// consecutive failures the room gives up and ends the game (bounded failure).
+const ALARM_ERROR_BACKOFF_MS = 1000
+const ALARM_MAX_CONSECUTIVE_ERRORS = 10
 
 // Per-connection rate limiting state (not serialized into attachment — lives in memory only)
 interface RateLimitState {
@@ -154,22 +177,43 @@ export class GameRoom extends DurableObject<Env> {
   // a stable requestId. This is a "contextual" field rather than passing
   // requestId through every private method signature, which would be noisy.
   private currentRequestId: string | null = null
+  // Originating edge region (colo), threaded in on the WS-upgrade request and
+  // reused for subsequent ws-message / alarm logs from this DO instance. The
+  // DO runs in its own isolate, so this is the only way its logs can carry the
+  // user's region — the Worker-isolate global the logger used to read is never
+  // visible here.
+  private currentRegion: string | null = null
+  // Consecutive alarm() failures (in-memory; resets on success or eviction).
+  private alarmErrorCount = 0
 
   /**
    * Emit a wide-event log line with the room-scoped envelope: roomCode,
-   * requestId, and whatever caller-supplied fields. All meaningful state
-   * changes inside the DO should go through this so logs are consistent.
+   * requestId, region, and whatever caller-supplied fields. All meaningful
+   * state changes inside the DO should go through this so logs are consistent.
    */
   private log(eventName: string, data: Record<string, unknown> = {}): void {
     logEvent(eventName, {
       roomCode: this.game?.roomCode,
       requestId: this.currentRequestId ?? undefined,
+      region: this.currentRegion ?? undefined,
       ...data,
     })
   }
 
+  /** Correlation context for RPC calls into the Matchmaker. */
+  private logContext(): MatchmakerLogContext {
+    return { requestId: this.currentRequestId ?? undefined, region: this.currentRegion ?? undefined }
+  }
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
+
+    // Auto-respond to the app-level heartbeat in the runtime so idle lobbies
+    // stay hibernated through pings instead of waking the DO every 30s per
+    // connection. Re-set on every constructor run (i.e. every wake/eviction).
+    if (typeof WebSocketRequestResponsePair !== 'undefined') {
+      ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(PING_REQUEST_BODY, PONG_RESPONSE_BODY))
+    }
 
     // Load state from SQLite on wake (hibernation-aware)
     ctx.blockConcurrencyWhile(async () => {
@@ -329,9 +373,12 @@ export class GameRoom extends DurableObject<Env> {
    * HTTP fetch handler for non-WebSocket requests
    */
   async fetch(request: Request): Promise<Response> {
-    // Capture the per-request id (threaded from Worker entry via header) so
-    // any logEvent() call reached during this fetch carries it.
+    // Capture the per-request id + region (threaded from Worker entry via
+    // headers) so any logEvent() call reached during this fetch carries them.
+    // The WS upgrade carries the region; keep the prior value for header-less
+    // internal fetches so a DO instance remembers its connections' region.
     this.currentRequestId = getRequestId(request)
+    this.currentRegion = getRegion(request) ?? this.currentRegion
     const url = new URL(request.url)
 
     // POST /init - Initialize room with code
@@ -859,34 +906,33 @@ export class GameRoom extends DurableObject<Env> {
     this.persistState()
   }
 
-  private internalRequest(url: string, init?: RequestInit): Request {
-    const headers = new Headers(init?.headers)
-    if (this.currentRequestId) headers.set(REQUEST_ID_HEADER, this.currentRequestId)
-    return new Request(url, { ...init, headers })
+  private matchmakerStub(): MatchmakerStub {
+    return this.env.MATCHMAKER.get(this.env.MATCHMAKER.idFromName('global')) as unknown as MatchmakerStub
   }
 
   private async updateRoomRegistry() {
     if (!this.game) return
-    const matchmaker = this.env.MATCHMAKER.get(this.env.MATCHMAKER.idFromName('global'))
-    await matchmaker.fetch(
-      this.internalRequest('https://internal/register', {
-        method: 'POST',
-        body: JSON.stringify({
-          roomCode: this.game.roomCode,
-          playerCount: Object.keys(this.game.players).length,
-          status: this.game.status,
-        }),
-      }),
+    await this.matchmakerStub().register(
+      this.game.roomCode,
+      Object.keys(this.game.players).length,
+      this.game.status,
+      this.logContext(),
     )
   }
 
   private fireAndForget(label: string, task: Promise<unknown>): void {
-    task.catch((err) => {
+    const guarded = task.catch((err) => {
       this.log('async_task_failed', {
         task: label,
         message: err instanceof Error ? err.message : String(err),
       })
     })
+    // Extend the DO's lifetime until the background task settles. Without this,
+    // an eviction between the handler returning and the task completing would
+    // silently drop it — e.g. a registry update lost, reintroducing
+    // matchmaker/reality drift. ctx.waitUntil is absent in some test harnesses;
+    // degrade gracefully there.
+    this.ctx.waitUntil?.(guarded)
   }
 
   private async startGame() {
@@ -957,7 +1003,41 @@ export class GameRoom extends DurableObject<Env> {
     // Alarm-driven wakes don't carry an HTTP request, so mint a requestId
     // for any logEvent() reached during this alarm pass.
     this.currentRequestId = getRequestId()
+    try {
+      await this.runAlarm()
+      this.alarmErrorCount = 0
+    } catch (err) {
+      this.alarmErrorCount++
+      this.log('alarm_error', {
+        message: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+        status: this.game?.status,
+        tick: this.game?.tick,
+        consecutiveErrors: this.alarmErrorCount,
+      })
+      const active =
+        !!this.game && ['playing', 'wipe_exit', 'wipe_hold', 'wipe_reveal', 'countdown'].includes(this.game.status)
+      if (active && this.alarmErrorCount < ALARM_MAX_CONSECUTIVE_ERRORS) {
+        // Re-arm deliberately with a backoff instead of letting Cloudflare
+        // retry the alarm blindly at the original 30Hz cadence (an error storm).
+        await this.ctx.storage.setAlarm(Date.now() + ALARM_ERROR_BACKOFF_MS)
+      } else if (active) {
+        // Bounded failure: a persistently faulting room halts rather than
+        // spinning forever.
+        this.log('alarm_error_giving_up', { consecutiveErrors: this.alarmErrorCount, status: this.game?.status })
+        try {
+          this.endGame('defeat')
+        } catch {}
+      }
+    }
+  }
 
+  /**
+   * The actual alarm work: game tick, countdown ticks, and empty-room cleanup.
+   * Wrapped by alarm() in an error boundary so a fault can't trigger a platform
+   * retry storm against poisoned state.
+   */
+  private async runAlarm() {
     const closedUnauthenticated = this.closeStaleUnauthenticatedSockets()
     if (closedUnauthenticated > 0) {
       this.log('ws_unauth_timeout', { closedCount: closedUnauthenticated })
@@ -1030,6 +1110,24 @@ export class GameRoom extends DurableObject<Env> {
     // Threshold 2400 ticks = 80s at 30Hz ≈ 2 × (PING_INTERVAL + PONG_TIMEOUT)
     // so we allow two missed pings before treating a player as gone.
     const IDLE_STALE_TICKS = 2400
+
+    // 0a. Reconcile liveness from auto-responded pings. With
+    // setWebSocketAutoResponse the runtime answers heartbeat pings while the DO
+    // sleeps, so they never reach webSocketMessage and can't bump lastActiveTick
+    // directly. The runtime stamps each socket's last auto-response, which still
+    // proves the connection is alive — fold that in before reaping so an idle
+    // player who is only pinging (no input) is not wrongly reaped.
+    const nowMs = Date.now()
+    for (const ws of this.ctx.getWebSockets()) {
+      const att = ws.deserializeAttachment() as WebSocketAttachment | null
+      const pid = att?.playerId
+      if (!pid || !this.game.players[pid]) continue
+      const lastPing = this.ctx.getWebSocketAutoResponseTimestamp(ws)
+      if (lastPing && nowMs - lastPing.getTime() < HEARTBEAT_LIVENESS_MS) {
+        this.game.players[pid].lastActiveTick = this.game.tick
+      }
+    }
+
     let reaped = 0
     for (const id of Object.keys(this.game.players)) {
       const p = this.game.players[id]
@@ -1278,13 +1376,7 @@ export class GameRoom extends DurableObject<Env> {
 
   private async cleanup() {
     if (this.game) {
-      const matchmaker = this.env.MATCHMAKER.get(this.env.MATCHMAKER.idFromName('global'))
-      await matchmaker.fetch(
-        this.internalRequest('https://internal/unregister', {
-          method: 'POST',
-          body: JSON.stringify({ roomCode: this.game.roomCode }),
-        }),
-      )
+      await this.matchmakerStub().unregister(this.game.roomCode, this.logContext())
     }
     await this.ctx.storage.deleteAlarm()
     this.ctx.storage.sql.exec('DELETE FROM game_state')
