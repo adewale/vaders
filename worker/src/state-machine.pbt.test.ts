@@ -554,9 +554,41 @@ interface CmdCtx {
 }
 
 interface Command {
-  check: (model: SystemModel) => boolean
+  check: (model: Readonly<SystemModel>) => boolean
   run: (ctx: CmdCtx) => Promise<void>
   toString: () => string
+}
+
+/**
+ * Adapts the journey commands to fast-check's model API.  Keeping the
+ * invariant bank in the adapter means it runs after every accepted command,
+ * while fc.commands can discard commands whose preconditions no longer hold
+ * and shrink the remaining sequence with that knowledge.
+ */
+class ModelCommand implements fc.AsyncCommand<SystemModel, CmdCtx> {
+  constructor(private readonly command: Command) {}
+
+  check(model: Readonly<SystemModel>): boolean {
+    return this.command.check(model)
+  }
+
+  async run(model: SystemModel, real: CmdCtx): Promise<void> {
+    if (real.model !== model) throw new Error('model/context identity drifted')
+    await this.command.run(real)
+
+    const violations = [
+      ...assertInvariants(real.real),
+      ...await assertMatchmakerCrossConsistency(real.real),
+    ]
+    if (violations.length > 0) {
+      const violation = violations[0]!
+      throw new Error(`Invariant violated: ${violation.name}\n  ${violation.details}`)
+    }
+  }
+
+  toString(): string {
+    return this.command.toString()
+  }
 }
 
 function pickRoomFromModel(model: SystemModel, idx: number): string | null {
@@ -804,34 +836,6 @@ const commandArb = fc.oneof(
   { weight: 2, arbitrary: fc.tuple(smallInt, tickCount).map(([r, t]) => AdvanceTickCommand(r, t)) },
 )
 
-async function runCommandSequence(commands: Command[], roomCodePool: string[]): Promise<InvariantViolation[]> {
-  const real = new RealSystem()
-  const model = new SystemModel()
-  const ctx: CmdCtx = {
-    model,
-    real,
-    roomCodePool,
-    roomCodesUsed: [],
-    nextName: () => model.nextPlayerName(),
-  }
-
-  const allViolations: InvariantViolation[] = []
-
-  for (const cmd of commands) {
-    if (!cmd.check(model)) continue
-    await cmd.run(ctx)
-    const v1 = assertInvariants(real)
-    const v2 = await assertMatchmakerCrossConsistency(real)
-    allViolations.push(...v1, ...v2)
-    if (allViolations.length > 0) {
-      // Short-circuit on first violation so shrinking gets a minimal case.
-      return allViolations
-    }
-  }
-
-  return allViolations
-}
-
 // ============================================================================
 // Properties
 // ============================================================================
@@ -841,14 +845,22 @@ const ROOM_CODE_POOL = ['ROOM01', 'ROOM02', 'ROOM03', 'ROOM04', 'ROOM05', 'ROOM0
 describe('PBT: State Machine Invariants', () => {
   it('no invariants violated across arbitrary multiplayer journeys', async () => {
     await fc.assert(
-      fc.asyncProperty(fc.array(commandArb, { minLength: 1, maxLength: 60 }), async (commands) => {
-        const violations = await runCommandSequence(commands, ROOM_CODE_POOL)
-        if (violations.length > 0) {
-          // Pretty-print the first violation so shrunk reproducers are readable.
-          const v = violations[0]
-          throw new Error(`Invariant violated: ${v.name}\n  ${v.details}`)
-        }
-      }),
+      fc.asyncProperty(
+        fc.commands([commandArb.map((command) => new ModelCommand(command))], { maxCommands: 60 }),
+        async (commands) => {
+          const model = new SystemModel()
+          await fc.asyncModelRun(() => ({
+            model,
+            real: {
+              model,
+              real: new RealSystem(),
+              roomCodePool: ROOM_CODE_POOL,
+              roomCodesUsed: [],
+              nextName: () => model.nextPlayerName(),
+            },
+          }), commands)
+        },
+      ),
       { numRuns: 50, verbose: false },
     )
   }, 120_000)
