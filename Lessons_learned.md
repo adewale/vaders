@@ -1535,3 +1535,26 @@ Region (the edge colo) was stashed in `globalThis.CF_REGION` at the Worker entry
 ### The mock is still the list of untested assumptions
 
 Every one of these five fixes required widening the hand-rolled `cloudflare:workers` mock toward the real platform: `getAlarm` (min-merge), `setWebSocketAutoResponse` + `getWebSocketAutoResponseTimestamp`, `waitUntil`, and RPC method stubs on the bindings. That list — the methods the mock *didn't* have — is precisely the set of platform behaviours nothing was exercising. It reinforces §21's standing recommendation: a `vitest-pool-workers` (workerd) smoke suite would have made every one of these fixes testable against the real runtime instead of a mock we keep teaching, one incident at a time, what the platform already does.
+
+---
+
+## 23. Shrink Stateful Multiplayer Journeys Through Command Preconditions
+
+The multiplayer property already had the difficult pieces: a shadow model,
+commands for room/player/matchmaker lifecycles, and invariants checked after each
+operation. Its manual runner still generated an arbitrary command array, skipped
+commands whose preconditions failed, and then reported that filtered journey on
+failure. Fast-check could shrink the array, but it did not understand which
+commands were admissible at each state.
+
+Adapting the existing commands to `fc.AsyncCommand` made their `check` methods
+part of `fc.commands` and `fc.asyncModelRun`. The adapter retains the production
+model and cross-system invariant bank, while fast-check now shrinks within valid
+join, ready, start, leave, disconnect, tick, and matchmaker transitions. Keeping
+the invariant check in the adapter also makes “after every accepted command” a
+single enforced seam instead of a convention in each journey.
+
+**The lesson: a stateful property is only command-aware when the property
+framework can see its preconditions. Do not generate an opaque array and skip
+invalid operations in a private loop; adapt the domain commands to the model
+runner so the minimized counterexample remains a valid multiplayer journey.**
