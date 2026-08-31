@@ -1547,12 +1547,16 @@ commands whose preconditions failed, and then reported that filtered journey on
 failure. Fast-check could shrink the array, but it did not understand which
 commands were admissible at each state.
 
-Adapting the existing commands to `fc.AsyncCommand` made their `check` methods
-part of `fc.commands` and `fc.asyncModelRun`. The adapter retains the production
-model and cross-system invariant bank, while fast-check now shrinks within valid
-join, ready, start, leave, disconnect, tick, and matchmaker transitions. Keeping
-the invariant check in the adapter also makes “after every accepted command” a
-single enforced seam instead of a convention in each journey.
+Adapting the existing commands to `fc.AsyncCommand` lets `fc.asyncModelRun`
+evaluate each command's `check` against the current model, while command-aware
+shrinking preserves those preconditions as it reduces a failure. The checks must
+resolve the same selected room and player as `run`; a coarse “some room has a
+player” guard still hides target-specific no-ops. Time commands must also model
+lifecycle cleanup—for example, an alarm that deletes an empty room—before later
+preconditions are evaluated. The adapter retains the
+production model and cross-system invariant bank, while accepted join, ready,
+start, leave, disconnect, tick, and matchmaker transitions share one invariant
+seam.
 
 **The lesson: a stateful property is only command-aware when the property
 framework can see its preconditions. Do not generate an opaque array and skip
