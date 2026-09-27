@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { pbtTimeout } from '../testing/pbt'
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react'
 import fc from 'fast-check'
 import { LobbyScreen } from './LobbyScreen'
@@ -311,6 +312,7 @@ describe('LobbyScreen', () => {
 
   // ─── Property-based test ──────────────────────────────────────────────────
 
+  const LOBBY_ROWS_RUNS = 30
   it('[PBT] row counts and slot invariants hold for any combination of players', () => {
     const slotArb = fc.constantFrom<PlayerSlot>(1, 2, 3, 4)
     fc.assert(
@@ -389,9 +391,9 @@ describe('LobbyScreen', () => {
           return true
         },
       ),
-      { numRuns: 30 },
+      { numRuns: LOBBY_ROWS_RUNS },
     )
-  })
+  }, pbtTimeout(LOBBY_ROWS_RUNS))
 })
 
 describe('LobbyScreen - hints bar', () => {

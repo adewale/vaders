@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest'
+import { pbtTimeout } from '../testing/pbt'
 import { render, cleanup, fireEvent } from '@testing-library/react'
 import { LaunchScreen } from './LaunchScreen'
 
@@ -388,6 +389,7 @@ describe('LaunchScreen menu sounds — property-based', () => {
     expect(calls).toEqual(['select', 'navigate', 'select'])
   })
 
+  const MENU_SOUND_RUNS = 40
   it('menu sound sequence matches the handler model for any key sequence (PBT)', async () => {
     const fc = await import('fast-check')
     await fc.assert(
@@ -407,13 +409,15 @@ describe('LaunchScreen menu sounds — property-based', () => {
           return JSON.stringify(calls) === JSON.stringify(expected)
         },
       ),
-      // 40 runs fits the 5s test timeout (each case renders + replays up to
-      // 40 events). Verified once at 1500 runs across fresh seeds; the known
-      // CI counterexample is pinned as the deterministic REGRESSION case above.
-      { numRuns: 40 },
+      // Each case renders + replays up to 40 events; the test timeout is
+      // sized to the run count (pbtTimeout). Verified once at 1500 runs across
+      // fresh seeds; the known CI counterexample is pinned as the
+      // deterministic REGRESSION case above.
+      { numRuns: MENU_SOUND_RUNS },
     )
-  })
+  }, pbtTimeout(MENU_SOUND_RUNS))
 
+  const NEGATIVE_KEY_RUNS = 40
   it('never fires on any purely-negative key sequence (PBT)', async () => {
     const fc = await import('fast-check')
     await fc.assert(
@@ -443,7 +447,7 @@ describe('LaunchScreen menu sounds — property-based', () => {
           return calls.length === 0
         },
       ),
-      { numRuns: 40 },
+      { numRuns: NEGATIVE_KEY_RUNS },
     )
-  })
+  }, pbtTimeout(NEGATIVE_KEY_RUNS))
 })
