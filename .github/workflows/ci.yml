@@ -95,16 +95,15 @@ jobs:
             exit 1
           fi
 
-      # Assertion density audit — informational, not blocking. Reviewing the
-      # visual-identity audit showed several drift bugs survived review
-      # because their tests asserted existence but not identity (one-assert
-      # smoke tests). This step prints a report of low-density tests so
-      # teams can chip away at them; `continue-on-error: true` keeps CI
-      # green until the fleet is cleaned up, at which point we flip the
-      # gate by removing that flag.
-      - name: Assertion density audit (informational)
-        run: node scripts/audit-assertion-density.mjs
-        continue-on-error: true
+      # Blocking: no test may rely on toBeDefined()/toBeTruthy() as its only
+      # assertion (existence, not identity — the shape that let the
+      # visual-identity drift bugs through). Existing offenders are frozen in
+      # a shrink-only baseline. Replaces the informational assertion-density
+      # audit, whose "3+ assertions" rule the skill has retracted.
+      - name: Weak sole-assertion check
+        run: |
+          node --test scripts/check-weak-sole-assertions.test.mjs
+          node scripts/check-weak-sole-assertions.mjs
 
       - name: No OpenTUI in web
         run: |
