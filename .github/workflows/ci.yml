@@ -50,6 +50,14 @@ jobs:
       - name: Type check (worker)
         run: cd worker && bun run typecheck
 
+      # client-core's tsconfig also includes ../shared, so this step
+      # typechecks the shared package (and its tests) too.
+      - name: Type check (client-core + shared)
+        run: cd client-core && bun run typecheck
+
+      - name: Type check (web)
+        run: cd web && bun run typecheck
+
       # ── Fast path tests (every commit) ─────────────────────────────
       - name: Run shared tests
         run: cd shared && bun test

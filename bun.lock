@@ -30,6 +30,7 @@
       "name": "@vaders/client-core",
       "version": "1.0.0",
       "devDependencies": {
+        "@types/bun": "^1.0.0",
         "@types/react": "^19.0.0",
         "typescript": "^5.3.0",
       },
