@@ -1238,7 +1238,7 @@ Small, surgical edits with low ambiguity: do them yourself. Briefing cost > exec
 
 Tests with one `expect()` are smoke tests dressed as behaviour tests. They prove the code path runs; they don't pin its output. A cyan glow and a magenta glow both satisfy `expect(cmds.find(c => c.kind === 'bullet-glow')).toBeDefined()`.
 
-The skill (`.claude/skills/testing-best-practices`) calls for ≥3 meaningful assertions. Enforcement: `scripts/audit-assertion-density.mjs` scans every test file, counts `expect(` + `fc.assert(` (weighted ×3), reports the lowest-density tests. Informational in CI for now; can be flipped to blocking once the backlog drains.
+The skill (`.claude/skills/testing-best-practices`) originally called for ≥3 meaningful assertions, and `scripts/audit-assertion-density.mjs` counted them as an informational CI step. The skill has since retracted the count rule — one precise assertion is fine; one *existence* check is the problem — so the density audit was replaced by a blocking check, `scripts/check-weak-sole-assertions.mjs`: it fails any test whose only assertion is `toBeDefined()`/`toBeTruthy()`. Existing offenders are frozen in a shrink-only baseline (`scripts/weak-sole-assertions.baseline.json`); strengthen one, then delete its entry.
 
 ### Both-directions, always
 

@@ -107,6 +107,8 @@ bun test client-core/          # Animation, connection, input, sprites
 bun test client/               # TUI components, hooks, terminal
 cd web && npx vitest run       # Web adapters, renderer, contracts, routing
 cd worker && bun run test      # Worker, GameRoom, reducer, matchmaker
+cd worker && bun run test:runtime  # Durable Objects in real workerd (alarms, WS auto-response)
+node scripts/check-weak-sole-assertions.mjs  # no test may rely on toBeDefined()/toBeTruthy() alone
 
 # Web E2E (requires local servers running)
 cd web && npx playwright test

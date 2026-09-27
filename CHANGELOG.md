@@ -2,6 +2,15 @@
 
 All notable changes to Vaders are documented in this file.
 
+## [Unreleased]
+
+### Changed (verification)
+
+- **Durable Object behaviour tested in the real Workers runtime** (`worker`) — new `bun run test:runtime` lane (`worker/vitest.runtime.config.ts`, `@cloudflare/vitest-pool-workers`) runs `worker/runtime-test/**` in workerd with the real bindings, alongside the mocked unit suite. It starts with two behaviours the `cloudflare:workers` mock had to be widened for (Lessons §22): single-alarm min-merge through the real `storage.getAlarm()`/`setAlarm()`, and WebSocket auto-response — the runtime answers the heartbeat ping itself, stamps `getWebSocketAutoResponseTimestamp`, and never delivers the ping to `webSocketMessage`. CI runs it. The worker's `vitest` moves to `^4.1.5`, which the pool requires.
+- **Every workspace is typechecked in CI** — `client-core` (which also covers `shared` via its tsconfig) and `web` join `client` and `worker`, and the root `typecheck` script covers all four. `client-core`'s check had 20 errors: 18 were its missing `@types/bun` dev dependency (now added), and 2 were real type errors in `interpolation.property.test.ts`.
+- **Rendering property tests have timeouts sized to their run count** (`web`) — five component PBTs had their `numRuns` tuned to fit the 5 s default timeout, so under CPU contention they failed as timeouts. They now use `pbtTimeout(numRuns)` (`web/src/testing/pbt.ts`).
+- **The assertion-density audit is replaced by a blocking weak-sole-assertion check** — `scripts/check-weak-sole-assertions.mjs` fails any test whose only assertion is `toBeDefined()`/`toBeTruthy()`, with the 36 existing offenders frozen in a shrink-only baseline. The old audit ran with `continue-on-error` and enforced a "3+ assertions per test" rule that the testing-best-practices skill has retracted.
+
 ## [1.2.0] — 2026-06-10
 
 A deep-audit hardening pass. Every fix below shipped test-first (red → green) with

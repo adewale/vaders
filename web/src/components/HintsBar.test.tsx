@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest'
+import { pbtTimeout } from '../testing/pbt'
 import { render, screen, cleanup } from '@testing-library/react'
 import fc from 'fast-check'
 import { HintsBar } from './HintsBar'
@@ -65,6 +66,7 @@ describe('HintsBar', () => {
     expect(fullText.indexOf('second')).toBeLessThan(fullText.indexOf('third'))
   })
 
+  const HINTS_RUNS = 40
   it('[PBT] renders exactly hints.length items preserving every key and desc', () => {
     const tokenArb = fc
       .string({ minLength: 1, maxLength: 8 })
@@ -92,7 +94,7 @@ describe('HintsBar', () => {
           unmount()
         }
       }),
-      { numRuns: 40 },
+      { numRuns: HINTS_RUNS },
     )
-  })
+  }, pbtTimeout(HINTS_RUNS))
 })
