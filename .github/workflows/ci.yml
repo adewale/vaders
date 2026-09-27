@@ -71,6 +71,12 @@ jobs:
       - name: Run worker tests
         run: cd worker && bun run test
 
+      # Real-runtime lane: Durable Object behaviour (alarms, WebSocket
+      # auto-response) in workerd via @cloudflare/vitest-pool-workers,
+      # instead of the hand-rolled cloudflare:workers mock.
+      - name: Run worker runtime tests (workerd)
+        run: cd worker && bun run test:runtime
+
       - name: Run web unit tests
         run: cd web && npx vitest run
 
