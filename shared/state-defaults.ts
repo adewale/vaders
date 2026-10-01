@@ -11,14 +11,17 @@ import { DEFAULT_CONFIG, type GameState, type GameStatus } from './types'
 
 // ─── Status Registry ─────────────────────────────────────────────────────────
 // Single source of truth for all GameStatus values.
-// Used by tests to verify exhaustive handling in UI components.
 
 /**
  * All possible GameStatus values as a runtime-accessible array.
  * When adding a new status:
  * 1. Add to GameStatus type in types.ts
- * 2. Add to this array
- * 3. TypeScript will error if the arrays don't match
+ * 2. Add to this array (TypeScript errors below if the two don't match)
+ * 3. Add it to STATUS_RENDER_MAP below (also type-checked)
+ * 4. TUI: add a case to the `switch (state.status)` in client/src/App.tsx
+ *    (and to GameScreen.tsx if it is a wipe phase), then add its expected
+ *    screen to EXPECTED_SCREEN in client/src/App.test.tsx (type-checked)
+ * 5. Web: check the `state.status` branches in web/src/App.tsx
  */
 export const ALL_GAME_STATUSES = [
   'waiting',

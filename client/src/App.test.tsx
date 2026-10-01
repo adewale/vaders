@@ -5,9 +5,10 @@
 // game screen (border + HUD) must not be drawn, and an auto-started solo game
 // must not show the lobby while waiting for the server.
 //
-// The only doubles are the WebSocket hook (a fake that holds server state in
-// React state, as the real hook does) and the audio hook (it spawns system
-// audio players; sound is not under test here).
+// Doubles: the WebSocket hook (a fake that holds server state in React state,
+// as the real hook does), the audio hook (it spawns system audio players;
+// sound is not under test here), and, in the solo test only, global fetch
+// (the room-creation request).
 
 import { describe, test, expect, mock, afterEach } from 'bun:test'
 import { useState } from 'react'
@@ -144,7 +145,8 @@ describe('TUI App renders one screen per GameStatus', () => {
     initialState = stateFor('countdown')
     const app = await mountApp({ roomCode: 'TEST01' })
     const lines = (await app.frame()).split('\n').map((l) => l.trim())
-    expect(lines[lines.indexOf(COUNTDOWN) + 2]).toBe('3')
+    const nextText = lines.slice(lines.indexOf(COUNTDOWN) + 1).find(Boolean)
+    expect(nextText).toBe('3')
   })
 })
 
