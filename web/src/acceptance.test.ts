@@ -1392,26 +1392,6 @@ describe('Barrier visual polish', () => {
     }
   })
 
-  it.skip('texture rects are within segment bounds (superseded by circle noise)', () => {
-    // Superseded: old rect-texture replaced by barrier-noise circles.
-    // The new circle-bounds test in 'Barrier concrete noise' covers this.
-    const b = makeBarrier(4, 20)
-    const state = stateWith([b], {})
-    const commands = buildDrawCommands(state, null)
-    const segX = (20 + 0 * 3) * CELL_W
-    const segY = (LAYOUT.BARRIER_Y + 0 * 2) * CELL_H
-    const segW = 3 * CELL_W
-    const segH = 2 * CELL_H
-    const textures = commands.filter((c): c is RectCmd => isRect(c) && (c as any).kind === 'barrier-texture')
-    expect(textures.length).toBeGreaterThan(0)
-    for (const t of textures) {
-      expect(t.x).toBeGreaterThanOrEqual(segX)
-      expect(t.y).toBeGreaterThanOrEqual(segY)
-      expect(t.x + t.width).toBeLessThanOrEqual(segX + segW)
-      expect(t.y + t.height).toBeLessThanOrEqual(segY + segH)
-    }
-  })
-
   it('highlight is at top of segment, 1px tall', () => {
     const b = makeBarrier(4, 20)
     const state = stateWith([b], {})
