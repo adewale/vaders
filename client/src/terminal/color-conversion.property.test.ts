@@ -1,9 +1,10 @@
 // client/src/terminal/color-conversion.property.test.ts
 // Property-based tests for color conversion functions
 
-import { describe, it, expect } from 'bun:test'
+import { describe, it, expect, spyOn } from 'bun:test'
+import { parseColor } from '@opentui/core'
 import fc from 'fast-check'
-import { hexTo256Color, hexTo16Color, convertColorForTerminal } from './index'
+import { hexTo256Color, hexTo16Color, convertColorForTerminal, type TerminalCapabilities } from './index'
 
 // Arbitrary for valid hex color strings (#rrggbb)
 const arbHexColor = fc
@@ -107,16 +108,23 @@ describe('convertColorForTerminal (property-based)', () => {
     )
   })
 
-  it('256-color terminals produce ansi256:N format with valid N', () => {
-    const caps256 = { supportsTrueColor: false } as any
-    fc.assert(
-      fc.property(arbHexColor, (hex) => {
-        const result = convertColorForTerminal(hex, caps256)
-        expect(result).toMatch(/^ansi256:\d+$/)
-        const n = Number.parseInt(result.split(':')[1], 10)
-        expect(n).toBeGreaterThanOrEqual(16)
-        expect(n).toBeLessThanOrEqual(255)
-      }),
-    )
+  it('256-color terminals: OpenTUI draws the requested colour, not its magenta fallback', () => {
+    // OpenTUI parses every fg/bg string with parseColor, which accepts hex and
+    // CSS names only and draws anything else magenta with a console warning.
+    // It always emits 24-bit SGR, so the colour to draw is the requested one.
+    const caps256 = { supportsTrueColor: false } as TerminalCapabilities
+    const warn = spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      fc.assert(
+        fc.property(arbHexColor, (hex) => {
+          warn.mockClear()
+          const drawn = parseColor(convertColorForTerminal(hex, caps256))
+          expect(warn).not.toHaveBeenCalled()
+          expect(drawn.toInts()).toEqual(parseColor(hex).toInts())
+        }),
+      )
+    } finally {
+      warn.mockRestore()
+    }
   })
 })

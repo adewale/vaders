@@ -678,7 +678,7 @@ test('renders every game status', () => {
 })
 ```
 
-The TUI client already has a version of this pattern in `App.test.ts` (checks exhaustive switch over `GameStatus`). Formalize it and require it of both frontends.
+The TUI client already has a version of this pattern in `client/src/App.test.tsx` (renders the real App for every `GameStatus`). Formalize it and require it of both frontends.
 
 **Quantity**: One contract test file per frontend. Coverage is enumeration-complete (every variant of every discriminated union).
 

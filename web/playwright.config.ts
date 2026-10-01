@@ -28,7 +28,12 @@ export default defineConfig({
     ? undefined
     : [
         {
-          command: 'cd ../worker && npx wrangler dev --port 8787',
+          // wrangler dev exits at startup when the worker's assets directory
+          // (../web/dist) is missing, so build the web bundle first on a
+          // fresh checkout or CI runner. An existing (even stale) dist is
+          // reused: the tests themselves load the app from the Vite server
+          // below.
+          command: '(test -d dist || bun run build) && cd ../worker && npx wrangler dev --port 8787',
           url: 'http://localhost:8787/health',
           reuseExistingServer: true,
           timeout: 30000,

@@ -555,11 +555,13 @@ export function wrapForPassthrough(sequence: string, caps: TerminalCapabilities)
 }
 
 /**
- * Convert a true color hex value to the nearest 256-color palette index.
- * Useful for terminals that don't support true color.
+ * Convert a true color hex value to a 256-color palette index.
+ * Useful for terminals that don't support true color. Each channel is rounded
+ * to 6 even steps, so the index is close to, but not always, the nearest
+ * xterm palette entry (whose levels are 0, 95, 135, 175, 215, 255).
  *
  * @param hex - Hex color string (e.g., "#ff5500" or "ff5500")
- * @returns The nearest 256-color palette index (16-255)
+ * @returns A 256-color palette index (16-255)
  */
 export function hexTo256Color(hex: string): number {
   // Remove # prefix if present
@@ -759,20 +761,16 @@ export function isAudioSupported(): boolean {
 // ─── Color Conversion Utilities ─────────────────────────────────────────────
 
 /**
- * Convert a hex color to terminal-appropriate format string.
- * - True color terminals: returns hex as-is (e.g., "#ff5555")
- * - 256-color terminals: returns "ansi256:N" format
+ * Color string for OpenTUI `fg`/`bg` props: the hex color unchanged, on every
+ * terminal. OpenTUI parses only hex and CSS names (anything else, such as
+ * "ansi256:N", is drawn magenta) and always emits 24-bit SGR, so a 256-color
+ * terminal shows these colors the same way it shows the rest of the UI.
  *
  * @param hex - Hex color string
- * @param caps - Terminal capabilities (uses cached if not provided)
+ * @param _caps - Unused; kept so existing callers need not change
  */
-export function convertColorForTerminal(hex: string, caps?: TerminalCapabilities): string {
-  const termCaps = caps ?? TERMINAL_CAPABILITIES
-  if (termCaps.supportsTrueColor) {
-    return hex
-  }
-  const idx = hexTo256Color(hex)
-  return `ansi256:${idx}`
+export function convertColorForTerminal(hex: string, _caps?: TerminalCapabilities): string {
+  return hex
 }
 
 /**
