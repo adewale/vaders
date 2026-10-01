@@ -20,7 +20,7 @@ import { DEFAULT_CONFIG, type GameState, type GameStatus } from './types'
  * 2. Add to this array
  * 3. TypeScript will error if the arrays don't match
  */
-export const ALL_GAME_STATUSES: readonly GameStatus[] = [
+export const ALL_GAME_STATUSES = [
   'waiting',
   'countdown',
   'wipe_exit',
@@ -28,10 +28,13 @@ export const ALL_GAME_STATUSES: readonly GameStatus[] = [
   'wipe_reveal',
   'playing',
   'game_over',
-] as const
+] as const satisfies readonly GameStatus[]
 
 // Type-level assertion: ALL_GAME_STATUSES must contain exactly all GameStatus values
-// If this line has a type error, the array is out of sync with the type
+// If this line has a type error, the array is out of sync with the type.
+// The array keeps its literal element types (`satisfies`, not a
+// `readonly GameStatus[]` annotation): with the annotation the element type is
+// always GameStatus, and this check passed even with a status missing.
 type StatusArrayType = (typeof ALL_GAME_STATUSES)[number]
 type StatusesMatch = StatusArrayType extends GameStatus ? (GameStatus extends StatusArrayType ? true : never) : never
 const _typeCheckStatuses: StatusesMatch = true
