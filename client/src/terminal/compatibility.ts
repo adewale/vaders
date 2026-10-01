@@ -758,10 +758,27 @@ export function isAudioSupported(): boolean {
 
 // ─── Color Conversion Utilities ─────────────────────────────────────────────
 
+const XTERM_CUBE_LEVELS = [0, 95, 135, 175, 215, 255]
+
+/** Hex value of an xterm 256-colour palette entry (16-255). */
+function xterm256ToHex(index: number): string {
+  let rgb: number[]
+  if (index >= 232) {
+    const gray = 8 + 10 * (index - 232)
+    rgb = [gray, gray, gray]
+  } else {
+    const i = index - 16
+    rgb = [XTERM_CUBE_LEVELS[Math.floor(i / 36)], XTERM_CUBE_LEVELS[Math.floor(i / 6) % 6], XTERM_CUBE_LEVELS[i % 6]]
+  }
+  return `#${rgb.map((v) => v.toString(16).padStart(2, '0')).join('')}`
+}
+
 /**
- * Convert a hex color to terminal-appropriate format string.
+ * Convert a hex color to a color string for OpenTUI `fg`/`bg` props.
  * - True color terminals: returns hex as-is (e.g., "#ff5555")
- * - 256-color terminals: returns "ansi256:N" format
+ * - 256-color terminals: returns the nearest 256-palette color, still as hex
+ *   (e.g., "#ff8787"). OpenTUI parses only hex and CSS names; anything else
+ *   (such as "ansi256:N") is drawn as magenta.
  *
  * @param hex - Hex color string
  * @param caps - Terminal capabilities (uses cached if not provided)
@@ -771,8 +788,7 @@ export function convertColorForTerminal(hex: string, caps?: TerminalCapabilities
   if (termCaps.supportsTrueColor) {
     return hex
   }
-  const idx = hexTo256Color(hex)
-  return `ansi256:${idx}`
+  return xterm256ToHex(hexTo256Color(hex))
 }
 
 /**

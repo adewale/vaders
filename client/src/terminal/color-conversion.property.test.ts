@@ -1,9 +1,10 @@
 // client/src/terminal/color-conversion.property.test.ts
 // Property-based tests for color conversion functions
 
-import { describe, it, expect } from 'bun:test'
+import { describe, it, expect, spyOn } from 'bun:test'
+import { parseColor } from '@opentui/core'
 import fc from 'fast-check'
-import { hexTo256Color, hexTo16Color, convertColorForTerminal } from './index'
+import { hexTo256Color, hexTo16Color, convertColorForTerminal, type TerminalCapabilities } from './index'
 
 // Arbitrary for valid hex color strings (#rrggbb)
 const arbHexColor = fc
@@ -107,16 +108,31 @@ describe('convertColorForTerminal (property-based)', () => {
     )
   })
 
-  it('256-color terminals produce ansi256:N format with valid N', () => {
-    const caps256 = { supportsTrueColor: false } as any
-    fc.assert(
-      fc.property(arbHexColor, (hex) => {
-        const result = convertColorForTerminal(hex, caps256)
-        expect(result).toMatch(/^ansi256:\d+$/)
-        const n = Number.parseInt(result.split(':')[1], 10)
-        expect(n).toBeGreaterThanOrEqual(16)
-        expect(n).toBeLessThanOrEqual(255)
-      }),
-    )
+  it('256-color terminals get the nearest xterm palette colour as hex', () => {
+    // Expected values are xterm 256-colour palette entries (cube levels
+    // 0,95,135,175,215,255; greys 8+10n): 51, 210, 24 and grey 244.
+    const caps256 = { supportsTrueColor: false } as TerminalCapabilities
+    expect(convertColorForTerminal('#00ffff', caps256)).toBe('#00ffff')
+    expect(convertColorForTerminal('#ff5555', caps256)).toBe('#ff8787')
+    expect(convertColorForTerminal('#123456', caps256)).toBe('#005f87')
+    expect(convertColorForTerminal('#808080', caps256)).toBe('#808080')
+  })
+
+  it('256-color output is a colour OpenTUI can draw (no magenta fallback)', () => {
+    // OpenTUI parses every fg/bg string with parseColor, which accepts hex and
+    // CSS names only and draws anything else as magenta with a console warning.
+    const caps256 = { supportsTrueColor: false } as TerminalCapabilities
+    const warn = spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      fc.assert(
+        fc.property(arbHexColor, (hex) => {
+          warn.mockClear()
+          parseColor(convertColorForTerminal(hex, caps256))
+          expect(warn).not.toHaveBeenCalled()
+        }),
+      )
+    } finally {
+      warn.mockRestore()
+    }
   })
 })
