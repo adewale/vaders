@@ -1562,3 +1562,27 @@ seam.
 framework can see its preconditions. Do not generate an opaque array and skip
 invalid operations in a private loop; adapt the domain commands to the model
 runner so the minimized counterexample remains a valid multiplayer journey.**
+
+### Adversarial review: accepted commands need independent postconditions
+
+Exposing a precondition is not enough if the command then copies the server's
+answer into the model. The ready, unready, solo-start, forfeit and leave commands did
+that: silently dropping any of those admissible operations still passed the
+adapter's invariant bank and changed which later commands were eligible.
+Instance-local fault injection reproduced all five blind spots. The commands
+now predict their lobby/match transition and readiness changes before observing
+the server, and reject a missing effect rather than learning it as the expected
+answer. Fault-injection regressions verify that those checks remain effective.
+Independent second review found another permissive seam: an alarm that erased
+an occupied lobby was treated as normal cleanup. Reject that disappearance
+before deleting the model room; retain valid empty-room cleanup and the distinct
+active-game heartbeat-reap path. Clean leave and unclean disconnect grace must
+not be conflated.
+
+Reachability matters too: the opening wipes take 90 ticks, while generated time
+commands advanced only 1–3. Include a 90-tick step as well as short steps, and
+keep explicit adapter journeys for gameplay and empty-room cleanup/recreation.
+For ordinary gameplay, SQL contains the last persisted checkpoint, not every
+tick's live state; movement and shooting assertions should inspect the actual
+broadcast sync. This remains a sequential, mocked-Durable-Object suite, not
+evidence about concurrent requests or real workerd scheduling.

@@ -692,12 +692,17 @@ const ReadyCommand = (roomIdx: number, playerIdx: number): Command => ({
       throw new Error('Ready ran after its precondition became false')
     }
     const { code, room, player } = target
+    const expectedStatus =
+      room.players.size >= 2 && Array.from(room.players.values()).every((p) => p.id === player.id || p.ready)
+        ? 'countdown'
+        : 'waiting'
     await ctx.real.sendAs(player.id, { type: 'ready' })
     const realState = ctx.real.getState(code)
-    if (realState) {
-      player.ready = realState.readyPlayerIds.includes(player.id)
-      room.status = realState.status
+    if (!realState?.readyPlayerIds.includes(player.id) || realState.status !== expectedStatus) {
+      throw new Error('Ready postcondition failed: expected ready player and the model-predicted lobby status')
     }
+    player.ready = true
+    room.status = expectedStatus
   },
   toString: () => `Ready(room=${roomIdx},player=${playerIdx})`,
 })
@@ -707,27 +712,22 @@ const UnreadyCommand = (roomIdx: number, playerIdx: number): Command => ({
   check: (model) => {
     const target = pickPlayerTarget(model, roomIdx, playerIdx)
     return (
-      target !== null &&
-      (target.room.status === 'waiting' || target.room.status === 'countdown') &&
-      target.player.ready
+      target !== null && (target.room.status === 'waiting' || target.room.status === 'countdown') && target.player.ready
     )
   },
   run: async (ctx) => {
     const target = pickPlayerTarget(ctx.model, roomIdx, playerIdx)
-    if (
-      !target ||
-      (target.room.status !== 'waiting' && target.room.status !== 'countdown') ||
-      !target.player.ready
-    ) {
+    if (!target || (target.room.status !== 'waiting' && target.room.status !== 'countdown') || !target.player.ready) {
       throw new Error('Unready ran after its precondition became false')
     }
     const { code, room, player } = target
     await ctx.real.sendAs(player.id, { type: 'unready' })
     const realState = ctx.real.getState(code)
-    if (realState) {
-      player.ready = realState.readyPlayerIds.includes(player.id)
-      room.status = realState.status
+    if (!realState || realState.readyPlayerIds.includes(player.id) || realState.status !== 'waiting') {
+      throw new Error('Unready postcondition failed: expected unready player and cancelled countdown')
     }
+    player.ready = false
+    room.status = 'waiting'
   },
   toString: () => `Unready(room=${roomIdx},player=${playerIdx})`,
 })
@@ -746,7 +746,11 @@ const StartSoloCommand = (roomIdx: number, playerIdx: number): Command => ({
     const { code, room, player } = target
     await ctx.real.sendAs(player.id, { type: 'start_solo' })
     const realState = ctx.real.getState(code)
-    if (realState) room.status = realState.status
+    if (realState?.status !== 'wipe_hold' || realState.readyPlayerIds.length !== 0) {
+      throw new Error('StartSolo postcondition failed: expected a new match in wipe_hold with readiness reset')
+    }
+    room.status = 'wipe_hold'
+    for (const p of room.players.values()) p.ready = false
   },
   toString: () => `StartSolo(room=${roomIdx},player=${playerIdx})`,
 })
@@ -755,9 +759,7 @@ const StartSoloCommand = (roomIdx: number, playerIdx: number): Command => ({
 const ForfeitCommand = (roomIdx: number, playerIdx: number): Command => ({
   check: (model) => {
     const target = pickPlayerTarget(model, roomIdx, playerIdx)
-    return (
-      target !== null && ['playing', 'wipe_exit', 'wipe_hold', 'wipe_reveal'].includes(target.room.status)
-    )
+    return target !== null && ['playing', 'wipe_exit', 'wipe_hold', 'wipe_reveal'].includes(target.room.status)
   },
   run: async (ctx) => {
     const target = pickPlayerTarget(ctx.model, roomIdx, playerIdx)
@@ -767,7 +769,10 @@ const ForfeitCommand = (roomIdx: number, playerIdx: number): Command => ({
     const { code, room, player } = target
     await ctx.real.sendAs(player.id, { type: 'forfeit' })
     const realState = ctx.real.getState(code)
-    if (realState) room.status = realState.status
+    if (realState?.status !== 'game_over') {
+      throw new Error('Forfeit postcondition failed: expected game_over')
+    }
+    room.status = 'game_over'
   },
   toString: () => `Forfeit(room=${roomIdx},player=${playerIdx})`,
 })
@@ -814,12 +819,19 @@ const LeaveCommand = (roomIdx: number, playerIdx: number): Command => ({
     if (!target) throw new Error('Leave ran after its precondition became false')
     const { code, room, player } = target
     await ctx.real.leavePlayer(player.id)
-    room.players.delete(player.id)
     const realState = ctx.real.getState(code)
-    if (realState) {
-      room.status = realState.status
-      room.mode = realState.mode
+    // This command is a clean close, not the unclean-disconnect grace path.
+    if (
+      !realState ||
+      player.id in realState.players ||
+      ctx.real.playerWs.has(player.id) ||
+      ctx.real.playerRoom.has(player.id)
+    ) {
+      throw new Error('Leave postcondition failed: clean close must remove the player and connection')
     }
+    room.players.delete(player.id)
+    room.status = realState.status
+    room.mode = realState.mode
   },
   toString: () => `Leave(room=${roomIdx},player=${playerIdx})`,
 })
@@ -857,6 +869,10 @@ const AdvanceTickCommand = (roomIdx: number, ticks: number): Command => ({
     const target = pickRoomTarget(ctx.model, roomIdx)
     if (!target) throw new Error('AdvanceTick ran after its precondition became false')
     const { code, room } = target
+    // Waiting players are not heartbeat-reaped. A short countdown step also
+    // cannot exhaust the 2400-tick active-game idle grace period.
+    const mustRetainOccupiedLobby =
+      room.players.size > 0 && (room.status === 'waiting' || (room.status === 'countdown' && ticks <= 90))
     await ctx.real.advanceTicks(code, ticks)
     const realState = ctx.real.getState(code)
     if (realState) {
@@ -867,6 +883,9 @@ const AdvanceTickCommand = (roomIdx: number, ticks: number): Command => ({
         else p.ready = realState.readyPlayerIds.includes(pid)
       }
     } else {
+      if (mustRetainOccupiedLobby) {
+        throw new Error('AdvanceTick postcondition failed: occupied lobby disappeared')
+      }
       // A waiting room with no players is deleted by its alarm. Keep both
       // sides of the model aligned so future commands can create it afresh.
       ctx.model.rooms.delete(code)
@@ -881,7 +900,9 @@ const AdvanceTickCommand = (roomIdx: number, ticks: number): Command => ({
 // ============================================================================
 
 const smallInt = fc.integer({ min: 0, max: 5 })
-const tickCount = fc.integer({ min: 1, max: 3 })
+// Preserve short tick steps, but also reach the 45 + 45 tick opening wipes
+// without requiring 30–90 consecutive tick commands in a 60-command journey.
+const tickCount = fc.oneof(fc.integer({ min: 1, max: 3 }), fc.constant(90))
 const direction = fc.constantFrom<'left' | 'right'>('left', 'right')
 
 const commandArb = fc.oneof(
@@ -903,6 +924,107 @@ const commandArb = fc.oneof(
 // ============================================================================
 
 const ROOM_CODE_POOL = ['ROOM01', 'ROOM02', 'ROOM03', 'ROOM04', 'ROOM05', 'ROOM06']
+
+function makeCommandContext(): CmdCtx {
+  const model = new SystemModel()
+  return {
+    model,
+    real: new RealSystem(),
+    roomCodePool: ROOM_CODE_POOL,
+    roomCodesUsed: [],
+    nextName: () => model.nextPlayerName(),
+  }
+}
+
+describe('PBT: Command harness regressions', () => {
+  it.each([
+    'ready',
+    'unready',
+    'start_solo',
+    'forfeit',
+    'leave',
+  ] as const)('rejects a silently dropped admissible %s command', async (operation) => {
+    const ctx = makeCommandContext()
+    await new ModelCommand(CreateRoomCommand(0)).run(ctx.model, ctx)
+    await new ModelCommand(JoinRoomCommand(0)).run(ctx.model, ctx)
+    if (operation === 'unready') await new ModelCommand(ReadyCommand(0, 0)).run(ctx.model, ctx)
+    if (operation === 'forfeit') await new ModelCommand(StartSoloCommand(0, 0)).run(ctx.model, ctx)
+
+    const command = new ModelCommand(
+      operation === 'ready'
+        ? ReadyCommand(0, 0)
+        : operation === 'unready'
+          ? UnreadyCommand(0, 0)
+          : operation === 'start_solo'
+            ? StartSoloCommand(0, 0)
+            : operation === 'forfeit'
+              ? ForfeitCommand(0, 0)
+              : LeaveCommand(0, 0),
+    )
+    expect(command.check(ctx.model)).toBe(true)
+    // Fault injection stays in this isolated harness instance, not production.
+    if (operation === 'leave') vi.spyOn(ctx.real, 'leavePlayer').mockResolvedValue(undefined)
+    else vi.spyOn(ctx.real, 'sendAs').mockResolvedValue(undefined)
+    await expect(command.run(ctx.model, ctx)).rejects.toThrow('postcondition')
+  })
+
+  it('reaches gameplay through the command adapter and applies gameplay operations', async () => {
+    const ctx = makeCommandContext()
+    const commands = [CreateRoomCommand(0), JoinRoomCommand(0), StartSoloCommand(0, 0), AdvanceTickCommand(0, 90)]
+    for (const command of commands) {
+      const adapted = new ModelCommand(command)
+      expect(adapted.check(ctx.model)).toBe(true)
+      await adapted.run(ctx.model, ctx)
+    }
+    expect(ctx.real.getState('ROOM01')?.status).toBe('playing')
+    const player = pickPlayerTarget(ctx.model, 0, 0)!.player
+    const initialState = ctx.real.getState('ROOM01')!
+    const initialX = initialState.players[player.id]!.x
+    expect(initialState.players[player.id]!.lastShotTick).toBeLessThan(initialState.tick)
+    for (const command of [MoveCommand(0, 0, 'left'), ShootCommand(0, 0), AdvanceTickCommand(0, 1)]) {
+      const adapted = new ModelCommand(command)
+      expect(adapted.check(ctx.model)).toBe(true)
+      await adapted.run(ctx.model, ctx)
+    }
+    // Ordinary ticks need not persist SQL; observe the state actually broadcast
+    // to this player instead of asserting against the preceding checkpoint.
+    const sync = ctx.real
+      .getReceivedMessages(player.id)
+      .filter((message) => message.type === 'sync')
+      .at(-1)!
+    const state = sync.state
+    expect(state.players[player.id]!.x).toBe(initialX - 2)
+    // A spawned bullet can hit a barrier during the same tick. The cooldown
+    // stamp proves this player's shot was applied even when no bullet survives.
+    expect(state.players[player.id]!.lastShotTick).toBe(initialState.tick)
+    await new ModelCommand(ForfeitCommand(0, 0)).run(ctx.model, ctx)
+    expect(ctx.real.getState('ROOM01')?.status).toBe('game_over')
+  })
+
+  it('cleans up an empty room and can recreate and join it through the adapter', async () => {
+    const ctx = makeCommandContext()
+    for (const command of [CreateRoomCommand(0), AdvanceTickCommand(0, 1)]) {
+      await new ModelCommand(command).run(ctx.model, ctx)
+    }
+    expect(ctx.model.rooms.size).toBe(0)
+    expect(ctx.real.rooms.size).toBe(0)
+    expect(JoinRoomCommand(0).check(ctx.model)).toBe(false)
+    await new ModelCommand(CreateRoomCommand(0)).run(ctx.model, ctx)
+    expect(JoinRoomCommand(0).check(ctx.model)).toBe(true)
+    await new ModelCommand(JoinRoomCommand(0)).run(ctx.model, ctx)
+    expect(Object.keys(ctx.real.getState('ROOM01')!.players)).toHaveLength(1)
+  })
+
+  it('rejects an alarm that deletes an occupied lobby', async () => {
+    const ctx = makeCommandContext()
+    await new ModelCommand(CreateRoomCommand(0)).run(ctx.model, ctx)
+    await new ModelCommand(JoinRoomCommand(0)).run(ctx.model, ctx)
+    vi.spyOn(ctx.real, 'advanceTicks').mockImplementation(async (code) => {
+      ctx.real.rooms.get(code)!.ctx.storage.sql.exec('DELETE FROM game_state')
+    })
+    await expect(new ModelCommand(AdvanceTickCommand(0, 1)).run(ctx.model, ctx)).rejects.toThrow('postcondition')
+  })
+})
 
 describe('PBT: State Machine Invariants', () => {
   it('no invariants violated across arbitrary multiplayer journeys', async () => {
