@@ -21,6 +21,11 @@ CI now refuses server reuse and Vite uses strict-port startup. An occupied local
 port is an environment issue: verify on an isolated port rather than killing an
 unrelated process or retrying the timeout.
 
+The Vite-backed E2E lane only needs Wrangler's assets directory to exist;
+it does not serve its UI from the Worker. Create that directory without building
+another frontend bundle, so fresh CI checkouts do not duplicate the build job.
+This does not test the deployed Worker's bundled static assets.
+
 A multiplayer TUI Space Invaders clone with OpenTUI and Cloudflare Durable Objects.
 
 ---
