@@ -1,4 +1,6 @@
-// client/src/App.test.tsx
+// Manual-only: bun test ./client/src/App.render-check.tsx
+// This real-render check is intentionally outside Bun's automatic test glob
+// because it adds native-render CPU/time compared with the old source checks.
 // Which screen the TUI shows for each GameStatus, observed by rendering the
 // real <App> in OpenTUI's headless test renderer and reading the character
 // frame. Guards the "no flash" contract: during countdown and wipe_hold the

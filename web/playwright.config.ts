@@ -35,13 +35,13 @@ export default defineConfig({
           // below.
           command: '(test -d dist || bun run build) && cd ../worker && npx wrangler dev --port 8787',
           url: 'http://localhost:8787/health',
-          reuseExistingServer: true,
+          reuseExistingServer: !process.env.CI,
           timeout: 30000,
         },
         {
-          command: 'VITE_SERVER_URL=http://localhost:8787 npx vite --port 5173',
+          command: 'VITE_SERVER_URL=http://localhost:8787 npx vite --port 5173 --strictPort',
           url: 'http://localhost:5173',
-          reuseExistingServer: true,
+          reuseExistingServer: !process.env.CI,
           timeout: 15000,
         },
       ],

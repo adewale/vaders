@@ -20,7 +20,7 @@ import { DEFAULT_CONFIG, type GameState, type GameStatus } from './types'
  * 3. Add it to STATUS_RENDER_MAP below (also type-checked)
  * 4. TUI: add a case to the `switch (state.status)` in client/src/App.tsx
  *    (and to GameScreen.tsx if it is a wipe phase), then add its expected
- *    screen to EXPECTED_SCREEN in client/src/App.test.tsx (type-checked)
+ *    screen to EXPECTED_SCREEN in client/src/App.render-check.tsx (type-checked)
  * 5. Web: check the `state.status` branches in web/src/App.tsx
  */
 export const ALL_GAME_STATUSES = [
