@@ -47,6 +47,14 @@
   ],
   "author": "",
   "license": "MIT",
+  "overrides": {
+    "@babel/core": "7.29.7",
+    "baseline-browser-mapping": "2.11.28",
+    "browserslist": "4.29.3",
+    "rollup": "4.64.3",
+    "source-map-js": "1.2.2",
+    "undici": "7.29.1"
+  },
   "devDependencies": {
     "@biomejs/biome": "^2.3.14",
     "fast-check": "^4.5.3"
