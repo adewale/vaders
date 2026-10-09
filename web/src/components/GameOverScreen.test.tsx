@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
-import { pbtTimeout } from '../testing/pbt'
 import { render, screen, fireEvent, cleanup } from '@testing-library/react'
 import fc from 'fast-check'
 import { GameOverScreen } from './GameOverScreen'
@@ -409,7 +408,6 @@ describe('GameOverScreen - leaderboard', () => {
     expect(rows[0].getAttribute('data-rank')).toBe('1')
   })
 
-  const LEADERBOARD_RUNS = 50
   it('PBT: leaderboard is sorted desc and trophies go to all top-kill players', () => {
     fc.assert(
       fc.property(
@@ -469,9 +467,9 @@ describe('GameOverScreen - leaderboard', () => {
           }
         },
       ),
-      { numRuns: LEADERBOARD_RUNS },
+      { numRuns: 50 },
     )
-  }, pbtTimeout(LEADERBOARD_RUNS))
+  })
 })
 
 // ─── #12 Caption casing consistency ────────────────────────────────────────

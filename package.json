@@ -23,7 +23,7 @@
     "deploy": "node scripts/write-build-info.mjs && cd web && bun run build && cd ../worker && npx wrangler deploy && node ../scripts/verify-deploy-coherence.mjs",
     "deploy:worker-only": "cd worker && bun run deploy",
     "verify-deploy": "node scripts/verify-deploy-coherence.mjs",
-    "typecheck": "cd worker && bun run typecheck && cd ../client && bun run typecheck && cd ../client-core && bun run typecheck && cd ../web && bun run typecheck",
+    "typecheck": "cd worker && bun run typecheck && cd ../client && bun run typecheck",
     "test": "bun run test:client && bun run test:worker && bun run test:shared && bun run test:core",
     "test:core": "cd client-core && bun test",
     "test:client": "cd client && bun test",

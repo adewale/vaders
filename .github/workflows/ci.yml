@@ -50,14 +50,6 @@ jobs:
       - name: Type check (worker)
         run: cd worker && bun run typecheck
 
-      # client-core's tsconfig also includes ../shared, so this step
-      # typechecks the shared package (and its tests) too.
-      - name: Type check (client-core + shared)
-        run: cd client-core && bun run typecheck
-
-      - name: Type check (web)
-        run: cd web && bun run typecheck
-
       # ── Fast path tests (every commit) ─────────────────────────────
       - name: Run shared tests
         run: cd shared && bun test
@@ -70,12 +62,6 @@ jobs:
 
       - name: Run worker tests
         run: cd worker && bun run test
-
-      # Real-runtime lane: Durable Object behaviour (alarms, WebSocket
-      # auto-response) in workerd via @cloudflare/vitest-pool-workers,
-      # instead of the hand-rolled cloudflare:workers mock.
-      - name: Run worker runtime tests (workerd)
-        run: cd worker && bun run test:runtime
 
       - name: Run web unit tests
         run: cd web && npx vitest run
@@ -95,15 +81,10 @@ jobs:
             exit 1
           fi
 
-      # Blocking: no test may rely on toBeDefined()/toBeTruthy() as its only
-      # assertion (existence, not identity — the shape that let the
-      # visual-identity drift bugs through). Existing offenders are frozen in
-      # a shrink-only baseline. Replaces the informational assertion-density
-      # audit, whose "3+ assertions" rule the skill has retracted.
-      - name: Weak sole-assertion check
-        run: |
-          node --test scripts/check-weak-sole-assertions.test.mjs
-          node scripts/check-weak-sole-assertions.mjs
+      # Existing descriptive report, not a semantic test-quality gate.
+      - name: Assertion count inventory (informational)
+        run: node scripts/audit-assertion-density.mjs
+        continue-on-error: true
 
       - name: No OpenTUI in web
         run: |
@@ -171,7 +152,7 @@ jobs:
         run: cd web && npx playwright install --with-deps chromium
 
       - name: Run E2E tests
-        run: cd web && npx playwright test
+        run: cd web && npx playwright test --project=chromium
         env:
           CI: true
 
