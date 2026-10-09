@@ -239,6 +239,11 @@ class RealSystem {
     await this.getOrCreate(roomCode)
   }
 
+  /** Forget a cleaned-up room so a later create models a fresh DO instance. */
+  forgetRoom(roomCode: string): void {
+    this.rooms.delete(roomCode)
+  }
+
   /** Make a GET /find call to the matchmaker, mirroring the Worker endpoint. */
   async matchmakeFind(): Promise<string | null> {
     const response = await this.matchmaker.fetch(new Request('https://internal/find'))
@@ -554,9 +559,39 @@ interface CmdCtx {
 }
 
 interface Command {
-  check: (model: SystemModel) => boolean
+  check: (model: Readonly<SystemModel>) => boolean
   run: (ctx: CmdCtx) => Promise<void>
   toString: () => string
+}
+
+/**
+ * Adapts the journey commands to fast-check's model API.  Keeping the
+ * invariant bank in the adapter means it runs after every accepted command.
+ * asyncModelRun evaluates each command's check against the current model, and
+ * the command-aware shrinker can preserve those preconditions while reducing a
+ * failing journey.
+ */
+class ModelCommand implements fc.AsyncCommand<SystemModel, CmdCtx> {
+  constructor(private readonly command: Command) {}
+
+  check(model: Readonly<SystemModel>): boolean {
+    return this.command.check(model)
+  }
+
+  async run(model: SystemModel, real: CmdCtx): Promise<void> {
+    if (real.model !== model) throw new Error('model/context identity drifted')
+    await this.command.run(real)
+
+    const violations = [...assertInvariants(real.real), ...(await assertMatchmakerCrossConsistency(real.real))]
+    if (violations.length > 0) {
+      const violation = violations[0]!
+      throw new Error(`Invariant violated: ${violation.name}\n  ${violation.details}`)
+    }
+  }
+
+  toString(): string {
+    return this.command.toString()
+  }
 }
 
 function pickRoomFromModel(model: SystemModel, idx: number): string | null {
@@ -570,6 +605,24 @@ function pickPlayerFromRoom(room: ModelRoom | undefined, idx: number): ModelPlay
   const list = Array.from(room.players.values())
   if (list.length === 0) return null
   return list[idx % list.length]
+}
+
+function pickRoomTarget(model: SystemModel, roomIdx: number): { code: string; room: ModelRoom } | null {
+  const code = pickRoomFromModel(model, roomIdx)
+  if (!code) return null
+  const room = model.rooms.get(code)
+  return room ? { code, room } : null
+}
+
+function pickPlayerTarget(
+  model: SystemModel,
+  roomIdx: number,
+  playerIdx: number,
+): { code: string; room: ModelRoom; player: ModelPlayer } | null {
+  const target = pickRoomTarget(model, roomIdx)
+  if (!target) return null
+  const player = pickPlayerFromRoom(target.room, playerIdx)
+  return player ? { ...target, player } : null
 }
 
 // ─── CreateRoomCommand ──────────────────────────────────────────────────────
@@ -594,111 +647,148 @@ const CreateRoomCommand = (roomIdx: number): Command => ({
 
 // ─── JoinRoomCommand ────────────────────────────────────────────────────────
 const JoinRoomCommand = (roomIdx: number): Command => ({
-  check: (model) => model.rooms.size > 0,
+  check: (model) => {
+    const target = pickRoomTarget(model, roomIdx)
+    return target !== null && target.room.players.size < 4 && target.room.status === 'waiting'
+  },
   run: async (ctx) => {
-    const code = pickRoomFromModel(ctx.model, roomIdx)!
-    const room = ctx.model.rooms.get(code)!
-    // Only attempt if the server should accept: room not full, not in countdown.
-    if (room.players.size >= 4) return
-    if (room.status === 'countdown') return
+    const target = pickRoomTarget(ctx.model, roomIdx)
+    if (!target || target.room.players.size >= 4 || target.room.status !== 'waiting') {
+      throw new Error('JoinRoom ran after its precondition became false')
+    }
+    const { code, room } = target
 
     const name = ctx.nextName()
     const playerId = await ctx.real.joinRoom(code, name)
-    if (playerId) {
-      // Re-read canonical slot from server (trust the server, not our guess).
-      const realState = ctx.real.getState(code)
-      const serverPlayer = realState?.players[playerId]
-      if (!serverPlayer) return
-      room.players.set(playerId, {
-        id: playerId,
-        name,
-        slot: serverPlayer.slot,
-        ready: false,
-        ws: ctx.real.playerWs.get(playerId)!,
-      })
-      room.mode = room.players.size === 1 ? 'solo' : 'coop'
-      room.status = realState.status
-      room.open = room.status === 'waiting' && room.players.size < 4
-    }
+    if (!playerId) throw new Error('JoinRoom was admissible but the server rejected it')
+
+    // Re-read canonical slot from server (trust the server, not our guess).
+    const realState = ctx.real.getState(code)
+    const serverPlayer = realState?.players[playerId]
+    if (!serverPlayer) throw new Error('JoinRoom succeeded without a canonical server player')
+    room.players.set(playerId, {
+      id: playerId,
+      name,
+      slot: serverPlayer.slot,
+      ready: false,
+      ws: ctx.real.playerWs.get(playerId)!,
+    })
+    room.mode = room.players.size === 1 ? 'solo' : 'coop'
+    room.status = realState.status
+    room.open = room.status === 'waiting' && room.players.size < 4
   },
   toString: () => `JoinRoom(${roomIdx})`,
 })
 
 // ─── ReadyCommand ───────────────────────────────────────────────────────────
 const ReadyCommand = (roomIdx: number, playerIdx: number): Command => ({
-  check: (model) => model.rooms.size > 0 && Array.from(model.rooms.values()).some((r) => r.players.size > 0),
+  check: (model) => {
+    const target = pickPlayerTarget(model, roomIdx, playerIdx)
+    return target !== null && target.room.status === 'waiting' && !target.player.ready
+  },
   run: async (ctx) => {
-    const code = pickRoomFromModel(ctx.model, roomIdx)!
-    const room = ctx.model.rooms.get(code)!
-    const player = pickPlayerFromRoom(room, playerIdx)
-    if (!player) return
+    const target = pickPlayerTarget(ctx.model, roomIdx, playerIdx)
+    if (!target || target.room.status !== 'waiting' || target.player.ready) {
+      throw new Error('Ready ran after its precondition became false')
+    }
+    const { code, room, player } = target
+    const expectedStatus =
+      room.players.size >= 2 && Array.from(room.players.values()).every((p) => p.id === player.id || p.ready)
+        ? 'countdown'
+        : 'waiting'
     await ctx.real.sendAs(player.id, { type: 'ready' })
     const realState = ctx.real.getState(code)
-    if (realState) {
-      player.ready = realState.readyPlayerIds.includes(player.id)
-      room.status = realState.status
+    if (!realState?.readyPlayerIds.includes(player.id) || realState.status !== expectedStatus) {
+      throw new Error('Ready postcondition failed: expected ready player and the model-predicted lobby status')
     }
+    player.ready = true
+    room.status = expectedStatus
   },
   toString: () => `Ready(room=${roomIdx},player=${playerIdx})`,
 })
 
 // ─── UnreadyCommand ─────────────────────────────────────────────────────────
 const UnreadyCommand = (roomIdx: number, playerIdx: number): Command => ({
-  check: (model) => model.rooms.size > 0 && Array.from(model.rooms.values()).some((r) => r.players.size > 0),
+  check: (model) => {
+    const target = pickPlayerTarget(model, roomIdx, playerIdx)
+    return (
+      target !== null && (target.room.status === 'waiting' || target.room.status === 'countdown') && target.player.ready
+    )
+  },
   run: async (ctx) => {
-    const code = pickRoomFromModel(ctx.model, roomIdx)!
-    const room = ctx.model.rooms.get(code)!
-    const player = pickPlayerFromRoom(room, playerIdx)
-    if (!player) return
+    const target = pickPlayerTarget(ctx.model, roomIdx, playerIdx)
+    if (!target || (target.room.status !== 'waiting' && target.room.status !== 'countdown') || !target.player.ready) {
+      throw new Error('Unready ran after its precondition became false')
+    }
+    const { code, room, player } = target
     await ctx.real.sendAs(player.id, { type: 'unready' })
     const realState = ctx.real.getState(code)
-    if (realState) {
-      player.ready = realState.readyPlayerIds.includes(player.id)
-      room.status = realState.status
+    if (!realState || realState.readyPlayerIds.includes(player.id) || realState.status !== 'waiting') {
+      throw new Error('Unready postcondition failed: expected unready player and cancelled countdown')
     }
+    player.ready = false
+    room.status = 'waiting'
   },
   toString: () => `Unready(room=${roomIdx},player=${playerIdx})`,
 })
 
 // ─── StartSoloCommand ───────────────────────────────────────────────────────
 const StartSoloCommand = (roomIdx: number, playerIdx: number): Command => ({
-  check: (model) => model.rooms.size > 0 && Array.from(model.rooms.values()).some((r) => r.players.size === 1),
+  check: (model) => {
+    const target = pickPlayerTarget(model, roomIdx, playerIdx)
+    return target !== null && target.room.players.size === 1 && target.room.status === 'waiting'
+  },
   run: async (ctx) => {
-    const code = pickRoomFromModel(ctx.model, roomIdx)!
-    const room = ctx.model.rooms.get(code)!
-    const player = pickPlayerFromRoom(room, playerIdx)
-    if (!player) return
-    if (room.players.size !== 1) return
+    const target = pickPlayerTarget(ctx.model, roomIdx, playerIdx)
+    if (!target || target.room.players.size !== 1 || target.room.status !== 'waiting') {
+      throw new Error('StartSolo ran after its precondition became false')
+    }
+    const { code, room, player } = target
     await ctx.real.sendAs(player.id, { type: 'start_solo' })
     const realState = ctx.real.getState(code)
-    if (realState) room.status = realState.status
+    if (realState?.status !== 'wipe_hold' || realState.readyPlayerIds.length !== 0) {
+      throw new Error('StartSolo postcondition failed: expected a new match in wipe_hold with readiness reset')
+    }
+    room.status = 'wipe_hold'
+    for (const p of room.players.values()) p.ready = false
   },
   toString: () => `StartSolo(room=${roomIdx},player=${playerIdx})`,
 })
 
 // ─── ForfeitCommand ─────────────────────────────────────────────────────────
 const ForfeitCommand = (roomIdx: number, playerIdx: number): Command => ({
-  check: (model) => model.rooms.size > 0 && Array.from(model.rooms.values()).some((r) => r.players.size > 0),
+  check: (model) => {
+    const target = pickPlayerTarget(model, roomIdx, playerIdx)
+    return target !== null && ['playing', 'wipe_exit', 'wipe_hold', 'wipe_reveal'].includes(target.room.status)
+  },
   run: async (ctx) => {
-    const code = pickRoomFromModel(ctx.model, roomIdx)!
-    const room = ctx.model.rooms.get(code)!
-    const player = pickPlayerFromRoom(room, playerIdx)
-    if (!player) return
+    const target = pickPlayerTarget(ctx.model, roomIdx, playerIdx)
+    if (!target || !['playing', 'wipe_exit', 'wipe_hold', 'wipe_reveal'].includes(target.room.status)) {
+      throw new Error('Forfeit ran after its precondition became false')
+    }
+    const { code, room, player } = target
     await ctx.real.sendAs(player.id, { type: 'forfeit' })
     const realState = ctx.real.getState(code)
-    if (realState) room.status = realState.status
+    if (realState?.status !== 'game_over') {
+      throw new Error('Forfeit postcondition failed: expected game_over')
+    }
+    room.status = 'game_over'
   },
   toString: () => `Forfeit(room=${roomIdx},player=${playerIdx})`,
 })
 
 // ─── ShootCommand ───────────────────────────────────────────────────────────
 const ShootCommand = (roomIdx: number, playerIdx: number): Command => ({
-  check: (model) => model.rooms.size > 0 && Array.from(model.rooms.values()).some((r) => r.players.size > 0),
+  check: (model) => {
+    const target = pickPlayerTarget(model, roomIdx, playerIdx)
+    return target !== null && target.room.status === 'playing'
+  },
   run: async (ctx) => {
-    const code = pickRoomFromModel(ctx.model, roomIdx)!
-    const room = ctx.model.rooms.get(code)!
-    const player = pickPlayerFromRoom(room, playerIdx)
-    if (!player) return
+    const target = pickPlayerTarget(ctx.model, roomIdx, playerIdx)
+    if (!target || target.room.status !== 'playing') {
+      throw new Error('Shoot ran after its precondition became false')
+    }
+    const { player } = target
     await ctx.real.sendAs(player.id, { type: 'shoot' })
   },
   toString: () => `Shoot(room=${roomIdx},player=${playerIdx})`,
@@ -706,12 +796,16 @@ const ShootCommand = (roomIdx: number, playerIdx: number): Command => ({
 
 // ─── MoveCommand ────────────────────────────────────────────────────────────
 const MoveCommand = (roomIdx: number, playerIdx: number, direction: 'left' | 'right'): Command => ({
-  check: (model) => model.rooms.size > 0 && Array.from(model.rooms.values()).some((r) => r.players.size > 0),
+  check: (model) => {
+    const target = pickPlayerTarget(model, roomIdx, playerIdx)
+    return target !== null && (target.room.status === 'playing' || target.room.status === 'countdown')
+  },
   run: async (ctx) => {
-    const code = pickRoomFromModel(ctx.model, roomIdx)!
-    const room = ctx.model.rooms.get(code)!
-    const player = pickPlayerFromRoom(room, playerIdx)
-    if (!player) return
+    const target = pickPlayerTarget(ctx.model, roomIdx, playerIdx)
+    if (!target || (target.room.status !== 'playing' && target.room.status !== 'countdown')) {
+      throw new Error('Move ran after its precondition became false')
+    }
+    const { player } = target
     await ctx.real.sendAs(player.id, { type: 'move', direction })
   },
   toString: () => `Move(room=${roomIdx},player=${playerIdx},dir=${direction})`,
@@ -719,19 +813,25 @@ const MoveCommand = (roomIdx: number, playerIdx: number, direction: 'left' | 'ri
 
 // ─── LeaveCommand ───────────────────────────────────────────────────────────
 const LeaveCommand = (roomIdx: number, playerIdx: number): Command => ({
-  check: (model) => model.rooms.size > 0 && Array.from(model.rooms.values()).some((r) => r.players.size > 0),
+  check: (model) => pickPlayerTarget(model, roomIdx, playerIdx) !== null,
   run: async (ctx) => {
-    const code = pickRoomFromModel(ctx.model, roomIdx)!
-    const room = ctx.model.rooms.get(code)!
-    const player = pickPlayerFromRoom(room, playerIdx)
-    if (!player) return
+    const target = pickPlayerTarget(ctx.model, roomIdx, playerIdx)
+    if (!target) throw new Error('Leave ran after its precondition became false')
+    const { code, room, player } = target
     await ctx.real.leavePlayer(player.id)
-    room.players.delete(player.id)
     const realState = ctx.real.getState(code)
-    if (realState) {
-      room.status = realState.status
-      room.mode = realState.mode
+    // This command is a clean close, not the unclean-disconnect grace path.
+    if (
+      !realState ||
+      player.id in realState.players ||
+      ctx.real.playerWs.has(player.id) ||
+      ctx.real.playerRoom.has(player.id)
+    ) {
+      throw new Error('Leave postcondition failed: clean close must remove the player and connection')
     }
+    room.players.delete(player.id)
+    room.status = realState.status
+    room.mode = realState.mode
   },
   toString: () => `Leave(room=${roomIdx},player=${playerIdx})`,
 })
@@ -764,11 +864,16 @@ const MatchmakeCommand = (roomIdx: number): Command => ({
 
 // ─── AdvanceTickCommand ────────────────────────────────────────────────────
 const AdvanceTickCommand = (roomIdx: number, ticks: number): Command => ({
-  check: (model) => model.rooms.size > 0,
+  check: (model) => pickRoomTarget(model, roomIdx) !== null,
   run: async (ctx) => {
-    const code = pickRoomFromModel(ctx.model, roomIdx)!
+    const target = pickRoomTarget(ctx.model, roomIdx)
+    if (!target) throw new Error('AdvanceTick ran after its precondition became false')
+    const { code, room } = target
+    // Waiting players are not heartbeat-reaped. A short countdown step also
+    // cannot exhaust the 2400-tick active-game idle grace period.
+    const mustRetainOccupiedLobby =
+      room.players.size > 0 && (room.status === 'waiting' || (room.status === 'countdown' && ticks <= 90))
     await ctx.real.advanceTicks(code, ticks)
-    const room = ctx.model.rooms.get(code)!
     const realState = ctx.real.getState(code)
     if (realState) {
       room.status = realState.status
@@ -777,6 +882,14 @@ const AdvanceTickCommand = (roomIdx: number, ticks: number): Command => ({
         if (!(pid in realState.players)) room.players.delete(pid)
         else p.ready = realState.readyPlayerIds.includes(pid)
       }
+    } else {
+      if (mustRetainOccupiedLobby) {
+        throw new Error('AdvanceTick postcondition failed: occupied lobby disappeared')
+      }
+      // A waiting room with no players is deleted by its alarm. Keep both
+      // sides of the model aligned so future commands can create it afresh.
+      ctx.model.rooms.delete(code)
+      ctx.real.forgetRoom(code)
     }
   },
   toString: () => `AdvanceTick(room=${roomIdx},ticks=${ticks})`,
@@ -787,7 +900,9 @@ const AdvanceTickCommand = (roomIdx: number, ticks: number): Command => ({
 // ============================================================================
 
 const smallInt = fc.integer({ min: 0, max: 5 })
-const tickCount = fc.integer({ min: 1, max: 3 })
+// Preserve short tick steps, but also reach the 45 + 45 tick opening wipes
+// without requiring 30–90 consecutive tick commands in a 60-command journey.
+const tickCount = fc.oneof(fc.integer({ min: 1, max: 3 }), fc.constant(90))
 const direction = fc.constantFrom<'left' | 'right'>('left', 'right')
 
 const commandArb = fc.oneof(
@@ -804,51 +919,135 @@ const commandArb = fc.oneof(
   { weight: 2, arbitrary: fc.tuple(smallInt, tickCount).map(([r, t]) => AdvanceTickCommand(r, t)) },
 )
 
-async function runCommandSequence(commands: Command[], roomCodePool: string[]): Promise<InvariantViolation[]> {
-  const real = new RealSystem()
-  const model = new SystemModel()
-  const ctx: CmdCtx = {
-    model,
-    real,
-    roomCodePool,
-    roomCodesUsed: [],
-    nextName: () => model.nextPlayerName(),
-  }
-
-  const allViolations: InvariantViolation[] = []
-
-  for (const cmd of commands) {
-    if (!cmd.check(model)) continue
-    await cmd.run(ctx)
-    const v1 = assertInvariants(real)
-    const v2 = await assertMatchmakerCrossConsistency(real)
-    allViolations.push(...v1, ...v2)
-    if (allViolations.length > 0) {
-      // Short-circuit on first violation so shrinking gets a minimal case.
-      return allViolations
-    }
-  }
-
-  return allViolations
-}
-
 // ============================================================================
 // Properties
 // ============================================================================
 
 const ROOM_CODE_POOL = ['ROOM01', 'ROOM02', 'ROOM03', 'ROOM04', 'ROOM05', 'ROOM06']
 
+function makeCommandContext(): CmdCtx {
+  const model = new SystemModel()
+  return {
+    model,
+    real: new RealSystem(),
+    roomCodePool: ROOM_CODE_POOL,
+    roomCodesUsed: [],
+    nextName: () => model.nextPlayerName(),
+  }
+}
+
+describe('PBT: Command harness regressions', () => {
+  it.each([
+    'ready',
+    'unready',
+    'start_solo',
+    'forfeit',
+    'leave',
+  ] as const)('rejects a silently dropped admissible %s command', async (operation) => {
+    const ctx = makeCommandContext()
+    await new ModelCommand(CreateRoomCommand(0)).run(ctx.model, ctx)
+    await new ModelCommand(JoinRoomCommand(0)).run(ctx.model, ctx)
+    if (operation === 'unready') await new ModelCommand(ReadyCommand(0, 0)).run(ctx.model, ctx)
+    if (operation === 'forfeit') await new ModelCommand(StartSoloCommand(0, 0)).run(ctx.model, ctx)
+
+    const command = new ModelCommand(
+      operation === 'ready'
+        ? ReadyCommand(0, 0)
+        : operation === 'unready'
+          ? UnreadyCommand(0, 0)
+          : operation === 'start_solo'
+            ? StartSoloCommand(0, 0)
+            : operation === 'forfeit'
+              ? ForfeitCommand(0, 0)
+              : LeaveCommand(0, 0),
+    )
+    expect(command.check(ctx.model)).toBe(true)
+    // Fault injection stays in this isolated harness instance, not production.
+    if (operation === 'leave') vi.spyOn(ctx.real, 'leavePlayer').mockResolvedValue(undefined)
+    else vi.spyOn(ctx.real, 'sendAs').mockResolvedValue(undefined)
+    await expect(command.run(ctx.model, ctx)).rejects.toThrow('postcondition')
+  })
+
+  it('reaches gameplay through the command adapter and applies gameplay operations', async () => {
+    const ctx = makeCommandContext()
+    const commands = [CreateRoomCommand(0), JoinRoomCommand(0), StartSoloCommand(0, 0), AdvanceTickCommand(0, 90)]
+    for (const command of commands) {
+      const adapted = new ModelCommand(command)
+      expect(adapted.check(ctx.model)).toBe(true)
+      await adapted.run(ctx.model, ctx)
+    }
+    expect(ctx.real.getState('ROOM01')?.status).toBe('playing')
+    const player = pickPlayerTarget(ctx.model, 0, 0)!.player
+    const initialState = ctx.real.getState('ROOM01')!
+    const initialX = initialState.players[player.id]!.x
+    expect(initialState.players[player.id]!.lastShotTick).toBeLessThan(initialState.tick)
+    for (const command of [MoveCommand(0, 0, 'left'), ShootCommand(0, 0), AdvanceTickCommand(0, 1)]) {
+      const adapted = new ModelCommand(command)
+      expect(adapted.check(ctx.model)).toBe(true)
+      await adapted.run(ctx.model, ctx)
+    }
+    // Ordinary ticks need not persist SQL; observe the state actually broadcast
+    // to this player instead of asserting against the preceding checkpoint.
+    const sync = ctx.real
+      .getReceivedMessages(player.id)
+      .filter((message) => message.type === 'sync')
+      .at(-1)!
+    const state = sync.state
+    expect(state.players[player.id]!.x).toBe(initialX - 2)
+    // A spawned bullet can hit a barrier during the same tick. The cooldown
+    // stamp proves this player's shot was applied even when no bullet survives.
+    expect(state.players[player.id]!.lastShotTick).toBe(initialState.tick)
+    await new ModelCommand(ForfeitCommand(0, 0)).run(ctx.model, ctx)
+    expect(ctx.real.getState('ROOM01')?.status).toBe('game_over')
+  })
+
+  it('cleans up an empty room and can recreate and join it through the adapter', async () => {
+    const ctx = makeCommandContext()
+    for (const command of [CreateRoomCommand(0), AdvanceTickCommand(0, 1)]) {
+      await new ModelCommand(command).run(ctx.model, ctx)
+    }
+    expect(ctx.model.rooms.size).toBe(0)
+    expect(ctx.real.rooms.size).toBe(0)
+    expect(JoinRoomCommand(0).check(ctx.model)).toBe(false)
+    await new ModelCommand(CreateRoomCommand(0)).run(ctx.model, ctx)
+    expect(JoinRoomCommand(0).check(ctx.model)).toBe(true)
+    await new ModelCommand(JoinRoomCommand(0)).run(ctx.model, ctx)
+    expect(Object.keys(ctx.real.getState('ROOM01')!.players)).toHaveLength(1)
+  })
+
+  it('rejects an alarm that deletes an occupied lobby', async () => {
+    const ctx = makeCommandContext()
+    await new ModelCommand(CreateRoomCommand(0)).run(ctx.model, ctx)
+    await new ModelCommand(JoinRoomCommand(0)).run(ctx.model, ctx)
+    vi.spyOn(ctx.real, 'advanceTicks').mockImplementation(async (code) => {
+      ctx.real.rooms.get(code)!.ctx.storage.sql.exec('DELETE FROM game_state')
+    })
+    await expect(new ModelCommand(AdvanceTickCommand(0, 1)).run(ctx.model, ctx)).rejects.toThrow('postcondition')
+  })
+})
+
 describe('PBT: State Machine Invariants', () => {
   it('no invariants violated across arbitrary multiplayer journeys', async () => {
     await fc.assert(
-      fc.asyncProperty(fc.array(commandArb, { minLength: 1, maxLength: 60 }), async (commands) => {
-        const violations = await runCommandSequence(commands, ROOM_CODE_POOL)
-        if (violations.length > 0) {
-          // Pretty-print the first violation so shrunk reproducers are readable.
-          const v = violations[0]
-          throw new Error(`Invariant violated: ${v.name}\n  ${v.details}`)
-        }
-      }),
+      fc.asyncProperty(
+        fc.commands([commandArb.map((command) => new ModelCommand(command))], { maxCommands: 60 }),
+        async (commands) => {
+          const model = new SystemModel()
+          await fc.asyncModelRun(
+            () => ({
+              model,
+              real: {
+                model,
+                real: new RealSystem(),
+                roomCodePool: ROOM_CODE_POOL,
+                roomCodesUsed: [],
+                nextName: () => model.nextPlayerName(),
+              },
+            }),
+            commands,
+          )
+        },
+      ),
       { numRuns: 50, verbose: false },
     )
   }, 120_000)

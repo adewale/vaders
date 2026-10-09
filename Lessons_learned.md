@@ -1535,3 +1535,54 @@ Region (the edge colo) was stashed in `globalThis.CF_REGION` at the Worker entry
 ### The mock is still the list of untested assumptions
 
 Every one of these five fixes required widening the hand-rolled `cloudflare:workers` mock toward the real platform: `getAlarm` (min-merge), `setWebSocketAutoResponse` + `getWebSocketAutoResponseTimestamp`, `waitUntil`, and RPC method stubs on the bindings. That list — the methods the mock *didn't* have — is precisely the set of platform behaviours nothing was exercising. It reinforces §21's standing recommendation: a `vitest-pool-workers` (workerd) smoke suite would have made every one of these fixes testable against the real runtime instead of a mock we keep teaching, one incident at a time, what the platform already does.
+
+---
+
+## 23. Shrink Stateful Multiplayer Journeys Through Command Preconditions
+
+The multiplayer property already had the difficult pieces: a shadow model,
+commands for room/player/matchmaker lifecycles, and invariants checked after each
+operation. Its manual runner still generated an arbitrary command array, skipped
+commands whose preconditions failed, and then reported that filtered journey on
+failure. Fast-check could shrink the array, but it did not understand which
+commands were admissible at each state.
+
+Adapting the existing commands to `fc.AsyncCommand` lets `fc.asyncModelRun`
+evaluate each command's `check` against the current model, while command-aware
+shrinking preserves those preconditions as it reduces a failure. The checks must
+resolve the same selected room and player as `run`; a coarse “some room has a
+player” guard still hides target-specific no-ops. Time commands must also model
+lifecycle cleanup—for example, an alarm that deletes an empty room—before later
+preconditions are evaluated. The adapter retains the
+production model and cross-system invariant bank, while accepted join, ready,
+start, leave, disconnect, tick, and matchmaker transitions share one invariant
+seam.
+
+**The lesson: a stateful property is only command-aware when the property
+framework can see its preconditions. Do not generate an opaque array and skip
+invalid operations in a private loop; adapt the domain commands to the model
+runner so the minimized counterexample remains a valid multiplayer journey.**
+
+### Adversarial review: accepted commands need independent postconditions
+
+Exposing a precondition is not enough if the command then copies the server's
+answer into the model. The ready, unready, solo-start, forfeit and leave commands did
+that: silently dropping any of those admissible operations still passed the
+adapter's invariant bank and changed which later commands were eligible.
+Instance-local fault injection reproduced all five blind spots. The commands
+now predict their lobby/match transition and readiness changes before observing
+the server, and reject a missing effect rather than learning it as the expected
+answer. Fault-injection regressions verify that those checks remain effective.
+Independent second review found another permissive seam: an alarm that erased
+an occupied lobby was treated as normal cleanup. Reject that disappearance
+before deleting the model room; retain valid empty-room cleanup and the distinct
+active-game heartbeat-reap path. Clean leave and unclean disconnect grace must
+not be conflated.
+
+Reachability matters too: the opening wipes take 90 ticks, while generated time
+commands advanced only 1–3. Include a 90-tick step as well as short steps, and
+keep explicit adapter journeys for gameplay and empty-room cleanup/recreation.
+For ordinary gameplay, SQL contains the last persisted checkpoint, not every
+tick's live state; movement and shooting assertions should inspect the actual
+broadcast sync. This remains a sequential, mocked-Durable-Object suite, not
+evidence about concurrent requests or real workerd scheduling.
