@@ -1,0 +1,18 @@
+{
+  "generatedAt": "2026-10-09",
+  "generator": "OpenTUI 0.1.74 TextRenderable via createTestRenderer; captured native character/foreground buffers, exported to SVG and PNG using sharp 0.34.5",
+  "baseSHA": "962158914bcc4f00e074af08204c431861769b9c",
+  "colourFixSHA": "76b958ce424f51f73ff4bbd5a8c41ddd981f070c",
+  "source": "client/src/terminal/compatibility.ts; unchanged colour implementation on the final PR head",
+  "input": { "colors": ["#ffff00", "#00ffff", "#ff9900"], "supportsTrueColor": false, "width": 18, "height": 3 },
+  "inputSHA256": "51a86f108c76befb01bab197475d6213e53c82e33314ead580e69d51ba5b9211",
+  "nativeRGBBefore": [[255, 0, 255], [255, 0, 255], [255, 0, 255]],
+  "nativeRGBAfter": [[255, 255, 0], [0, 255, 255], [255, 153, 0]],
+  "checks": "Observed all three unsupported ansi256 inputs falling back to magenta on base, and all three requested RGB colours in the native head frame. Existing replacement colour property uses OpenTUI parseColor for arbitrary hex inputs.",
+  "pngSHA256": {
+    "before.png": "bffe979a18d30810cbc17a86f76a830930427d793f273f47521e2949d9b59836",
+    "after.png": "52da5a7b53fb75686b65680687d8f5c5a76d8dc32eec03369c9322b3d7741163"
+  },
+  "limitation": "A compact fg-input fixture, not a full gameplay screenshot; SVG/PNG use a monospace export font. Proves OpenTUI's native RGB result, not physical terminal true-colour capability or every animation frame.",
+  "independentCheck": "bun test client/src/terminal/color-conversion.property.test.ts"
+}

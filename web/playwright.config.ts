@@ -28,15 +28,19 @@ export default defineConfig({
     ? undefined
     : [
         {
-          command: 'cd ../worker && npx wrangler dev --port 8787',
+          // wrangler dev exits at startup when the worker's assets directory
+          // (../web/dist) is missing. Only its directory is needed: these
+          // tests load the UI from Vite and use the Worker for API/WebSockets.
+          // Avoid a duplicate frontend build on every fresh E2E checkout.
+          command: 'mkdir -p dist && cd ../worker && npx wrangler dev --port 8787',
           url: 'http://localhost:8787/health',
-          reuseExistingServer: true,
+          reuseExistingServer: !process.env.CI,
           timeout: 30000,
         },
         {
-          command: 'VITE_SERVER_URL=http://localhost:8787 npx vite --port 5173',
+          command: 'VITE_SERVER_URL=http://localhost:8787 npx vite --port 5173 --strictPort',
           url: 'http://localhost:5173',
-          reuseExistingServer: true,
+          reuseExistingServer: !process.env.CI,
           timeout: 15000,
         },
       ],

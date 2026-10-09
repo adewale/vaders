@@ -1,5 +1,31 @@
 # Lessons Learned: Building Vaders
 
+## October 2026: Rendering evidence without growing the recurring test budget
+
+Source searches and copied render switches cannot prove what OpenTUI draws. The manual
+`bun test ./client/src/App.render-check.tsx` check mounts the real App and samples
+its character frame for every game status and two transition journeys. It replaces
+the misleading source/helper tests as review evidence, but stays outside Bun's
+automatic test-name glob: native rendering measured about 0.5 seconds locally,
+versus a few milliseconds for the old checks. Under the current cost cap, do not
+add it to CI or the default suite. Sampled settled frames do not prove every
+intermediate animation frame or physical-terminal rendering.
+
+OpenTUI's actual colour parser is the right oracle for its fg/bg inputs:
+`ansi256:N` is unsupported and silently becomes magenta; returning the requested
+hex colour preserves the intended parser result. This does not create true-colour
+support in a terminal that lacks it.
+
+Local E2E must not accidentally reuse another app listening on the same port.
+CI now refuses server reuse and Vite uses strict-port startup. An occupied local
+port is an environment issue: verify on an isolated port rather than killing an
+unrelated process or retrying the timeout.
+
+The Vite-backed E2E lane only needs Wrangler's assets directory to exist;
+it does not serve its UI from the Worker. Create that directory without building
+another frontend bundle, so fresh CI checkouts do not duplicate the build job.
+This does not test the deployed Worker's bundled static assets.
+
 A multiplayer TUI Space Invaders clone with OpenTUI and Cloudflare Durable Objects.
 
 ---

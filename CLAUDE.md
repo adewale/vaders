@@ -105,6 +105,7 @@ bun run test                   # shared + client-core + client + worker
 bun test shared/               # Shared types, protocol, collision
 bun test client-core/          # Animation, connection, input, sprites
 bun test client/               # TUI components, hooks, terminal
+bun test ./client/src/App.render-check.tsx # Manual real-render check, not part of default suite
 cd web && npx vitest run       # Web adapters, renderer, contracts, routing
 cd worker && bun run test      # Worker, GameRoom, reducer, matchmaker
 
