@@ -1262,9 +1262,13 @@ Small, surgical edits with low ambiguity: do them yourself. Briefing cost > exec
 
 ### Assertion density
 
-Tests with one `expect()` are smoke tests dressed as behaviour tests. They prove the code path runs; they don't pin its output. A cyan glow and a magenta glow both satisfy `expect(cmds.find(c => c.kind === 'bullet-glow')).toBeDefined()`.
+One precise `expect()` can pin behaviour. An existence-only assertion may not: a cyan glow and a magenta glow both satisfy `expect(cmds.find(c => c.kind === 'bullet-glow')).toBeDefined()`.
 
-The skill (`.claude/skills/testing-best-practices`) calls for ≥3 meaningful assertions. Enforcement: `scripts/audit-assertion-density.mjs` scans every test file, counts `expect(` + `fc.assert(` (weighted ×3), reports the lowest-density tests. Informational in CI for now; can be flipped to blocking once the backlog drains.
+The skill (`.claude/skills/testing-best-practices`) originally called for ≥3 meaningful assertions and has retracted that rule. The existing `scripts/audit-assertion-density.mjs` remains informational: raw syntactic counts establish neither test quality nor behavioural coverage. A proposed replacement regex blocker falsely classified `expect(x).toBe('.toBeTruthy()')` as weak because it matched text inside the precise assertion. We dropped that new blocker and baseline instead of turning a heuristic into a mandatory gate. Review the behaviour asserted, not the count; no new recurring verification lane is needed for this correction.
+
+### Match browser selection to installation, without expanding the fleet
+
+The E2E workflow installed Chromium but invoked every configured browser. Select `--project=chromium` in that existing post-merge job; do not install extra browsers or add PR-time E2E to compensate. A fresh checkout also needs the assets boot fix in PR #12 before that job can start. Real-workerd lanes, extra workspace CI typechecks and longer PBT watchdogs remain deferred under the no-cost-growth constraint; local verification does not justify adding recurring lanes.
 
 ### Both-directions, always
 

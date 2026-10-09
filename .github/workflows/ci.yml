@@ -81,14 +81,8 @@ jobs:
             exit 1
           fi
 
-      # Assertion density audit — informational, not blocking. Reviewing the
-      # visual-identity audit showed several drift bugs survived review
-      # because their tests asserted existence but not identity (one-assert
-      # smoke tests). This step prints a report of low-density tests so
-      # teams can chip away at them; `continue-on-error: true` keeps CI
-      # green until the fleet is cleaned up, at which point we flip the
-      # gate by removing that flag.
-      - name: Assertion density audit (informational)
+      # Existing descriptive report, not a semantic test-quality gate.
+      - name: Assertion count inventory (informational)
         run: node scripts/audit-assertion-density.mjs
         continue-on-error: true
 
@@ -158,7 +152,7 @@ jobs:
         run: cd web && npx playwright install --with-deps chromium
 
       - name: Run E2E tests
-        run: cd web && npx playwright test
+        run: cd web && npx playwright test --project=chromium
         env:
           CI: true
 

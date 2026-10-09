@@ -1,27 +1,8 @@
 #!/usr/bin/env node
-// scripts/audit-assertion-density.mjs
-//
-// Report tests with fewer than 3 meaningful `expect(…)` calls.
-//
-// **Why this exists**: the testing-best-practices skill calls for ≥3
-// assertions per test. Reviewing the visual-identity audit turned up the
-// root cause of several missed bugs — tests that assert *existence* but
-// not *identity*. A one-assertion test like
-//
-//   it('renders a glow', () => {
-//     expect(cmds.find(c => c.kind === 'bullet-glow')).toBeDefined()
-//   })
-//
-// passes for any colour, any shape, any glow. It's a smoke test. Raising
-// assertion density forces tests to describe what SHOULD be present AND
-// what SHOULDN'T — both-directions, positive + negative — which is the
-// test shape that caught nothing when the bullet palette drifted to
-// single-colour across eleven rendering layers.
-//
-// This script is **non-blocking by default**. It prints a report of the
-// lowest-density test files so they can be upgraded over time. Pass
-// `--fail-under=N` to make it exit non-zero if any test has < N asserts
-// (CI gate).
+// Descriptive assertion-count inventory, not a semantic quality check.
+// One precise assertion can be sufficient; several weak assertions can still
+// prove nothing. Retained as the existing informational report, with no gate,
+// baseline, extra dependency, runtime lane or assertion-count requirement.
 
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
@@ -31,13 +12,10 @@ import { fileURLToPath } from 'node:url'
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')
 
-const FAIL_UNDER_FLAG = process.argv.find((a) => a.startsWith('--fail-under='))
-const FAIL_UNDER = FAIL_UNDER_FLAG ? Number.parseInt(FAIL_UNDER_FLAG.split('=')[1], 10) : 0
-const TARGET_DENSITY = 3
+const REPORT_COUNT_LIMIT = 3
 
 // Roots we audit. Intentionally excludes `client/` (TUI) and `worker/` for
-// this initial pass — once the skill's bar is met in web/client-core/shared
-// we'll expand.
+// this report. Its scope remains unchanged; it is not a quality bar.
 const SCAN_ROOTS = ['web/src', 'client-core/src', 'shared', 'scripts']
 
 // File patterns considered test files.
@@ -83,15 +61,12 @@ function extractTests(source) {
       if (depth === 0) break
     }
     const body = source.slice(match.index + match[0].length, i)
-    // Count `expect(` calls + property-based entry points. A PBT's
-    // boolean return from `fc.property` IS its assertion, so `fc.assert(`
-    // counts as 3 effective assertions (typically a PBT exercises many
-    // inputs and verifies multiple conditions per run). This matches the
-    // density policy described in the skill's PBT guidance.
+    // Raw syntactic counts are descriptive only. A property assertion is
+    // counted once, not given an arbitrary quality weight.
     const expectCount = (body.match(/\bexpect\s*\(/g) ?? []).length
     const pbtCount = (body.match(/\bfc\.assert\s*\(/g) ?? []).length
     const bareAssert = (body.match(/\b(?:assert|expect\.soft)\s*\(/g) ?? []).length
-    const asserts = expectCount + pbtCount * 3 + bareAssert
+    const asserts = expectCount + pbtCount + bareAssert
     tests.push({ name, asserts })
   }
   return tests
@@ -109,7 +84,7 @@ for (const rel of SCAN_ROOTS) {
     const source = readFileSync(file, 'utf8')
     const tests = extractTests(source)
     for (const t of tests) {
-      if (t.asserts < TARGET_DENSITY) {
+      if (t.asserts < REPORT_COUNT_LIMIT) {
         findings.push({ file: relative(root, file), name: t.name, asserts: t.asserts })
       }
     }
@@ -122,9 +97,9 @@ const total = findings.length
 const distribution = [0, 0, 0]
 for (const f of findings) distribution[Math.min(2, f.asserts)]++
 
-console.log(`assertion density audit — target ≥ ${TARGET_DENSITY} expect() per test`)
+console.log(`assertion-count inventory (informational only; counts do not establish test quality)`)
 console.log(`scope: ${SCAN_ROOTS.join(', ')}`)
-console.log(`low-density tests found: ${total}`)
+console.log(`tests with fewer than ${REPORT_COUNT_LIMIT} syntactic assertions: ${total}`)
 console.log(`  0 assertions : ${distribution[0]}`)
 console.log(`  1 assertion  : ${distribution[1]}`)
 console.log(`  2 assertions : ${distribution[2]}`)
@@ -138,15 +113,5 @@ if (findings.length > 0) {
   }
   if (findings.length > HEAD) {
     console.log(`  … and ${findings.length - HEAD} more`)
-  }
-}
-
-// Non-blocking by default. Opt in via --fail-under=N.
-let failed = 0
-if (FAIL_UNDER > 0) {
-  failed = findings.filter((f) => f.asserts < FAIL_UNDER).length
-  if (failed > 0) {
-    console.error(`\nFAIL: ${failed} tests below --fail-under=${FAIL_UNDER}`)
-    process.exit(1)
   }
 }

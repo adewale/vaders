@@ -45,7 +45,7 @@ describe('toRenderPosition (property-based)', () => {
   })
 
   it('halfBlock is always one of the valid block characters (Unicode)', () => {
-    const validBlocks = new Set([HALF_BLOCKS.full, HALF_BLOCKS.right, HALF_BLOCKS.empty])
+    const validBlocks = new Set<string>([HALF_BLOCKS.full, HALF_BLOCKS.right, HALF_BLOCKS.empty])
     fc.assert(
       fc.property(arbSubPosition, arbSubPosition, (vx, vy) => {
         const pos = toRenderPosition(vx, vy, false)
@@ -55,7 +55,7 @@ describe('toRenderPosition (property-based)', () => {
   })
 
   it('halfBlock is always one of the valid block characters (ASCII)', () => {
-    const validBlocks = new Set([HALF_BLOCKS_ASCII.full, HALF_BLOCKS_ASCII.right, HALF_BLOCKS_ASCII.empty])
+    const validBlocks = new Set<string>([HALF_BLOCKS_ASCII.full, HALF_BLOCKS_ASCII.right, HALF_BLOCKS_ASCII.empty])
     fc.assert(
       fc.property(arbSubPosition, arbSubPosition, (vx, vy) => {
         const pos = toRenderPosition(vx, vy, true)

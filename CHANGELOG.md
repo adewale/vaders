@@ -2,6 +2,14 @@
 
 All notable changes to Vaders are documented in this file.
 
+## [Unreleased]
+
+### Changed (verification)
+
+- **Client-core can be typechecked locally** — its missing `@types/bun` declaration dependency is now explicit, and two interpolation-property Set declarations accept the renderer's string-valued output. Additional CI typecheck/runtime lanes and larger test timeouts are deferred to avoid increasing recurring cost.
+- **Web E2E uses only the browser installed by CI** — the existing post-merge job explicitly selects Chromium rather than also attempting Firefox and WebKit.
+- **Assertion counts are descriptive, not a quality requirement** — the existing informational inventory no longer claims "3+ assertions" proves test quality or gives property assertions an arbitrary weight. The proposed regex blocker/baseline was dropped after adversarial review found false positives for precise assertions.
+
 ## [1.2.0] — 2026-06-10
 
 A deep-audit hardening pass. Every fix below shipped test-first (red → green) with
