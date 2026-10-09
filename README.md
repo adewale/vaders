@@ -31,7 +31,7 @@ bun install
 bun run vaders
 ```
 
-Requires [Bun](https://bun.sh), a terminal at least 120×36, and macOS (`afplay`) or Linux (`aplay`) for audio.
+Requires [Bun](https://bun.sh) 1.4.2 or newer, a terminal at least 120×36, and macOS (`afplay`) or Linux (`aplay`) for audio. The nested compatible security overrides use lockfile v3, which older Bun releases cannot read.
 
 ### Browser support
 

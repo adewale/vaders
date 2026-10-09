@@ -3,6 +3,9 @@
   "version": "1.2.0",
   "description": "Multiplayer TUI Space Invaders clone (1-4 players) using OpenTUI and Cloudflare Durable Objects",
   "type": "module",
+  "engines": {
+    "bun": ">=1.4.2"
+  },
   "bin": {
     "vaders": "./bin/vaders.ts"
   },
@@ -53,7 +56,15 @@
     "browserslist": "4.29.3",
     "rollup": "4.64.3",
     "source-map-js": "1.2.2",
-    "undici": "7.29.1"
+    "undici": "7.29.1",
+    "diff": "8.0.4",
+    "jimp": "1.6.1",
+    "shell-quote": "1.12.0",
+    "ws": "8.21.0",
+    "react-devtools-core": {
+      ".": "7.0.1",
+      "ws": "7.5.11"
+    }
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.14",
