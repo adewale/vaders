@@ -1,7 +1,7 @@
 // worker/src/game/scaling.ts
 // Player count scaling logic
 
-import type { GameConfig, ScaledConfig, GameState } from '../../../shared/types'
+import type { DifficultyConfig, GameConfig, ScaledConfig, GameState } from '../../../shared/types'
 import {
   LAYOUT,
   ALIEN_MOVE_STEP,
@@ -11,26 +11,35 @@ import {
   applyPlayerInput,
 } from '../../../shared/types'
 
-export function getScaledConfig(playerCount: number, baseConfig: GameConfig): ScaledConfig {
-  // Scaling table per player count. shootMult is applied to baseAlienShootRate
-  // from GameConfig so the base probability is configurable rather than hardcoded.
-  const scaleTable = {
-    1: { speedMult: 1.0, shootMult: 1.0, cols: 11, rows: 5 }, // base rate
-    2: { speedMult: 1.25, shootMult: 1.5, cols: 11, rows: 5 }, // 50% more shooting
-    3: { speedMult: 1.5, shootMult: 2.0, cols: 13, rows: 5 }, // 2x shooting
-    4: { speedMult: 1.75, shootMult: 2.5, cols: 13, rows: 6 }, // 2.5x shooting
-  }
-  const scale = scaleTable[playerCount as keyof typeof scaleTable] ?? scaleTable[1]
+/**
+ * Resolve the effective game parameters for a player count and wave from a
+ * DifficultyConfig document (see specs/difficulty-tuning-spec.md §2.3).
+ *
+ * Wave ramp (no-op with DEFAULT_DIFFICULTY's all-zero waveRamp):
+ *   speedMult(wave) = speedMult * (1 + speedPctPerWave * (min(wave, maxWaveForRamp) - 1))
+ *   shootMult(wave) = shootMult * (1 + shootPctPerWave * (min(wave, maxWaveForRamp) - 1))
+ */
+export function getScaledConfig(playerCount: number, wave: number, difficulty: DifficultyConfig): ScaledConfig {
+  // Out-of-range player counts (0, 5, …) fall back to the 1-player entry,
+  // matching the old hardcoded table's `?? scaleTable[1]` behavior.
+  const entry = difficulty.perPlayerCount[playerCount as 1 | 2 | 3 | 4] ?? difficulty.perPlayerCount[1]
 
-  // Use baseAlienShootRate from config as the base, scaled by player count
-  const shootProbability = baseConfig.baseAlienShootRate * scale.shootMult
+  const { speedPctPerWave, shootPctPerWave, maxWaveForRamp } = difficulty.waveRamp
+  const rampWaves = Math.min(wave, maxWaveForRamp) - 1
+  const speedMult = entry.speedMult * (1 + speedPctPerWave * rampWaves)
+  const shootMult = entry.shootMult * (1 + shootPctPerWave * rampWaves)
+
+  // The game's lives mechanics are a shared pool; 'per-player' mode just
+  // sizes the pool proportionally to player count.
+  const lives = difficulty.livesMode === 'per-player' ? entry.lives * playerCount : entry.lives
 
   return {
-    alienMoveIntervalTicks: Math.floor(baseConfig.baseAlienMoveIntervalTicks / scale.speedMult),
-    alienShootProbability: shootProbability, // ~0.016 to 0.040 per tick
-    alienCols: scale.cols,
-    alienRows: scale.rows,
-    lives: playerCount === 1 ? 3 : 5,
+    alienMoveIntervalTicks: Math.max(1, Math.floor(difficulty.base.alienMoveIntervalTicks / speedMult)),
+    alienShootProbability: difficulty.base.alienShootRate * shootMult, // ~0.016 to 0.040 per tick (default)
+    alienCols: entry.cols,
+    alienRows: entry.rows,
+    lives,
+    barriers: entry.barriers,
   }
 }
 
@@ -53,7 +62,7 @@ export function getPlayerSpawnX(slot: number, playerCount: number, screenWidth: 
 // Does NOT validate full game loop - only tests basic movement physics
 export function tickMovementOnly(state: GameState, config: GameConfig): GameState {
   const playerCount = Object.keys(state.players).length
-  const scaled = getScaledConfig(playerCount, config)
+  const scaled = getScaledConfig(playerCount, state.wave, state.difficulty)
 
   // Clone state to avoid mutation
   const next = structuredClone(state)

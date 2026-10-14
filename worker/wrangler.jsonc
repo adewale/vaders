@@ -15,6 +15,16 @@
     "binding": "ASSETS",
     "not_found_handling": "single-page-application"
   },
+  // Difficulty override: DIFFICULTY_CONFIG is a JSON-serialized
+  // DifficultyConfig document (see shared/types.ts). When unset, games use
+  // DEFAULT_DIFFICULTY ("ship-v1") — no var needed for shipped behavior.
+  // Invalid values log `difficulty_config_invalid` and fall back to defaults.
+  // For the local playtest loop, prefer `.dev.vars`:
+  //   DIFFICULTY_CONFIG={"name":"flatter-multi-A","base":{...},"perPlayerCount":{...},"livesMode":"shared","waveRamp":{...}}
+  // then restart `wrangler dev`. Example production override:
+  // "vars": {
+  //   "DIFFICULTY_CONFIG": "{\"name\":\"flatter-multi-A\",\"base\":{\"alienShootRate\":0.016,\"alienMoveIntervalTicks\":18},\"perPlayerCount\":{\"1\":{\"speedMult\":1,\"shootMult\":1,\"cols\":11,\"rows\":5,\"lives\":3,\"barriers\":3},\"2\":{\"speedMult\":1.1,\"shootMult\":1.2,\"cols\":11,\"rows\":5,\"lives\":6,\"barriers\":4},\"3\":{\"speedMult\":1.2,\"shootMult\":1.4,\"cols\":13,\"rows\":5,\"lives\":9,\"barriers\":4},\"4\":{\"speedMult\":1.3,\"shootMult\":1.6,\"cols\":13,\"rows\":6,\"lives\":12,\"barriers\":4}},\"livesMode\":\"shared\",\"waveRamp\":{\"speedPctPerWave\":0.05,\"shootPctPerWave\":0.05,\"maxWaveForRamp\":8}}"
+  // },
   "durable_objects": {
     "bindings": [
       { "name": "GAME_ROOM", "class_name": "GameRoom" },

@@ -5,11 +5,13 @@ import { describe, it, expect } from 'vitest'
 import { gameReducer } from './reducer'
 import type { GameState } from '../../../shared/types'
 import { LAYOUT, DEFAULT_CONFIG, WIPE_TIMING, COUNTDOWN_SECONDS, getAliens, getBullets } from '../../../shared/types'
+import { getScaledConfig } from './scaling'
 import {
   createTestGameState,
   createTestPlayer,
   createTestAlien,
   createTestBullet,
+  createTestBarrier,
   createTestPlayingState,
   createTestGameStateWithPlayer,
   createTestGameStateWithPlayers,
@@ -380,6 +382,55 @@ describe('Wave Progression', () => {
     expect(waveCompleted).toBe(true)
   })
 
+  it('completes a full wave transition purely in the reducer (no shell involvement)', () => {
+    // Clearing the last alien must advance the wave, prune everything but
+    // barriers, and run the whole wipe cycle — including spawning the next
+    // formation — through gameReducer alone.
+    const { state } = createTestPlayingState(1, {
+      aliens: [createTestAlien('last-alien', 50, 10, { alive: false })],
+      bullets: [createTestBullet('stray-bullet', 30, 15, 'player-1', -1)],
+      barriers: [createTestBarrier('barrier-1', 40)],
+    })
+    state.alienShootingDisabled = true
+    state.alienDirection = -1 // Verify reset to 1 on wave transition
+    state.nextEntityId = 100
+
+    // Same tick as wave_complete: wave incremented, only barriers remain, wipe starts
+    const r = gameReducer(state, { type: 'TICK' })
+    expect(hasEvent(r.events, 'wave_complete')).toBe(true)
+    expect(getEventData<{ wave: number }>(r.events, 'wave_complete')?.wave).toBe(1)
+    expect(r.state.wave).toBe(2)
+    expect(r.state.status).toBe('wipe_exit')
+    expect(r.state.wipeTicksRemaining).toBe(WIPE_TIMING.EXIT_TICKS)
+    expect(r.state.wipeWaveNumber).toBe(2)
+    expect(r.state.alienDirection).toBe(1)
+    expect(r.state.entities).toHaveLength(1) // Bullets and dead aliens dropped
+    expect(r.state.entities[0]).toMatchObject({ kind: 'barrier', id: 'barrier-1' })
+
+    // Exit phase → hold (still no aliens)
+    const { state: afterExit } = runTicks(r.state, WIPE_TIMING.EXIT_TICKS)
+    expect(afterExit.status).toBe('wipe_hold')
+    expect(getAliens(afterExit.entities)).toHaveLength(0)
+
+    // Hold → reveal: a fresh formation exists, entering, with fresh entity ids
+    const { state: afterHold } = runTicks(afterExit, WIPE_TIMING.HOLD_TICKS)
+    expect(afterHold.status).toBe('wipe_reveal')
+    const aliens = getAliens(afterHold.entities)
+    const scaled = getScaledConfig(1, afterHold.wave, afterHold.difficulty)
+    expect(aliens).toHaveLength(scaled.alienCols * scaled.alienRows)
+    expect(aliens.every((a) => a.entering)).toBe(true)
+    expect(aliens.every((a) => a.alive)).toBe(true)
+    expect(aliens.every((a) => /^e_\d+$/.test(a.id))).toBe(true)
+    expect(new Set(aliens.map((a) => a.id)).size).toBe(aliens.length) // All ids unique
+    expect(afterHold.nextEntityId).toBe(100 + aliens.length) // Counter advanced in state
+
+    // Reveal → playing for wave 2
+    const { state: afterReveal } = runTicks(afterHold, WIPE_TIMING.REVEAL_TICKS)
+    expect(afterReveal.status).toBe('playing')
+    expect(afterReveal.wave).toBe(2)
+    expect(getAliens(afterReveal.entities).every((a) => a.entering === false)).toBe(true)
+  })
+
   it('score accumulates across multiple kills', () => {
     const { state, players } = createShootReadyState(1)
     const player = players[0]
@@ -439,8 +490,9 @@ describe('Wave Progression', () => {
 
     // Tick until second kill - also disable alien movement by setting a high move interval
     // so the alien doesn't drift away from the bullet during travel
+    // (the reducer reads this from the difficulty snapshot, not GameConfig)
     current = structuredClone(current)
-    current.config.baseAlienMoveIntervalTicks = 99999
+    current.difficulty.base.alienMoveIntervalTicks = 99999
 
     let secondKilled = false
     for (let i = 0; i < 30; i++) {
@@ -567,6 +619,38 @@ describe('Wipe Phase Transitions', () => {
     // Reveal phase
     const { state: afterReveal } = runTicks(afterHold, WIPE_TIMING.REVEAL_TICKS)
     expect(afterReveal.status).toBe('playing')
+  })
+})
+
+// ============================================================================
+// Determinism
+// ============================================================================
+
+describe('Reducer determinism', () => {
+  it('two identical initial states produce deep-equal states after 2000 ticks', () => {
+    // The reducer is the complete state machine (wave transitions, spawning,
+    // entity ids all in-state), so same seed → same game, tick for tick.
+    const makeStartedState = (): GameState => {
+      const { state } = createTestGameStateWithPlayer(
+        { id: 'p1', name: 'Determinist', x: 60 },
+        { rngSeed: 424242 },
+      )
+      return gameReducer(state, { type: 'START_SOLO' }).state
+    }
+
+    let a = makeStartedState()
+    let b = makeStartedState()
+    expect(a).toEqual(b)
+
+    for (let i = 0; i < 2000; i++) {
+      a = gameReducer(a, { type: 'TICK' }).state
+      b = gameReducer(b, { type: 'TICK' }).state
+    }
+
+    // The idle player deterministically loses (TICK is a no-op after
+    // game_over), so just require that the sim actually progressed.
+    expect(a.tick).toBeGreaterThan(100)
+    expect(a).toEqual(b)
   })
 })
 

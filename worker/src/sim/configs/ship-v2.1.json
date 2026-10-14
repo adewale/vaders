@@ -1,0 +1,47 @@
+{
+  "name": "ship-v2.1",
+  "base": {
+    "alienShootRate": 0.016,
+    "alienMoveIntervalTicks": 18
+  },
+  "perPlayerCount": {
+    "1": {
+      "speedMult": 1.0,
+      "shootMult": 1.0,
+      "cols": 11,
+      "rows": 5,
+      "lives": 3,
+      "barriers": 3
+    },
+    "2": {
+      "speedMult": 1.25,
+      "shootMult": 1.5,
+      "cols": 11,
+      "rows": 5,
+      "lives": 5,
+      "barriers": 4
+    },
+    "3": {
+      "speedMult": 1.5,
+      "shootMult": 2.0,
+      "cols": 11,
+      "rows": 5,
+      "lives": 5,
+      "barriers": 4
+    },
+    "4": {
+      "speedMult": 1.75,
+      "shootMult": 2.5,
+      "cols": 11,
+      "rows": 6,
+      "lives": 5,
+      "barriers": 4
+    }
+  },
+  "livesMode": "shared",
+  "waveRamp": {
+    "speedPctPerWave": 0.02,
+    "shootPctPerWave": 0.03,
+    "maxWaveForRamp": 10
+  }
+}

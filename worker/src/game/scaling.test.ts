@@ -3,180 +3,91 @@
 
 import { describe, it, expect } from 'vitest'
 import { getScaledConfig, getPlayerSpawnX } from './scaling'
-import { DEFAULT_CONFIG, STANDARD_WIDTH } from '../../../shared/types'
+import { DEFAULT_CONFIG, DEFAULT_DIFFICULTY, STANDARD_WIDTH, type DifficultyConfig } from '../../../shared/types'
 
 // ============================================================================
 // getScaledConfig Tests
 // ============================================================================
 
 describe('getScaledConfig', () => {
-  describe('1 player (solo) configuration', () => {
-    it('returns lives = 3', () => {
-      const scaled = getScaledConfig(1, DEFAULT_CONFIG)
-      expect(scaled.lives).toBe(3)
+  // GOLDEN TESTS (spec §2.4 / Gate 1): DEFAULT_DIFFICULTY must reproduce the
+  // pre-extraction hardcoded values bit-for-bit. Any drift here means the
+  // config refactor changed shipped behavior — that is a failure, not a tune.
+  describe('DEFAULT_DIFFICULTY reproduces shipped values (golden)', () => {
+    const golden = {
+      1: { alienMoveIntervalTicks: 18, shootMult: 1.0, alienCols: 11, alienRows: 5, lives: 3, barriers: 3 },
+      2: { alienMoveIntervalTicks: 14, shootMult: 1.5, alienCols: 11, alienRows: 5, lives: 5, barriers: 4 },
+      3: { alienMoveIntervalTicks: 12, shootMult: 2.0, alienCols: 13, alienRows: 5, lives: 5, barriers: 4 },
+      4: { alienMoveIntervalTicks: 10, shootMult: 2.5, alienCols: 13, alienRows: 6, lives: 5, barriers: 4 },
+    } as const
+
+    for (const playerCount of [1, 2, 3, 4] as const) {
+      it(`${playerCount} player(s): exact pre-refactor values`, () => {
+        const expected = golden[playerCount]
+        const scaled = getScaledConfig(playerCount, 1, DEFAULT_DIFFICULTY)
+
+        expect(scaled.alienMoveIntervalTicks).toBe(expected.alienMoveIntervalTicks)
+        // Exact equality: same floats, same multiplication as the old code
+        // (0.016 * shootMult), so this must be bit-identical — not toBeCloseTo.
+        expect(scaled.alienShootProbability).toBe(DEFAULT_CONFIG.baseAlienShootRate * expected.shootMult)
+        expect(scaled.alienCols).toBe(expected.alienCols)
+        expect(scaled.alienRows).toBe(expected.alienRows)
+        expect(scaled.lives).toBe(expected.lives)
+        expect(scaled.barriers).toBe(expected.barriers)
+      })
+    }
+
+    it('shoot probabilities are the documented 0.016 / 0.024 / 0.032 / 0.040 per tick', () => {
+      expect(getScaledConfig(1, 1, DEFAULT_DIFFICULTY).alienShootProbability).toBeCloseTo(0.016, 10)
+      expect(getScaledConfig(2, 1, DEFAULT_DIFFICULTY).alienShootProbability).toBeCloseTo(0.024, 10)
+      expect(getScaledConfig(3, 1, DEFAULT_DIFFICULTY).alienShootProbability).toBeCloseTo(0.032, 10)
+      expect(getScaledConfig(4, 1, DEFAULT_DIFFICULTY).alienShootProbability).toBeCloseTo(0.04, 10)
     })
 
-    it('returns speedMult = 1.0 (base alien move interval)', () => {
-      const scaled = getScaledConfig(1, DEFAULT_CONFIG)
-      // alienMoveIntervalTicks = floor(baseAlienMoveIntervalTicks / 1.0)
-      expect(scaled.alienMoveIntervalTicks).toBe(DEFAULT_CONFIG.baseAlienMoveIntervalTicks)
+    it('DEFAULT_DIFFICULTY base rates match DEFAULT_CONFIG base rates', () => {
+      expect(DEFAULT_DIFFICULTY.base.alienShootRate).toBe(DEFAULT_CONFIG.baseAlienShootRate)
+      expect(DEFAULT_DIFFICULTY.base.alienMoveIntervalTicks).toBe(DEFAULT_CONFIG.baseAlienMoveIntervalTicks)
     })
 
-    it('returns alienCols = 11', () => {
-      const scaled = getScaledConfig(1, DEFAULT_CONFIG)
-      expect(scaled.alienCols).toBe(11)
-    })
-
-    it('returns alienRows = 5', () => {
-      const scaled = getScaledConfig(1, DEFAULT_CONFIG)
-      expect(scaled.alienRows).toBe(5)
-    })
-
-    it('calculates alienShootProbability from baseAlienShootRate * 1.0 (solo)', () => {
-      const scaled = getScaledConfig(1, DEFAULT_CONFIG)
-      const expectedProbability = DEFAULT_CONFIG.baseAlienShootRate * 1.0
-      expect(scaled.alienShootProbability).toBeCloseTo(expectedProbability, 5)
-    })
-  })
-
-  describe('2 player configuration', () => {
-    it('returns lives = 5 (shared)', () => {
-      const scaled = getScaledConfig(2, DEFAULT_CONFIG)
-      expect(scaled.lives).toBe(5)
-    })
-
-    it('returns speedMult = 1.25 (faster alien move interval)', () => {
-      const scaled = getScaledConfig(2, DEFAULT_CONFIG)
-      // alienMoveIntervalTicks = floor(18 / 1.25) = floor(14.4) = 14
-      const expectedInterval = Math.floor(DEFAULT_CONFIG.baseAlienMoveIntervalTicks / 1.25)
-      expect(scaled.alienMoveIntervalTicks).toBe(expectedInterval)
-    })
-
-    it('returns alienCols = 11', () => {
-      const scaled = getScaledConfig(2, DEFAULT_CONFIG)
-      expect(scaled.alienCols).toBe(11)
-    })
-
-    it('returns alienRows = 5', () => {
-      const scaled = getScaledConfig(2, DEFAULT_CONFIG)
-      expect(scaled.alienRows).toBe(5)
-    })
-
-    it('calculates alienShootProbability from baseAlienShootRate * 1.5 (2 players)', () => {
-      const scaled = getScaledConfig(2, DEFAULT_CONFIG)
-      const expectedProbability = DEFAULT_CONFIG.baseAlienShootRate * 1.5
-      expect(scaled.alienShootProbability).toBeCloseTo(expectedProbability, 5)
-    })
-  })
-
-  describe('3 player configuration', () => {
-    it('returns lives = 5 (shared)', () => {
-      const scaled = getScaledConfig(3, DEFAULT_CONFIG)
-      expect(scaled.lives).toBe(5)
-    })
-
-    it('returns speedMult = 1.5 (faster alien move interval)', () => {
-      const scaled = getScaledConfig(3, DEFAULT_CONFIG)
-      // alienMoveIntervalTicks = floor(18 / 1.5) = floor(12) = 12
-      const expectedInterval = Math.floor(DEFAULT_CONFIG.baseAlienMoveIntervalTicks / 1.5)
-      expect(scaled.alienMoveIntervalTicks).toBe(expectedInterval)
-    })
-
-    it('returns alienCols = 13', () => {
-      const scaled = getScaledConfig(3, DEFAULT_CONFIG)
-      expect(scaled.alienCols).toBe(13)
-    })
-
-    it('returns alienRows = 5', () => {
-      const scaled = getScaledConfig(3, DEFAULT_CONFIG)
-      expect(scaled.alienRows).toBe(5)
-    })
-
-    it('calculates alienShootProbability from baseAlienShootRate * 2.0 (3 players)', () => {
-      const scaled = getScaledConfig(3, DEFAULT_CONFIG)
-      const expectedProbability = DEFAULT_CONFIG.baseAlienShootRate * 2.0
-      expect(scaled.alienShootProbability).toBeCloseTo(expectedProbability, 5)
-    })
-  })
-
-  describe('4 player configuration', () => {
-    it('returns lives = 5 (shared)', () => {
-      const scaled = getScaledConfig(4, DEFAULT_CONFIG)
-      expect(scaled.lives).toBe(5)
-    })
-
-    it('returns speedMult = 1.75 (fastest alien move interval)', () => {
-      const scaled = getScaledConfig(4, DEFAULT_CONFIG)
-      // alienMoveIntervalTicks = floor(18 / 1.75) = floor(10.28) = 10
-      const expectedInterval = Math.floor(DEFAULT_CONFIG.baseAlienMoveIntervalTicks / 1.75)
-      expect(scaled.alienMoveIntervalTicks).toBe(expectedInterval)
-    })
-
-    it('returns alienCols = 13', () => {
-      const scaled = getScaledConfig(4, DEFAULT_CONFIG)
-      expect(scaled.alienCols).toBe(13)
-    })
-
-    it('returns alienRows = 6', () => {
-      const scaled = getScaledConfig(4, DEFAULT_CONFIG)
-      expect(scaled.alienRows).toBe(6)
-    })
-
-    it('calculates alienShootProbability from baseAlienShootRate * 2.5 (4 players)', () => {
-      const scaled = getScaledConfig(4, DEFAULT_CONFIG)
-      const expectedProbability = DEFAULT_CONFIG.baseAlienShootRate * 2.5
-      expect(scaled.alienShootProbability).toBeCloseTo(expectedProbability, 5)
+    it('is named ship-v1 with shared lives and a zero wave ramp', () => {
+      expect(DEFAULT_DIFFICULTY.name).toBe('ship-v1')
+      expect(DEFAULT_DIFFICULTY.livesMode).toBe('shared')
+      expect(DEFAULT_DIFFICULTY.waveRamp).toEqual({ speedPctPerWave: 0, shootPctPerWave: 0, maxWaveForRamp: 8 })
     })
   })
 
   describe('edge cases', () => {
-    it('defaults to 1 player scale config for 0 players', () => {
-      const scaled = getScaledConfig(0, DEFAULT_CONFIG)
-      // Uses scaleTable[1] for cols/rows, but lives formula uses actual playerCount
-      // lives = playerCount === 1 ? 3 : 5 -> 0 !== 1 -> 5
-      expect(scaled.lives).toBe(5)
+    it('falls back to the 1-player entry for 0 players', () => {
+      const scaled = getScaledConfig(0, 1, DEFAULT_DIFFICULTY)
+      // Out-of-range counts use perPlayerCount[1] wholesale (the old code's
+      // `?? scaleTable[1]` fallback, now including lives from that entry).
+      expect(scaled.lives).toBe(3)
+      expect(scaled.alienCols).toBe(11)
+      expect(scaled.alienRows).toBe(5)
+      expect(scaled.alienMoveIntervalTicks).toBe(18)
+    })
+
+    it('falls back to the 1-player entry for invalid player count', () => {
+      const scaled = getScaledConfig(5, 1, DEFAULT_DIFFICULTY)
+      expect(scaled.lives).toBe(3)
       expect(scaled.alienCols).toBe(11)
       expect(scaled.alienRows).toBe(5)
     })
 
-    it('defaults to 1 player scale config for invalid player count', () => {
-      const scaled = getScaledConfig(5, DEFAULT_CONFIG)
-      // Uses scaleTable[1] for cols/rows, but lives formula uses actual playerCount
-      expect(scaled.lives).toBe(5)
+    it('falls back to the 1-player entry for negative player count', () => {
+      const scaled = getScaledConfig(-1, 1, DEFAULT_DIFFICULTY)
+      expect(scaled.lives).toBe(3)
       expect(scaled.alienCols).toBe(11)
       expect(scaled.alienRows).toBe(5)
-    })
-
-    it('defaults to 1 player scale config for negative player count', () => {
-      const scaled = getScaledConfig(-1, DEFAULT_CONFIG)
-      // Uses scaleTable[1] for cols/rows, but lives formula uses actual playerCount
-      expect(scaled.lives).toBe(5)
-      expect(scaled.alienCols).toBe(11)
-      expect(scaled.alienRows).toBe(5)
-    })
-  })
-
-  describe('alienMoveIntervalTicks calculation', () => {
-    it('correctly floors the result of division', () => {
-      // With baseAlienMoveIntervalTicks = 18:
-      // 1 player: 18 / 1.0 = 18
-      // 2 players: 18 / 1.25 = 14.4 -> 14
-      // 3 players: 18 / 1.5 = 12
-      // 4 players: 18 / 1.75 = 10.28 -> 10
-
-      expect(getScaledConfig(1, DEFAULT_CONFIG).alienMoveIntervalTicks).toBe(18)
-      expect(getScaledConfig(2, DEFAULT_CONFIG).alienMoveIntervalTicks).toBe(14)
-      expect(getScaledConfig(3, DEFAULT_CONFIG).alienMoveIntervalTicks).toBe(12)
-      expect(getScaledConfig(4, DEFAULT_CONFIG).alienMoveIntervalTicks).toBe(10)
     })
   })
 
   describe('alienShootProbability scaling', () => {
     it('increases monotonically with player count', () => {
-      const prob1 = getScaledConfig(1, DEFAULT_CONFIG).alienShootProbability
-      const prob2 = getScaledConfig(2, DEFAULT_CONFIG).alienShootProbability
-      const prob3 = getScaledConfig(3, DEFAULT_CONFIG).alienShootProbability
-      const prob4 = getScaledConfig(4, DEFAULT_CONFIG).alienShootProbability
+      const prob1 = getScaledConfig(1, 1, DEFAULT_DIFFICULTY).alienShootProbability
+      const prob2 = getScaledConfig(2, 1, DEFAULT_DIFFICULTY).alienShootProbability
+      const prob3 = getScaledConfig(3, 1, DEFAULT_DIFFICULTY).alienShootProbability
+      const prob4 = getScaledConfig(4, 1, DEFAULT_DIFFICULTY).alienShootProbability
 
       expect(prob2).toBeGreaterThan(prob1)
       expect(prob3).toBeGreaterThan(prob2)
@@ -185,9 +96,99 @@ describe('getScaledConfig', () => {
 
     it('stays within reasonable bounds (< 0.05 per tick)', () => {
       for (let i = 1; i <= 4; i++) {
-        const scaled = getScaledConfig(i, DEFAULT_CONFIG)
+        const scaled = getScaledConfig(i, 1, DEFAULT_DIFFICULTY)
         expect(scaled.alienShootProbability).toBeLessThan(0.05)
         expect(scaled.alienShootProbability).toBeGreaterThan(0)
+      }
+    })
+  })
+
+  describe('wave ramp', () => {
+    /** A copy of DEFAULT_DIFFICULTY with a non-zero ramp for the math tests. */
+    function rampedConfig(speedPctPerWave: number, shootPctPerWave: number, maxWaveForRamp: number): DifficultyConfig {
+      const config = structuredClone(DEFAULT_DIFFICULTY)
+      config.name = 'ramp-test'
+      config.waveRamp = { speedPctPerWave, shootPctPerWave, maxWaveForRamp }
+      return config
+    }
+
+    it('zero ramp (DEFAULT_DIFFICULTY): wave 5 is identical to wave 1', () => {
+      for (const playerCount of [1, 2, 3, 4]) {
+        expect(getScaledConfig(playerCount, 5, DEFAULT_DIFFICULTY)).toEqual(
+          getScaledConfig(playerCount, 1, DEFAULT_DIFFICULTY),
+        )
+      }
+    })
+
+    it('non-zero ramp: wave 1 applies no ramp (min(wave, cap) - 1 = 0)', () => {
+      const config = rampedConfig(0.1, 0.2, 8)
+      const scaled = getScaledConfig(1, 1, config)
+      expect(scaled.alienMoveIntervalTicks).toBe(18)
+      expect(scaled.alienShootProbability).toBeCloseTo(0.016, 10)
+    })
+
+    it('non-zero ramp: applies the documented formulas at wave 3', () => {
+      const config = rampedConfig(0.1, 0.2, 8)
+      const scaled = getScaledConfig(1, 3, config)
+      // speedMult(3) = 1.0 * (1 + 0.1 * 2) = 1.2 → floor(18 / 1.2) = 15
+      expect(scaled.alienMoveIntervalTicks).toBe(15)
+      // shootMult(3) = 1.0 * (1 + 0.2 * 2) = 1.4 → 0.016 * 1.4 = 0.0224
+      expect(scaled.alienShootProbability).toBeCloseTo(0.0224, 10)
+    })
+
+    it('non-zero ramp: compounds with the player-count multiplier', () => {
+      const config = rampedConfig(0.1, 0.2, 8)
+      const scaled = getScaledConfig(2, 3, config)
+      // speedMult(3) = 1.25 * 1.2 = 1.5 → floor(18 / 1.5) = 12
+      expect(scaled.alienMoveIntervalTicks).toBe(12)
+      // shootMult(3) = 1.5 * 1.4 = 2.1 → 0.016 * 2.1 = 0.0336
+      expect(scaled.alienShootProbability).toBeCloseTo(0.0336, 10)
+    })
+
+    it('ramp caps at maxWaveForRamp', () => {
+      const config = rampedConfig(0.1, 0.2, 4)
+      const atCap = getScaledConfig(1, 4, config)
+      expect(getScaledConfig(1, 5, config)).toEqual(atCap)
+      expect(getScaledConfig(1, 50, config)).toEqual(atCap)
+      // And the cap is genuinely harder than wave 1
+      expect(atCap.alienMoveIntervalTicks).toBeLessThan(getScaledConfig(1, 1, config).alienMoveIntervalTicks)
+      expect(atCap.alienShootProbability).toBeGreaterThan(getScaledConfig(1, 1, config).alienShootProbability)
+    })
+
+    it('alienMoveIntervalTicks never drops below 1, even with an extreme ramp', () => {
+      const config = rampedConfig(10, 0, 8)
+      const scaled = getScaledConfig(4, 8, config)
+      expect(scaled.alienMoveIntervalTicks).toBe(1)
+    })
+  })
+
+  describe('livesMode', () => {
+    it("'shared' uses the configured pool as-is", () => {
+      expect(getScaledConfig(1, 1, DEFAULT_DIFFICULTY).lives).toBe(3)
+      expect(getScaledConfig(2, 1, DEFAULT_DIFFICULTY).lives).toBe(5)
+      expect(getScaledConfig(3, 1, DEFAULT_DIFFICULTY).lives).toBe(5)
+      expect(getScaledConfig(4, 1, DEFAULT_DIFFICULTY).lives).toBe(5)
+    })
+
+    it("'per-player' sizes the pool as lives × playerCount", () => {
+      const config = structuredClone(DEFAULT_DIFFICULTY)
+      config.livesMode = 'per-player'
+      expect(getScaledConfig(1, 1, config).lives).toBe(3) // 3 × 1
+      expect(getScaledConfig(2, 1, config).lives).toBe(10) // 5 × 2
+      expect(getScaledConfig(3, 1, config).lives).toBe(15) // 5 × 3
+      expect(getScaledConfig(4, 1, config).lives).toBe(20) // 5 × 4
+    })
+  })
+
+  describe('JSON round-trip', () => {
+    it('serialize → parse drives identical output (config is one JSON document)', () => {
+      const roundTripped = JSON.parse(JSON.stringify(DEFAULT_DIFFICULTY)) as DifficultyConfig
+      for (const playerCount of [1, 2, 3, 4]) {
+        for (const wave of [1, 2, 5, 10]) {
+          expect(getScaledConfig(playerCount, wave, roundTripped)).toEqual(
+            getScaledConfig(playerCount, wave, DEFAULT_DIFFICULTY),
+          )
+        }
       }
     })
   })

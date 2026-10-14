@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Vaders Difficulty Report</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="difficulty-report-lib.js"></script>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --warn: #f85149;
+    --ok: #56d364;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px;
+    font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  h1 { margin: 0 0 4px; font-size: 22px; }
+  h2 { margin: 0 0 12px; font-size: 16px; color: var(--muted); font-weight: 500; }
+  h3 { margin: 0 0 10px; font-size: 14px; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .chart-wrap {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    margin-bottom: 16px;
+  }
+  .chart-wrap canvas { max-height: 320px; }
+  .chart-wrap.headline canvas { max-height: 380px; }
+  .charts2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 1100px) { .charts2 { grid-template-columns: 1fr; } }
+  .note { font-size: 11px; color: var(--muted); margin-top: 8px; line-height: 1.5; }
+  .warn { color: var(--warn); }
+  .ok { color: var(--ok); }
+
+  /* controls */
+  .controls { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; font-size: 13px; }
+  .controls .group { display: flex; align-items: center; gap: 8px; }
+  .controls label { color: var(--muted); }
+  select {
+    background: #0d1117; border: 1px solid var(--border); color: var(--text);
+    padding: 5px 8px; border-radius: 6px; font-size: 13px;
+  }
+  .segmented { display: inline-flex; background: #0d1117; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .segmented button {
+    background: transparent; border: none; color: var(--muted);
+    padding: 6px 14px; cursor: pointer; font-size: 13px;
+  }
+  .segmented button.active { background: #1f6feb; color: white; }
+  .segmented button:disabled { opacity: 0.35; cursor: default; }
+  input[type=range] { accent-color: var(--accent); }
+  .val { font-variant-numeric: tabular-nums; min-width: 32px; display: inline-block; text-align: right; }
+  button.secondary {
+    background: transparent; border: 1px solid var(--border); color: var(--text);
+    padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;
+  }
+  button.secondary:hover { background: #1f2937; }
+
+  /* drop zone / empty state */
+  #dropzone {
+    border: 2px dashed var(--border);
+    border-radius: 10px;
+    padding: 48px 24px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.8;
+    margin-bottom: 16px;
+  }
+  #dropzone strong { color: var(--text); }
+  body.dragging #dropzone, body.dragging .panel:first-of-type { border-color: var(--accent); }
+  body.dragging::after {
+    content: "Drop sim results JSON to load";
+    position: fixed; inset: 0;
+    background: rgba(13, 17, 23, 0.85);
+    color: var(--accent);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 24px; font-weight: 600;
+    border: 3px dashed var(--accent);
+    pointer-events: none;
+  }
+  .filelist { font-size: 12px; color: var(--muted); }
+  .filelist .chip {
+    display: inline-block; background: #0d1117; border: 1px solid var(--border);
+    border-radius: 12px; padding: 2px 10px; margin: 2px 6px 2px 0;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* summary cards */
+  .config-block { margin-bottom: 14px; }
+  .config-name { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
+  .card {
+    background: #0d1117; border: 1px solid var(--border);
+    border-radius: 6px; padding: 10px; font-size: 11px;
+  }
+  .card.anchor { border-color: var(--accent); }
+  .card .pc { color: var(--muted); margin-bottom: 6px; display: flex; justify-content: space-between; }
+  .card .pc .tag { color: var(--accent); }
+  .card .big { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .card .big .unit { font-size: 11px; font-weight: 400; color: var(--muted); }
+  .card .rows { margin-top: 6px; line-height: 1.7; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .card .rows b { color: var(--text); font-weight: 600; }
+
+  details { margin-bottom: 16px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 13px; padding: 4px 0; }
+  details .panel { margin-top: 8px; margin-bottom: 0; font-size: 13px; line-height: 1.7; }
+  .hidden { display: none; }
+  .empty-note { color: var(--muted); font-size: 12px; padding: 16px 0; text-align: center; }
+</style>
+</head>
+<body>
+
+<h1>Vaders Difficulty Report</h1>
+<h2>How a difficulty-config change alters the game, measured from bot-simulation results</h2>
+
+<details>
+  <summary>How to read this report</summary>
+  <div class="panel">
+    <p><strong>Per-wave hazard</strong> — Following Aponte, Levieux &amp; Natkin (2011), difficulty is the <em>probability of failure at a task</em>: each point is the chance a game that reached wave w is lost during wave w. This is the headline view — compare configs at the same player count.</p>
+    <p><strong>Kaplan-Meier survival</strong> — Standard survival analysis as used in game analytics (e.g. Drachen et&nbsp;al.): the fraction of games still going after t seconds. Games that hit the simulation tick cap are right-censored (they leave the at-risk pool but never count as losses), so the curve is honest about unfinished games.</p>
+    <p><strong>Flow channel</strong> — Csikszentmihalyi's flow model, as adapted for game pacing by Jenova Chen and Jesse Schell: challenge over time should stay inside a band between boredom (too easy) and anxiety (too hard). Here the challenge proxy is mean lives lost per wave; tune the band edges to your taste and check whether the curve stays inside. <em>Caveat seen in real data:</em> a config can show low lives-lost yet 100% hazard (instant defeat by alien invasion) — always read this view together with the hazard view.</p>
+  </div>
+</details>
+
+<div class="panel">
+  <h3>Data</h3>
+  <div class="controls" style="margin-bottom: 10px;">
+    <input type="file" id="fileInput" accept=".json,application/json" multiple>
+    <button class="secondary" id="loadSample">Load sample dataset (ship-v1 vs ship-v2)</button>
+    <button class="secondary" id="clearData">Clear</button>
+  </div>
+  <div class="filelist" id="fileList">No data loaded.</div>
+</div>
+
+<div id="dropzone">
+  <strong>Drag &amp; drop one or more sim results JSON files anywhere on this page</strong><br>
+  (output of the worker sim CLI — drop a "before" file and an "after" file to compare configs side by side)<br>
+  …or use the file picker above. The sample-dataset button needs the page served over HTTP
+  (e.g. <code>python3 -m http.server</code> in <code>tools/</code>) — <code>fetch()</code> can't read local files when opened via <code>file://</code>, but drag &amp; drop always works.
+</div>
+
+<div id="report" class="hidden">
+
+  <div class="panel">
+    <div class="controls">
+      <div class="group">
+        <label>Bot policy</label>
+        <select id="policySel"></select>
+      </div>
+      <div class="group">
+        <label>Player count</label>
+        <span class="segmented" id="pcSel"></span>
+      </div>
+      <div class="group">
+        <label>Flow band (lives lost / wave)</label>
+        <input type="range" id="flowLow" min="0" max="2" step="0.05" value="0.2">
+        <span class="val" id="flowLowVal">0.2</span>
+        <span style="color: var(--muted)">to</span>
+        <input type="range" id="flowHigh" min="0.5" max="5" step="0.05" value="1.5">
+        <span class="val" id="flowHighVal">1.5</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="chart-wrap headline">
+    <h3>Per-wave hazard — chance of losing during each wave (if you got there)</h3>
+    <canvas id="hazardChart"></canvas>
+    <div class="empty-note hidden" id="hazardEmpty"></div>
+    <div class="note">
+      One line per config at the selected player count. Dashed/faded segments mean fewer than 10 games
+      reached that wave — treat those points as low-confidence. A flat-ish line is a constant-pressure game;
+      a spike means a wall at that wave; hazard 1.0 means no game survives that wave.
+    </div>
+  </div>
+
+  <div class="charts2">
+    <div class="chart-wrap">
+      <h3>Survival — games still going over time (Kaplan-Meier)</h3>
+      <canvas id="kmChart"></canvas>
+      <div class="empty-note hidden" id="kmEmpty"></div>
+      <div class="note">
+        Step down = games lost at that moment. <span style="font-weight:600">+</span> marks are games cut off
+        by the simulation tick cap (censored — still alive when the sim stopped, not losses).
+      </div>
+    </div>
+    <div class="chart-wrap">
+      <h3>Flow channel — challenge per wave (mean lives lost)</h3>
+      <canvas id="flowChart"></canvas>
+      <div class="empty-note hidden" id="flowEmpty"></div>
+      <div class="note">
+        Shaded band = the flow channel (adjust with the sliders above). Below the band the wave is
+        boring; above it, punishing. Only games that reached a wave contribute to its point.
+      </div>
+    </div>
+  </div>
+
+  <div class="chart-wrap">
+    <h3>Wave pacing — median seconds to clear each wave</h3>
+    <canvas id="paceChart"></canvas>
+    <div class="empty-note hidden" id="paceEmpty"></div>
+    <div class="note">
+      Rising = later waves take longer (pressure builds). Falling = players outscale the game.
+      Only games that actually cleared a wave contribute, so deep waves reflect the survivors.
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>Summary — every config × player count at the selected bot policy</h3>
+    <div id="summaryCards"></div>
+    <div class="note">
+      The <span style="color: var(--accent)">outlined card</span> is the comparison anchor: the solo cell of the
+      first loaded config. "× anchor" compares median final wave against it — above 1× means games last more
+      waves than the anchor.
+    </div>
+  </div>
+
+</div>
+
+<script>
+"use strict";
+/* ============================================================== *
+ *  UI layer only. All data math lives in difficulty-report-lib.js
+ *  (pure functions, tested by `bun tools/difficulty-report-test.js`).
+ * ============================================================== */
+const L = DifficultyReportLib;
+
+const CONFIG_COLORS = ["#5fd7ff", "#ff9933", "#ff66cc", "#99ff66", "#f8e16c", "#b694f5", "#56d364", "#f85149"];
+const GRID = "#30363d", MUTED = "#8b949e", TEXT = "#c9d1d9";
+const FADE = 0.25;
+
+const state = {
+  files: [],          // [{name, data}]
+  pool: { results: [], aggregates: [], configOrder: [] },
+  policy: "competent",
+  playerCount: 1,
+  flowLow: 0.2,
+  flowHigh: 1.5,
+};
+const charts = {};
+
+function configColor(name) {
+  const i = state.pool.configOrder.indexOf(name);
+  return CONFIG_COLORS[(i >= 0 ? i : 0) % CONFIG_COLORS.length];
+}
+function withAlpha(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+}
+
+/* ---------- data loading ---------- */
+
+function addFile(name, data) {
+  if (!data || !Array.isArray(data.results)) {
+    alert(`${name}: not a sim results file (missing "results" array)`);
+    return;
+  }
+  state.files.push({ name, data });
+  rebuildPool();
+}
+
+function rebuildPool() {
+  state.pool = L.mergePools(state.files.map((f) => f.data));
+  const dims = L.listDims(state.pool.results);
+  // keep selections valid
+  if (!dims.policies.includes(state.policy)) {
+    state.policy = dims.policies.includes("competent") ? "competent" : dims.policies[0];
+  }
+  if (!dims.playerCounts.includes(state.playerCount)) {
+    state.playerCount = dims.playerCounts[0];
+  }
+  renderFileList();
+  renderControls();
+  render();
+}
+
+function renderFileList() {
+  const el = document.getElementById("fileList");
+  if (state.files.length === 0) {
+    el.textContent = "No data loaded.";
+    return;
+  }
+  el.innerHTML =
+    state.files
+      .map((f) => `<span class="chip">${escapeHtml(f.name)} — ${f.data.results.length} games</span>`)
+      .join("") +
+    `<span class="chip">pool: ${state.pool.results.length} games, configs: ${state.pool.configOrder.map(escapeHtml).join(", ")}</span>`;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+function readFiles(fileList) {
+  for (const file of fileList) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        addFile(file.name, JSON.parse(reader.result));
+      } catch (e) {
+        alert(`${file.name}: invalid JSON (${e.message})`);
+      }
+    };
+    reader.readAsText(file);
+  }
+}
+
+document.getElementById("fileInput").addEventListener("change", (e) => {
+  readFiles(e.target.files);
+  e.target.value = "";
+});
+
+document.getElementById("loadSample").addEventListener("click", async () => {
+  try {
+    const res = await fetch("sample-data/ship-v1-vs-v2.results.json");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    addFile("ship-v1-vs-v2 (sample)", await res.json());
+  } catch (e) {
+    alert(
+      "Could not fetch the sample dataset — this only works when the page is served over HTTP " +
+      "(e.g. run `python3 -m http.server` in tools/ and open localhost). " +
+      "When opened via file://, drag & drop tools/sample-data/ship-v1-vs-v2.results.json onto the page instead.\n\n" + e
+    );
+  }
+});
+
+document.getElementById("clearData").addEventListener("click", () => {
+  state.files = [];
+  rebuildPool();
+});
+
+/* drag & drop anywhere */
+let dragDepth = 0;
+document.addEventListener("dragenter", (e) => { e.preventDefault(); dragDepth++; document.body.classList.add("dragging"); });
+document.addEventListener("dragleave", (e) => { e.preventDefault(); if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove("dragging"); } });
+document.addEventListener("dragover", (e) => e.preventDefault());
+document.addEventListener("drop", (e) => {
+  e.preventDefault();
+  dragDepth = 0;
+  document.body.classList.remove("dragging");
+  if (e.dataTransfer && e.dataTransfer.files.length) readFiles(e.dataTransfer.files);
+});
+
+/* ---------- controls ---------- */
+
+function renderControls() {
+  const dims = L.listDims(state.pool.results);
+  const has = state.pool.results.length > 0;
+  document.getElementById("report").classList.toggle("hidden", !has);
+  document.getElementById("dropzone").classList.toggle("hidden", has);
+  if (!has) return;
+
+  const polSel = document.getElementById("policySel");
+  polSel.innerHTML = dims.policies.map((p) => `<option value="${escapeHtml(p)}"${p === state.policy ? " selected" : ""}>${escapeHtml(p)}</option>`).join("");
+
+  const pcSel = document.getElementById("pcSel");
+  pcSel.innerHTML = dims.playerCounts
+    .map((pc) => `<button data-pc="${pc}" class="${pc === state.playerCount ? "active" : ""}">${pc}p</button>`)
+    .join("");
+  pcSel.querySelectorAll("button").forEach((b) =>
+    b.addEventListener("click", () => {
+      state.playerCount = parseInt(b.dataset.pc);
+      renderControls();
+      render();
+    })
+  );
+}
+
+document.getElementById("policySel").addEventListener("change", (e) => { state.policy = e.target.value; render(); });
+document.getElementById("flowLow").addEventListener("input", (e) => {
+  state.flowLow = Math.min(parseFloat(e.target.value), state.flowHigh);
+  document.getElementById("flowLowVal").textContent = state.flowLow.toFixed(2);
+  render();
+});
+document.getElementById("flowHigh").addEventListener("input", (e) => {
+  state.flowHigh = Math.max(parseFloat(e.target.value), state.flowLow);
+  document.getElementById("flowHighVal").textContent = state.flowHigh.toFixed(2);
+  render();
+});
+
+/* ---------- chart helpers ---------- */
+
+function destroyChart(id) {
+  if (charts[id]) { charts[id].destroy(); delete charts[id]; }
+}
+
+function setEmpty(emptyId, canvasId, msg) {
+  const empty = document.getElementById(emptyId);
+  const canvas = document.getElementById(canvasId);
+  if (msg) {
+    destroyChart(canvasId);
+    empty.textContent = msg;
+    empty.classList.remove("hidden");
+    canvas.classList.add("hidden");
+    return true;
+  }
+  empty.classList.add("hidden");
+  canvas.classList.remove("hidden");
+  return false;
+}
+
+function baseScales(xTitle, yTitle) {
+  return {
+    x: { title: { display: true, text: xTitle, color: MUTED }, ticks: { color: MUTED }, grid: { color: GRID } },
+    y: { title: { display: true, text: yTitle, color: MUTED }, ticks: { color: MUTED }, grid: { color: GRID } },
+  };
+}
+const legendOpts = { labels: { color: TEXT, usePointStyle: true, pointStyle: "line" } };
+
+/** Shades the flow band behind the datasets. */
+const flowBandPlugin = {
+  id: "flowBand",
+  beforeDatasetsDraw(chart, _args, opts) {
+    if (!opts || opts.low == null) return;
+    const { ctx, chartArea, scales } = chart;
+    const yHi = scales.y.getPixelForValue(opts.high);
+    const yLo = scales.y.getPixelForValue(opts.low);
+    ctx.save();
+    ctx.fillStyle = "rgba(86, 211, 100, 0.10)";
+    ctx.fillRect(chartArea.left, Math.max(yHi, chartArea.top), chartArea.width, Math.min(yLo, chartArea.bottom) - Math.max(yHi, chartArea.top));
+    ctx.fillStyle = MUTED;
+    ctx.font = "10px sans-serif";
+    if (yHi > chartArea.top + 10) ctx.fillText("anxiety ↑", chartArea.left + 6, yHi - 4);
+    ctx.fillText("flow", chartArea.left + 6, Math.min(yLo, chartArea.bottom) - 4);
+    if (yLo < chartArea.bottom - 6) ctx.fillText("boredom ↓", chartArea.left + 6, Math.min(yLo + 12, chartArea.bottom - 2));
+    ctx.restore();
+  },
+};
+
+/* ---------- views ---------- */
+
+function selectedCells() {
+  // one cell per config at the selected (playerCount, policy); skip empty configs
+  return state.pool.configOrder
+    .map((configName) => ({
+      configName,
+      games: L.filterResults(state.pool.results, {
+        configName,
+        playerCount: state.playerCount,
+        botPolicy: state.policy,
+      }),
+    }))
+    .filter((c) => c.games.length > 0);
+}
+
+function renderHazard(cells) {
+  if (setEmpty("hazardEmpty", "hazardChart", cells.length ? null : `No games for ${state.playerCount}p / ${state.policy}.`)) return;
+  const perConfig = cells.map((c) => ({ name: c.configName, rows: L.computeHazard(c.games) }));
+  const maxWave = Math.max(...perConfig.map((p) => p.rows.length));
+  const labels = Array.from({ length: maxWave }, (_, i) => `W${i + 1}`);
+
+  const datasets = perConfig.map((p) => {
+    const color = configColor(p.name);
+    const data = labels.map((_, i) => (p.rows[i] ? p.rows[i].hazard : null));
+    const lowConf = labels.map((_, i) => (p.rows[i] ? p.rows[i].lowConfidence : false));
+    return {
+      label: p.name,
+      data,
+      borderColor: color,
+      backgroundColor: color,
+      tension: 0,
+      spanGaps: false,
+      pointRadius: (ctx) => (lowConf[ctx.dataIndex] ? 2 : 3),
+      pointBackgroundColor: (ctx) => (lowConf[ctx.dataIndex] ? withAlpha(color, FADE) : color),
+      pointBorderColor: (ctx) => (lowConf[ctx.dataIndex] ? withAlpha(color, FADE) : color),
+      segment: {
+        borderDash: (ctx) => (lowConf[ctx.p0DataIndex] || lowConf[ctx.p1DataIndex] ? [3, 4] : undefined),
+        borderColor: (ctx) => (lowConf[ctx.p0DataIndex] || lowConf[ctx.p1DataIndex] ? withAlpha(color, 0.45) : color),
+      },
+      meta: { rows: p.rows },
+    };
+  });
+
+  destroyChart("hazardChart");
+  charts.hazardChart = new Chart(document.getElementById("hazardChart"), {
+    type: "line",
+    data: { labels, datasets },
+    options: {
+      plugins: {
+        legend: legendOpts,
+        tooltip: {
+          callbacks: {
+            label: (c) => {
+              const r = c.dataset.meta.rows[c.dataIndex];
+              if (!r) return null;
+              return `${c.dataset.label}: ${(r.hazard * 100).toFixed(1)}% lost in this wave (${r.diedIn}/${r.reached} games${r.lowConfidence ? ", LOW CONFIDENCE" : ""})`;
+            },
+          },
+        },
+      },
+      scales: {
+        ...baseScales("Wave", "Chance of losing during this wave"),
+        y: { ...baseScales("", "Chance of losing during this wave").y, min: 0, max: 1, ticks: { color: MUTED, callback: (v) => `${(v * 100).toFixed(0)}%` } },
+      },
+      animation: { duration: 150 },
+    },
+  });
+}
+
+function renderKM(cells) {
+  if (setEmpty("kmEmpty", "kmChart", cells.length ? null : `No games for ${state.playerCount}p / ${state.policy}.`)) return;
+  const datasets = [];
+  for (const c of cells) {
+    const km = L.computeKM(c.games);
+    if (km.points.length === 0) continue;
+    const color = configColor(c.configName);
+    datasets.push({
+      label: c.configName,
+      data: km.points.map((p) => ({ x: L.ticksToSeconds(p.t), y: p.s })),
+      borderColor: color,
+      backgroundColor: color,
+      stepped: "after",
+      pointRadius: 0,
+      tension: 0,
+    });
+    if (km.censorTimes.length > 0) {
+      datasets.push({
+        label: `${c.configName} (censored)`,
+        data: km.censorTimes.map((t) => ({ x: L.ticksToSeconds(t), y: L.kmValueAt(km.points, t) })),
+        showLine: false,
+        pointStyle: "cross",
+        pointRadius: 6,
+        pointBorderWidth: 1.5,
+        borderColor: withAlpha(color, 0.8),
+        backgroundColor: withAlpha(color, 0.8),
+        skipLegend: true,
+      });
+    }
+  }
+  destroyChart("kmChart");
+  charts.kmChart = new Chart(document.getElementById("kmChart"), {
+    type: "line",
+    data: { datasets },
+    options: {
+      parsing: false,
+      plugins: {
+        legend: { labels: { ...legendOpts.labels, filter: (item, data) => !data.datasets[item.datasetIndex].skipLegend } },
+        tooltip: {
+          callbacks: {
+            label: (c) => `${c.dataset.label}: ${(c.parsed.y * 100).toFixed(1)}% of games still going at ${c.parsed.x.toFixed(0)}s`,
+          },
+        },
+      },
+      scales: {
+        x: { type: "linear", min: 0, title: { display: true, text: "Time (seconds)", color: MUTED }, ticks: { color: MUTED }, grid: { color: GRID } },
+        y: { min: 0, max: 1, title: { display: true, text: "Games still going", color: MUTED }, ticks: { color: MUTED, callback: (v) => `${(v * 100).toFixed(0)}%` }, grid: { color: GRID } },
+      },
+      animation: { duration: 150 },
+    },
+  });
+}
+
+function renderFlow(cells) {
+  if (setEmpty("flowEmpty", "flowChart", cells.length ? null : `No games for ${state.playerCount}p / ${state.policy}.`)) return;
+  const perConfig = cells.map((c) => ({ name: c.configName, rows: L.computeFlowProxy(c.games) }));
+  const maxWave = Math.max(...perConfig.map((p) => p.rows.length));
+  const labels = Array.from({ length: maxWave }, (_, i) => `W${i + 1}`);
+  const datasets = perConfig.map((p) => {
+    const color = configColor(p.name);
+    const lowConf = labels.map((_, i) => (p.rows[i] ? p.rows[i].lowConfidence : false));
+    return {
+      label: p.name,
+      data: labels.map((_, i) => (p.rows[i] ? p.rows[i].meanLivesLost : null)),
+      borderColor: color,
+      backgroundColor: color,
+      tension: 0.15,
+      pointRadius: (ctx) => (lowConf[ctx.dataIndex] ? 2 : 3),
+      pointBackgroundColor: (ctx) => (lowConf[ctx.dataIndex] ? withAlpha(color, FADE) : color),
+      segment: {
+        borderDash: (ctx) => (lowConf[ctx.p0DataIndex] || lowConf[ctx.p1DataIndex] ? [3, 4] : undefined),
+        borderColor: (ctx) => (lowConf[ctx.p0DataIndex] || lowConf[ctx.p1DataIndex] ? withAlpha(color, 0.45) : color),
+      },
+      meta: { rows: p.rows },
+    };
+  });
+  destroyChart("flowChart");
+  charts.flowChart = new Chart(document.getElementById("flowChart"), {
+    type: "line",
+    data: { labels, datasets },
+    plugins: [flowBandPlugin],
+    options: {
+      plugins: {
+        legend: legendOpts,
+        flowBand: { low: state.flowLow, high: state.flowHigh },
+        tooltip: {
+          callbacks: {
+            label: (c) => {
+              const r = c.dataset.meta.rows[c.dataIndex];
+              if (!r) return null;
+              const zone = L.classifyFlow(r.meanLivesLost, state.flowLow, state.flowHigh);
+              return `${c.dataset.label}: ${r.meanLivesLost.toFixed(2)} lives lost on average (${zone}, ${r.reached} games${r.lowConfidence ? ", LOW CONFIDENCE" : ""})`;
+            },
+          },
+        },
+      },
+      scales: { ...baseScales("Wave", "Mean lives lost during wave"), y: { ...baseScales("", "Mean lives lost during wave").y, beginAtZero: true } },
+      animation: { duration: 150 },
+    },
+  });
+}
+
+function renderPacing(cells) {
+  const perConfig = cells
+    .map((c) => ({ name: c.configName, rows: L.computePacing(c.games) }))
+    .filter((p) => p.rows.length > 0);
+  const msg = cells.length === 0
+    ? `No games for ${state.playerCount}p / ${state.policy}.`
+    : perConfig.length === 0
+      ? "No wave was ever cleared at this selection (every game ended during wave 1)."
+      : null;
+  if (setEmpty("paceEmpty", "paceChart", msg)) return;
+
+  const maxWave = Math.max(...perConfig.map((p) => p.rows.length));
+  const labels = Array.from({ length: maxWave }, (_, i) => `W${i + 1}`);
+  const datasets = perConfig.map((p) => {
+    const color = configColor(p.name);
+    return {
+      label: p.name,
+      data: labels.map((_, i) => (p.rows[i] ? p.rows[i].medianSeconds : null)),
+      borderColor: color,
+      backgroundColor: color,
+      tension: 0.15,
+      pointRadius: 3,
+      spanGaps: true,
+      meta: { rows: p.rows },
+    };
+  });
+  destroyChart("paceChart");
+  charts.paceChart = new Chart(document.getElementById("paceChart"), {
+    type: "line",
+    data: { labels, datasets },
+    options: {
+      plugins: {
+        legend: legendOpts,
+        tooltip: {
+          callbacks: {
+            label: (c) => {
+              const r = c.dataset.meta.rows[c.dataIndex];
+              if (!r || r.medianSeconds === null) return null;
+              return `${c.dataset.label}: median ${r.medianSeconds.toFixed(1)}s to clear (${r.n} games cleared it)`;
+            },
+          },
+        },
+      },
+      scales: { ...baseScales("Wave", "Median seconds to clear"), y: { ...baseScales("", "Median seconds to clear").y, beginAtZero: true } },
+      animation: { duration: 150 },
+    },
+  });
+}
+
+function renderSummary() {
+  const el = document.getElementById("summaryCards");
+  const grid = L.summaryGrid(state.pool.results, state.pool.configOrder, state.policy);
+  if (grid.cells.length === 0) {
+    el.innerHTML = `<div class="empty-note">No games for policy "${escapeHtml(state.policy)}".</div>`;
+    return;
+  }
+  const byConfig = new Map();
+  for (const c of grid.cells) {
+    if (!byConfig.has(c.configName)) byConfig.set(c.configName, []);
+    byConfig.get(c.configName).push(c);
+  }
+  el.innerHTML = [...byConfig.entries()]
+    .map(([name, cs]) => {
+      const color = configColor(name);
+      const cards = cs
+        .map((c) => {
+          const earlyCls = c.defeatBeforeWave2Rate >= 0.5 ? "warn" : c.defeatBeforeWave2Rate === 0 ? "ok" : "";
+          return `
+            <div class="card${c.isAnchor ? " anchor" : ""}">
+              <div class="pc"><span>${c.playerCount} player${c.playerCount > 1 ? "s" : ""} · ${c.games} games</span>${c.isAnchor ? '<span class="tag">anchor</span>' : ""}</div>
+              <div class="big">wave ${c.medianFinalWave}<span class="unit"> median</span></div>
+              <div class="rows">
+                lost before wave 2: <b class="${earlyCls}">${(c.defeatBeforeWave2Rate * 100).toFixed(0)}%</b><br>
+                hit sim cap (survived): <b>${(c.capRate * 100).toFixed(0)}%</b><br>
+                vs anchor: <b>${c.vsAnchor === null ? "—" : c.vsAnchor.toFixed(2) + "×"}</b>
+              </div>
+            </div>`;
+        })
+        .join("");
+      return `<div class="config-block"><div class="config-name" style="color: ${color}">${escapeHtml(name)}</div><div class="cards">${cards}</div></div>`;
+    })
+    .join("");
+}
+
+function render() {
+  if (state.pool.results.length === 0) {
+    for (const id of Object.keys(charts)) destroyChart(id);
+    return;
+  }
+  const cells = selectedCells();
+  renderHazard(cells);
+  renderKM(cells);
+  renderFlow(cells);
+  renderPacing(cells);
+  renderSummary();
+}
+</script>
+</body>
+</html>
