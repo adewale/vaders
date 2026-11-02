@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main, master]
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   lint-and-test:
     name: Lint, Type Check & Test
@@ -127,7 +131,7 @@ jobs:
   # ── Slow path (merge to main only) ──────────────────────────────
   e2e-web:
     name: E2E Tests (Web)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # the locked Playwright does not support Ubuntu 26.04
     needs: [lint-and-test, build]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
